@@ -24,6 +24,7 @@ set(SOURCES "audio/audio_codec.cc"
             "settings.cc"
             "device_state_event.cc"
             "main.cc"
+            "sd_test.cc"
             )
 
 set(INCLUDE_DIRS "." "display" "audio" "protocols")
@@ -216,6 +217,12 @@ elseif(CONFIG_BOARD_TYPE_LABPLUS_LEDONG_V2)
     set(BOARD_TYPE "labplus-ledong-v2") 
 elseif(CONFIG_BOARD_TYPE_SURFER_C3_1_14TFT)
     set(BOARD_TYPE "surfer-c3-1.14tft")
+elseif(CONFIG_BOARD_TYPE_GUITION_JC1060P470)
+    set(BOARD_TYPE "guition-jc1060p470")
+elseif(CONFIG_BOARD_TYPE_GUITION_JC8012P4A1)
+    set(BOARD_TYPE "guition-jc8012p4a1")
+elseif(CONFIG_BOARD_TYPE_GUITION_JC4880P443)
+    set(BOARD_TYPE "guition-jc4880p443")
 endif()
 file(GLOB BOARD_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.cc

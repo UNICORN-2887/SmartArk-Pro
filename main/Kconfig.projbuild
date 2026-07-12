@@ -300,10 +300,19 @@ choice BOARD_TYPE
     config BOARD_TYPE_LABPLUS_LEDONG_V2
         bool "labplus ledong_v2 board"
         depends on IDF_TARGET_ESP32S3
-    depends on IDF_TARGET_ESP32S3
+
     config BOARD_TYPE_SURFER_C3_1_14TFT
         bool "Surfer-C3-1-14TFT"
         depends on IDF_TARGET_ESP32C3
+    config BOARD_TYPE_GUITION_JC1060P470
+        bool "Guition JC1060P470"
+        depends on IDF_TARGET_ESP32P4
+    config BOARD_TYPE_GUITION_JC8012P4A1
+        bool "Guition JC8012P4A1"
+        depends on IDF_TARGET_ESP32P4
+    config BOARD_TYPE_GUITION_JC4880P443
+        bool "Guition JC4880P443"
+        depends on IDF_TARGET_ESP32P4
 endchoice
 
 choice ESP_S3_LCD_EV_Board_Version_TYPE

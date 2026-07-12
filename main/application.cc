@@ -17,6 +17,7 @@
 
 #define TAG "Application"
 
+extern void sdcard_init(void);
 
 static const char* const STATE_STRINGS[] = {
     "unknown",
@@ -330,6 +331,9 @@ void Application::Start() {
 
     /* Setup the display */
     auto display = board.GetDisplay();
+
+    /* Initialize SD card (test) */
+    sdcard_init();
 
     /* Setup the audio service */
     auto codec = board.GetAudioCodec();
