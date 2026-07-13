@@ -25,9 +25,10 @@ set(SOURCES "audio/audio_codec.cc"
             "device_state_event.cc"
             "main.cc"
             "sd_test.cc"
+            "apps/image_display/ImageDisplay.cpp"
             )
 
-set(INCLUDE_DIRS "." "display" "audio" "protocols")
+set(INCLUDE_DIRS "." "display" "audio" "protocols" "apps/image_display")
 
 # 添加板级公共文件
 file(GLOB BOARD_COMMON_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/boards/common/*.cc)

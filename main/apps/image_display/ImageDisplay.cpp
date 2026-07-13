@@ -45,7 +45,7 @@ static uint8_t *s_output_buf = NULL;
 static size_t s_output_buf_size = 0;
 static int s_current_index = 0;
 static int s_image_count = 0;
-static char s_image_paths[64][300];
+static char s_image_paths[256][300];
 
 // 解码并显示图片
 static bool decode_and_display_image(const char *image_path)
@@ -179,7 +179,7 @@ static int search_image_files(void)
     s_image_count = 0;
     struct dirent *dir;
     
-    while ((dir = readdir(d)) != NULL && s_image_count < APP_CACHE_BUF_SIZE) {
+    while ((dir = readdir(d)) != NULL && s_image_count < 256) {
         if (dir->d_type != DT_DIR) {
             const char *ext = strrchr(dir->d_name, '.');
             if (ext && (strcasecmp(ext, ".jpg") == 0 || 

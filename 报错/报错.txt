@@ -1,144 +1,54 @@
-Core1 Saved PC:0x4ff05812
---- 0x4ff05812: esp_cpu_wait_for_intr at E:/Passport/esp32/v5.5.1/esp-idf/components/esp_hw_support/cpu.c:57
-SPI mode:DIO, clock div:1
-load:0x4ff33ce0,len:0x5a0
-load:0x4ff29ed0,len:0xca0
-load:0x4ff2cbd0,len:0x3160
-entry 0x4ff29ed0
-I (43) hex_psram: vendor id    : 0x0d (AP)
-I (44) hex_psram: Latency      : 0x01 (Fixed)        
-I (44) hex_psram: DriveStr.    : 0x00 (25 Ohm)
-I (45) hex_psram: dev id       : 0x03 (generation 4) 
-I (49) hex_psram: density      : 0x07 (256 Mbit)
-I (53) hex_psram: good-die     : 0x06 (Pass)
-I (57) hex_psram: SRF          : 0x02 (Slow Refresh)
-I (62) hex_psram: BurstType    : 0x00 ( Wrap)        
-I (66) hex_psram: BurstLen     : 0x03 (2048 Byte)
-I (70) hex_psram: BitMode      : 0x01 (X16 Mode)     
-I (75) hex_psram: Readlatency  : 0x04 (14 cycles@Fixed)
-I (80) hex_psram: DriveStrength: 0x00 (1/1)
-I (84) MSPI DQS: tuning success, best phase id is 0  
-I (256) MSPI DQS: tuning success, best delayline id is 17
-I esp_psram: Found 32MB PSRAM device
-I esp_psram: Speed: 200MHz
-I (389) mmu_psram: .rodata xip on psram
-I (483) mmu_psram: .text xip on psram
-I (484) hex_psram: psram CS IO is dedicated
-I (484) cpu_start: Multicore app
-I (494) cpu_start: Pro cpu start user code
-I (494) cpu_start: cpu freq: 360000000 Hz
-I (494) app_init: Application information:
-I (494) app_init: Project name:     xiaozhi
-I (498) app_init: App version:      1.8.2
-I (501) app_init: Compile time:     Jul 12 2026 17:10:33
-I (506) app_init: ELF file SHA256:  040a41ec1...
-I (511) app_init: ESP-IDF:          v5.5.1-dirty
-I (515) efuse_init: Min chip rev:     v0.1
-I (519) efuse_init: Max chip rev:     v1.99 
-I (523) efuse_init: Chip rev:         v1.3
-I (527) heap_init: Initializing. RAM available for dynamic allocation:
-I (533) heap_init: At 4FF22810 len 000187B0 (97 KiB): RAM
-I (538) heap_init: At 4FF3AFC0 len 00004BF0 (18 KiB): RAM
-I (543) heap_init: At 4FF40000 len 00060000 (384 KiB): RAM
-I (549) heap_init: At 501080A0 len 00007F60 (31 KiB): RTCRAM
-I (554) heap_init: At 30100068 len 00001F98 (7 KiB): TCM
-I (559) esp_psram: Adding pool of 28736K of PSRAM memory to heap allocator
-I (565) esp_psram: Adding pool of 38K of PSRAM memory gap generated due to end address alignment of irom to the heap allocator
-I (577) esp_psram: Adding pool of 9K of PSRAM memory gap generated due to end address alignment of drom to the heap allocator
-W (588) spi_flash: Detected boya flash chip but using generic driver. For optimal functionality, enable `SPI_FLASH_SUPPORT_BOYA_CHIP` in menuconfig
-I (601) spi_flash: detected chip: generic
-I (604) spi_flash: flash io: qio
-I (608) host_init: ESP Hosted : Host chip_ip[18]     
-I (612) H_API: ESP-Hosted starting. Hosted_Tasks: prio:23, stack: 5120 RPC_task_stack: 5120
-I (620) H_API: ** add_esp_wifi_remote_channels **
-I (625) H_SDIO_DRV: sdio_data_to_rx_buf_task started 
-I (629) main_task: Started on CPU0
-I (632) esp_psram: Reserving pool of 48K of internal memory for DMA/internal allocations
-I (639) main_task: Calling app_main()
-I (646) Board: UUID=b9cfc8c8-87b4-4ebd-94c5-db804a346209 SKU=guition-jc4880p443
-I (650) button: IoT Button Version: 4.1.3
-I (654) jc4880p443: MIPI DSI PHY Powered on
-I (659) jc4880p443: Install MIPI DSI LCD control panel
-I (662) st7701: version: 1.1.3
-I (703) st7701_mipi: LCD ID: FF FF FF
-I (703) st7701_mipi:  st7701->madctl_val: 0x0, st7701->colmod_val: 0x55
-I (843) Display: Power management not supported
-I (843) LcdDisplay: Turning display on
-I (843) LcdDisplay: Initialize LVGL library
-I (843) LcdDisplay: Initialize LVGL port
-I (847) LVGL: Starting LVGL task
-I (850) LcdDisplay: Adding LCD display
-E (854) lcd_panel: esp_lcd_panel_swap_xy(50): swap_xy is not supported by this panel
-I (870) Backlight: Set brightness to 75
-I (870) jc4880p443: Initializing SD card (SPI mode)  
-E (1391) vfs_fat_sdmmc: sdmmc_card_init failed (0x107).
-E (1392) jc4880p443: SD card mount failed: ESP_ERR_TIMEOUT
-I (1392) Application: STATE: starting
-I (1395) Es8311AudioCodec: Duplex channels created   
-I (1403) ES8311: Work in Slave mode
-I (1406) Es8311AudioCodec: Es8311AudioCodec initialized
-I (1407) AudioCodec: Set input enable to true
-I (1411) I2S_IF: channel mode 0 bits:16/16 channel:2 mask:1
-W (1416) i2s_common: dma frame num is adjusted to 256 to align the dma buffer with 64, bufsize = 512      
-I (1425) I2S_IF: STD Mode 1 bits:16/16 channel:2 sample_rate:16000 mask:1
-I (1431) I2S_IF: channel mode 0 bits:16/16 channel:2 mask:1
-W (1437) i2s_common: dma frame num is adjusted to 256 to align the dma buffer with 64, bufsize = 512      
-I (1446) I2S_IF: STD Mode 0 bits:16/16 channel:2 sample_rate:16000 mask:1
-I (1467) Adev_Codec: Open codec device OK
-I (1468) AudioCodec: Set output enable to true       
-I (1468) AudioCodec: Audio codec started
-I (1469) Application: STATE: configuring
-I (1472) DnsServer: Starting DNS server
-I (1475) transport: Attempt connection with slave: retry[0]
-W (1480) H_SDIO_DRV: Reset slave using GPIO[54]      
-I (1484) os_wrapper_esp: GPIO [54] configured
-I (3008) sdio_wrapper: SDIO master: Slot 1, Data-Lines: 4-bit Freq(KHz)[40000 KHz]
-I (3008) sdio_wrapper: GPIOs: CLK[18] CMD[19] D0[14] D1[15] D2[16] D3[17] Slave_Reset[54]
-I (3012) sdio_wrapper: Queues: Tx[20] Rx[20] SDIO-Rx-Mode[1]
-I (3051) sdio_wrapper: Function 0 Blocksize: 512
-I (3051) sdio_wrapper: Function 1 Blocksize: 512     
-I (3151) H_SDIO_DRV: Card init success, TRANSPORT_RX_ACTIVE
-I (3151) transport: set_transport_state: 1
-I (3151) transport: Waiting for esp_hosted slave to be ready
-I (3225) H_SDIO_DRV: SDIO Host operating in STREAMING MODE
-I (3225) H_SDIO_DRV: Open data path at slave
-I (3225) H_SDIO_DRV: Starting SDIO process rx task   
-I (3252) H_SDIO_DRV: Received ESP_PRIV_IF type message
-I (3253) transport: Received INIT event from ESP32 peripheral
-I (3253) transport: EVENT: 12
-I (3254) transport: Identified slave [esp32c6]       
-I (3259) transport: EVENT: 11
-I (3261) transport: capabilities: 0xd
-I (3265) transport: Features supported are:
-I (3269) transport:      * WLAN
-I (3271) transport:        - HCI over SDIO
-I (3275) transport:        - BLE only
-I (3278) transport: EVENT: 13
-W (3281) transport: Version mismatch: Host [2.12.0] > Co-proc [2.3.0] ==> Upgrade co-proc to avoid RPC timeouts
-I (3290) transport: ESP board type is : 13
+-- Adding linker script E:/Passport/esp32/v5.5.1/esp-idf/components/soc/esp32p4/ld/esp32p4.peripherals.ld 
+-- ESP_LCD_NV3023: 1.0.0
+-- ADC_BATTERY_ESTIMATION: 0.2.0
+-- ADC_MIC: 0.2.0
+-- BUTTON: 4.1.3
+-- ESP_LCD_AXS15231B: 1.0.1
+-- ESP_LCD_GC9A01: 2.0.1
+-- ESP_LCD_ILI9341: 1.2.0
+-- ESP_LCD_JD9165: 1.0.2
+-- ESP_LCD_JD9365: 1.0.2
+-- ESP_LCD_PANEL_IO_ADDITIONS: 1.0.1
+-- ESP_LCD_SPD2010: 1.0.2
+-- ESP_LCD_ST7701: 1.1.3
+-- ESP_LCD_ST77916: 1.0.1
+-- ESP_LCD_ST7796: 1.3.2
+-- LVGL version: 9.2.2
+-- ESP_MMAP_ASSETS: 1.3.1
+-- Using Hosted Wi-Fi
+-- Using new driver components (IDF >= 5.0)
+-- KNOB: 1.0.0
+-- I2C_BUS: 1.5.2
+-- ESP_LCD_JD9365_10_1: 1.0.3
+-- ESP_LCD_SH8601: 1.0.2
+-- ESP_LCD_ST7703: 1.0.3
+-- Component idf::espressif__esp_hosted will be linked with -Wl,--whole-archive
+-- Component idf::main will be linked with -Wl,--whole-archive
+-- Components: 78__esp-ml307 78__esp-opus 78__esp-opus-encoder 78__esp-wifi-connect 78__esp_lcd_nv3023 78__xiaozhi-fonts app_trace app_update bootloader bootloader_support bt cmock console cxx driver efuse esp-tls esp_adc esp_app_format esp_bootloader_format esp_coex esp_common esp_driver_ana_cmpr esp_driver_bitscrambler esp_driver_cam esp_driver_dac esp_driver_gpio esp_driver_gptimer esp_driver_i2c esp_driver_i2s esp_driver_isp esp_driver_jpeg esp_driver_ledc esp_driver_mcpwm esp_driver_parlio esp_driver_pcnt esp_driver_ppa esp_driver_rmt esp_driver_sdio esp_driver_sdm esp_driver_sdmmc esp_driver_sdspi esp_driver_spi esp_driver_touch_sens esp_driver_tsens esp_driver_twai esp_driver_uart esp_driver_usb_serial_jtag esp_eth esp_event esp_gdbstub esp_hid esp_http_client esp_http_server esp_https_ota esp_https_server esp_hw_support esp_lcd esp_local_ctrl esp_mm esp_netif esp_netif_stack esp_partition esp_phy esp_pm esp_psram esp_ringbuf esp_rom esp_security esp_system esp_timer esp_vfs_console esp_wifi espcoredump espressif__adc_battery_estimation espressif__adc_mic espressif__button espressif__cmake_utilities espressif__dl_fft espressif__eppp_link espressif__esp-dsp espressif__esp-sr espressif__esp32-camera espressif__esp_codec_dev espressif__esp_hosted espressif__esp_io_expander espressif__esp_io_expander_tca9554 espressif__esp_io_expander_tca95xx_16bit espressif__esp_jpeg espressif__esp_lcd_axs15231b espressif__esp_lcd_gc9a01 espressif__esp_lcd_ili9341 espressif__esp_lcd_ili9881c espressif__esp_lcd_jd9165 espressif__esp_lcd_jd9365 espressif__esp_lcd_panel_io_additions espressif__esp_lcd_spd2010 espressif__esp_lcd_st7701 espressif__esp_lcd_st77916 espressif__esp_lcd_st7796 espressif__esp_lcd_touch espressif__esp_lcd_touch_cst816s espressif__esp_lcd_touch_ft5x06 espressif__esp_lcd_touch_gt911 espressif__esp_lvgl_port espressif__esp_mmap_assets espressif__esp_serial_slave_link espressif__esp_wifi_remote espressif__i2c_bus espressif__knob espressif__led_strip esptool_py fatfs freertos hal heap http_parser idf_test ieee802154 json log lvgl__lvgl lwip main mbedtls mqtt newlib nvs_flash nvs_sec_provider openthread partition_table protobuf-c protocomm pthread riscv rt sdmmc soc spi_flash spiffs tcp_transport tny-robotics__sh1106-esp-idf ulp unity usb vfs waveshare__esp_lcd_jd9365_10_1 waveshare__esp_lcd_sh8601 waveshare__esp_lcd_st7703 waveshare__esp_lcd_touch_cst9217 wear_levelling wifi_provisioning wpa_supplicant
+-- Component paths: E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/78__esp-ml307 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/78__esp-opus E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/78__esp-opus-encoder E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/78__esp-wifi-connect E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/78__esp_lcd_nv3023 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/78__xiaozhi-fonts E:/Passport/esp32/v5.5.1/esp-idf/components/app_trace E:/Passport/esp32/v5.5.1/esp-idf/components/app_update E:/Passport/esp32/v5.5.1/esp-idf/components/bootloader E:/Passport/esp32/v5.5.1/esp-idf/components/bootloader_support E:/Passport/esp32/v5.5.1/esp-idf/components/bt E:/Passport/esp32/v5.5.1/esp-idf/components/cmock E:/Passport/esp32/v5.5.1/esp-idf/components/console E:/Passport/esp32/v5.5.1/esp-idf/components/cxx E:/Passport/esp32/v5.5.1/esp-idf/components/driver E:/Passport/esp32/v5.5.1/esp-idf/components/efuse E:/Passport/esp32/v5.5.1/esp-idf/components/esp-tls E:/Passport/esp32/v5.5.1/esp-idf/components/esp_adc E:/Passport/esp32/v5.5.1/esp-idf/components/esp_app_format E:/Passport/esp32/v5.5.1/esp-idf/components/esp_bootloader_format E:/Passport/esp32/v5.5.1/esp-idf/components/esp_coex E:/Passport/esp32/v5.5.1/esp-idf/components/esp_common E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_ana_cmpr E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_bitscrambler E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_cam E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_dac E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_gpio E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_gptimer E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_i2c E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_i2s E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_isp E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_jpeg E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_ledc E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_mcpwm E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_parlio E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_pcnt E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_ppa E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_rmt E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_sdio E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_sdm E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_sdmmc E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_sdspi E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_spi E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_touch_sens E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_tsens E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_twai E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_uart E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_usb_serial_jtag E:/Passport/esp32/v5.5.1/esp-idf/components/esp_eth E:/Passport/esp32/v5.5.1/esp-idf/components/esp_event E:/Passport/esp32/v5.5.1/esp-idf/components/esp_gdbstub E:/Passport/esp32/v5.5.1/esp-idf/components/esp_hid E:/Passport/esp32/v5.5.1/esp-idf/components/esp_http_client E:/Passport/esp32/v5.5.1/esp-idf/components/esp_http_server E:/Passport/esp32/v5.5.1/esp-idf/components/esp_https_ota E:/Passport/esp32/v5.5.1/esp-idf/components/esp_https_server E:/Passport/esp32/v5.5.1/esp-idf/components/esp_hw_support E:/Passport/esp32/v5.5.1/esp-idf/components/esp_lcd E:/Passport/esp32/v5.5.1/esp-idf/components/esp_local_ctrl E:/Passport/esp32/v5.5.1/esp-idf/components/esp_mm E:/Passport/esp32/v5.5.1/esp-idf/components/esp_netif E:/Passport/esp32/v5.5.1/esp-idf/components/esp_netif_stack E:/Passport/esp32/v5.5.1/esp-idf/components/esp_partition E:/Passport/esp32/v5.5.1/esp-idf/components/esp_phy E:/Passport/esp32/v5.5.1/esp-idf/components/esp_pm E:/Passport/esp32/v5.5.1/esp-idf/components/esp_psram E:/Passport/esp32/v5.5.1/esp-idf/components/esp_ringbuf E:/Passport/esp32/v5.5.1/esp-idf/components/esp_rom E:/Passport/esp32/v5.5.1/esp-idf/components/esp_security E:/Passport/esp32/v5.5.1/esp-idf/components/esp_system E:/Passport/esp32/v5.5.1/esp-idf/components/esp_timer E:/Passport/esp32/v5.5.1/esp-idf/components/esp_vfs_console E:/Passport/esp32/v5.5.1/esp-idf/components/esp_wifi E:/Passport/esp32/v5.5.1/esp-idf/components/espcoredump E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__adc_battery_estimation E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__adc_mic E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__button E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__cmake_utilities E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__dl_fft E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__eppp_link E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp-dsp E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp-sr E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp32-camera E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_codec_dev E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_hosted E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_io_expander E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_io_expander_tca9554 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_io_expander_tca95xx_16bit E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_jpeg E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_axs15231b E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_gc9a01 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_ili9341 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_ili9881c E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_jd9165 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_jd9365 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_panel_io_additions E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_spd2010 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_st7701 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_st77916 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_st7796 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_touch E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_touch_cst816s E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_touch_ft5x06 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_touch_gt911 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lvgl_port E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_mmap_assets E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_serial_slave_link E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_wifi_remote E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__i2c_bus E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__knob E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__led_strip E:/Passport/esp32/v5.5.1/esp-idf/components/esptool_py E:/Passport/esp32/v5.5.1/esp-idf/components/fatfs E:/Passport/esp32/v5.5.1/esp-idf/components/freertos E:/Passport/esp32/v5.5.1/esp-idf/components/hal E:/Passport/esp32/v5.5.1/esp-idf/components/heap E:/Passport/esp32/v5.5.1/esp-idf/components/http_parser E:/Passport/esp32/v5.5.1/esp-idf/components/idf_test E:/Passport/esp32/v5.5.1/esp-idf/components/ieee802154 E:/Passport/esp32/v5.5.1/esp-idf/components/json E:/Passport/esp32/v5.5.1/esp-idf/components/log E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/lvgl__lvgl E:/Passport/esp32/v5.5.1/esp-idf/components/lwip E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/main E:/Passport/esp32/v5.5.1/esp-idf/components/mbedtls E:/Passport/esp32/v5.5.1/esp-idf/components/mqtt E:/Passport/esp32/v5.5.1/esp-idf/components/newlib E:/Passport/esp32/v5.5.1/esp-idf/components/nvs_flash E:/Passport/esp32/v5.5.1/esp-idf/components/nvs_sec_provider E:/Passport/esp32/v5.5.1/esp-idf/components/openthread E:/Passport/esp32/v5.5.1/esp-idf/components/partition_table E:/Passport/esp32/v5.5.1/esp-idf/components/protobuf-c E:/Passport/esp32/v5.5.1/esp-idf/components/protocomm E:/Passport/esp32/v5.5.1/esp-idf/components/pthread E:/Passport/esp32/v5.5.1/esp-idf/components/riscv E:/Passport/esp32/v5.5.1/esp-idf/components/rt E:/Passport/esp32/v5.5.1/esp-idf/components/sdmmc E:/Passport/esp32/v5.5.1/esp-idf/components/soc E:/Passport/esp32/v5.5.1/esp-idf/components/spi_flash E:/Passport/esp32/v5.5.1/esp-idf/components/spiffs E:/Passport/esp32/v5.5.1/esp-idf/components/tcp_transport E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/tny-robotics__sh1106-esp-idf E:/Passport/esp32/v5.5.1/esp-idf/components/ulp E:/Passport/esp32/v5.5.1/esp-idf/components/unity E:/Passport/esp32/v5.5.1/esp-idf/components/usb E:/Passport/esp32/v5.5.1/esp-idf/components/vfs E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/waveshare__esp_lcd_jd9365_10_1 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/waveshare__esp_lcd_sh8601 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/waveshare__esp_lcd_st7703 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/waveshare__esp_lcd_touch_cst9217 E:/Passport/esp32/v5.5.1/esp-idf/components/wear_levelling E:/Passport/esp32/v5.5.1/esp-idf/components/wifi_provisioning E:/Passport/esp32/v5.5.1/esp-idf/components/wpa_supplicant
+-- Configuring done (36.6s)
+-- Generating done (11.9s)
+-- Build files have been written to: E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/build
 
-I (3294) transport: Base transport is set-up, TRANSPORT_TX_ACTIVE
-I (3300) H_API: Transport active
-I (3303) transport: Slave chip Id[12]
-I (3307) transport: raw_tp_dir[-], flow_ctrl: low[60] high[80]
-I (3312) transport: transport_delayed_init
-I (3316) esp_cli: Registering command: crash
-I (3320) esp_cli: Registering command: reboot        
-I (3324) esp_cli: Registering command: mem-dump      
-I (3328) esp_cli: Registering command: task-dump     
-I (3333) esp_cli: Registering command: cpu-dump      
-I (3337) esp_cli: Registering command: heap-trace    
-I (3341) esp_cli: Registering command: sock-dump     
-I (3346) esp_cli: Registering command: host-power-save
-I (3351) hci_stub_drv: Host BT Support: Disabled     
-I (3355) H_SDIO_DRV: Received INIT event
-I (3359) H_SDIO_DRV: Event type: 0x22
-I (3362) H_SDIO_DRV: Write thread started
-I (3899) WifiConfigurationAp: Access Point started with SSID Xiaozhi-86A9
-I (3903) RPC_WRAP: ESP Event: wifi station started   
-I (3907) RPC_WRAP: ESP Event: softap started
-I (3918) WifiConfigurationAp: Web server started     
-I (3918) rpc_req: Scan start Req
+[52/78] Performing build step for 'bootloader'       
+[1/1] C:\WINDOWS\system32\cmd.exe /C "cd /D E:\Passport\espp4\sparepart\JC4880P443C_I_W\1-Demo\idf_examples\ESP-IDF\xiaozhi-esp32sp1\build\bootloader\esp-idf\esptool_py && E:\Passport\esp32\.espressif\python_env\idf5.5_py3.11_env\Scripts\python.exe E:/Passport/esp32/v5.5.1/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x2000 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/build/bootloader/bootloader.bin"
+Bootloader binary size 0x4400 bytes. 0x1c00 bytes (29%) free.
+[73/78] Generating esp-idf/esp_system/ld/sections.ld 
+info: INFO: Symbol TAIJIPAI_I2S_TYPE_STD defined in multiple locations (see below). Please check if this is a correct behavior or a random name match:
+    E:\Passport\espp4\sparepart\JC4880P443C_I_W\1-Demo\idf_examples\ESP-IDF\xiaozhi-esp32sp1\main\Kconfig.projbuild:498
+    E:\Passport\espp4\sparepart\JC4880P443C_I_W\1-Demo\idf_examples\ESP-IDF\xiaozhi-esp32sp1\main\Kconfig.projbuild:510
+info: INFO: Symbol TAIJIPAI_I2S_TYPE_PDM defined in multiple locations (see below). Please check if this is a correct behavior or a random name match:
+    E:\Passport\espp4\sparepart\JC4880P443C_I_W\1-Demo\idf_examples\ESP-IDF\xiaozhi-esp32sp1\main\Kconfig.projbuild:512
+    E:\Passport\espp4\sparepart\JC4880P443C_I_W\1-Demo\idf_examples\ESP-IDF\xiaozhi-esp32sp1\main\Kconfig.projbuild:500
+info: INFO: Choice I2S_TYPE_TAIJIPI_S3 defined in multiple locations (see below). Please check if this is a correct behavior or a random name match:
+    E:\Passport\espp4\sparepart\JC4880P443C_I_W\1-Demo\idf_examples\ESP-IDF\xiaozhi-esp32sp1\main\Kconfig.projbuild:504
+    E:\Passport\espp4\sparepart\JC4880P443C_I_W\1-Demo\idf_examples\ESP-IDF\xiaozhi-esp32sp1\main\Kconfig.projbuild:492
+[75/78] Linking CXX executable xiaozhi.elf           
+FAILED: xiaozhi.elf
+C:\WINDOWS\system32\cmd.exe /C "cd . && E:\Passport\esp32\.espressif\tools\riscv32-esp-elf\esp-14.2.0_20241119\riscv32-esp-elf\bin\riscv32-esp-elf-g++.exe -march=rv32imafc_zicsr_zifencei_xesppie -mabi=ilp32f -nostartfiles -march=rv32imafc_zicsr_zifencei_xesppie -mabi=ilp32f    -Wl,--cref -Wl,--defsym=IDF_TARGET_ESP32P4=0 -Wl,--Map=E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/build/xiaozhi.map -Wl,--no-warn-rwx-segments -Wl,--orphan-handling=warn -fno-rtti -fno-lto -Wl,--gc-sections -Wl,--warn-common -T rom.api.ld -T esp32p4.peripherals.ld -T esp32p4.rom.ld -T esp32p4.rom.api.ld -T esp32p4.rom.rvfp.ld -T esp32p4.rom.wdt.ld -T esp32p4.rom.systimer.ld -T esp32p4.rom.version.ld -T esp32p4.rom.libc.ld -T esp32p4.rom.libc-suboptimal_for_misaligned_mem.ld -T esp32p4.rom.newlib.ld -T memory.ld -T sections.ld -Wl,--enable-non-contiguous-regions @CMakeFiles\xiaozhi.elf.rsp -o xiaozhi.elf && cd ."
+E:/Passport/esp32/.espressif/tools/riscv32-esp-elf/esp-14.2.0_20241119/riscv32-esp-elf/bin/../lib/gcc/riscv32-esp-elf/14.2.0/../../../../riscv32-esp-elf/bin/ld.exe: esp-idf/main/libmain.a(sd_test.cc.obj): in function `sd_mount_task(void*)':
+E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/main/sd_test.cc:100:(.text._ZL13sd_mount_taskPv+0x2ac): undefined reference to `image_display_init'
+collect2.exe: error: ld returned 1 exit status       
+ninja: build stopped: subcommand failed.
 
-I (3929) esp_netif_lwip: DHCP server started on interface WIFI_AP_DEF with IP: 192.168.4.1
-W (3956) Application: Alert 配网模式: 手机连接热点 Xiaozhi-86A9，浏览器访问 http://192.168.4.1
+ *  终端进程“E:\Passport\esp32\.espressif\tools\ninja\1.12.1\ninja.exe”已终止，退出代码: 1。 
