@@ -148,3 +148,44 @@ E (911) jc4880p443: SD card mount failed: ESP_ERR_TIMEOUT
 - `config.h` + `jc4880p443.cc` — 保持原版，板级文件无需改动
 
 **验证结果**: ✅ 成功 — SD 卡正常挂载，目录遍历正常，WiFi 同时正常工作。
+
+---
+
+## 4. SD卡JPG图片解码显示在屏幕上
+
+**日期**: 2026-07-13
+
+**起因**: 需要在配网阶段将SD卡中的JPG图片显示在屏幕上。
+
+**解决方案（移植自 `xiaozhi-esp32_v3picOK/main/apps/image_display/`）**:
+- 使用 ESP32-P4 硬件 JPEG 解码器 (`driver/jpeg_decode.h`)
+- 解码为 RGB565 格式，通过 LVGL `lv_canvas` 直接渲染
+
+**涉及文件**:
+- `main/apps/image_display/ImageDisplay.cpp` — **新增** JPEG解码+LVGL显示
+- `main/apps/image_display/ImageDisplay.hpp` — **新增** 接口头文件（移除extern "C"修复链接）
+- `main/CMakeLists.txt` — 添加源文件和 include 路径
+- `main/sd_test.cc` — SD卡挂载成功后调用 `image_display_init()`
+
+**验证结果**: ✅ 成功 — HAPPY001.JPG 正常显示在屏幕上。
+
+---
+
+## 5. 视频循环播放（硬件JPEG解码 + MJPEG序列）
+
+**日期**: 2026-07-13
+
+**起因**: 需要实现SD卡图片序列的视频循环播放，验证硬件解码帧率。
+
+**方案**: 
+- 基于已有的硬件 JPEG 解码器（`driver/jpeg_decode.h`）
+- 新增 `video_playback_task` FreeRTOS 任务循环调用 `image_display_next()`
+- 双缓冲 LVGL canvas 解码+显示
+- 每秒统计并打印实际 FPS
+
+**涉及文件**:
+- `main/apps/image_display/ImageDisplay.cpp` — 新增视频播放任务、FPS统计
+- `main/apps/image_display/ImageDisplay.hpp` — 新增 `video_playback_start/stop/get_fps` API
+- `main/sd_test.cc` — 挂载后自动启动30FPS循环播放
+
+**验证结果**: ✅ 成功 — 3张JPG以23 FPS循环播放（目标30 FPS），硬件JPEG解码流水线验证通过。

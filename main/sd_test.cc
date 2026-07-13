@@ -8,6 +8,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sd_pwr_ctrl_by_on_chip_ldo.h"
+#include "apps/image_display/ImageDisplay.hpp"
 
 static const char *TAG = "SD_TEST";
 
@@ -101,7 +102,12 @@ static void sd_mount_task(void *pvParameters)
         }
         closedir(d);
     }
-    
+
+    // 自动显示第一张JPG图片，然后开始视频循环播放
+    if (image_display_init()) {
+        video_playback_start(30);  // 30 FPS 循环播放
+    }
+
     vTaskDelete(NULL);
 }
 
