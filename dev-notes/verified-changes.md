@@ -189,3 +189,27 @@ E (911) jc4880p443: SD card mount failed: ESP_ERR_TIMEOUT
 - `main/sd_test.cc` — 挂载后自动启动30FPS循环播放
 
 **验证结果**: ✅ 成功 — 3张JPG以23 FPS循环播放（目标30 FPS），硬件JPEG解码流水线验证通过。
+
+---
+
+## 6. PPA硬件抠图合成（色键抠红 + 图层叠加）
+
+**日期**: 2026-07-14
+
+**起因**: 角色帧含红色背景，需要抠掉红色叠到静态背景上。软件PNG解码太慢（100-200ms/帧），需要硬件方案。
+
+**解决方案**:
+- **完全取代PNG方案**：所有素材统一JPEG格式
+- **硬件流水线**：JPEG解码器 → PPA BLEND(色键抠红) → RGB565合成 → LVGL canvas
+- PPA `fg_ck_en` 前景色键：红色范围 `BGR=(200,0,0)~(255,80,80)` 的像素替换为背景
+- 背景缺失时自动降级为直接显示
+- 开启 FATFS 长文件名支持（`FATFS_LFN_HEAP`）
+
+**涉及文件**:
+- `main/apps/image_display/PPACompositor.cpp` — **新增** PPA BLEND客户端+背景加载+JPEG解码+色键合成
+- `main/apps/image_display/PPACompositor.h` — PPA 接口（init/load_bg/composite_frame/deinit）
+- `main/apps/image_display/ImageDisplay.cpp` — 重构为PPA合成通道，删除lodepng/PNG代码
+- `main/CMakeLists.txt` — 添加PPACompositor.cpp
+- `sdkconfig` — 开启FATFS长文件名
+
+**验证结果**: ✅ 成功 — PPA BLEND初始化成功，background.jpg加载，120帧HAPPY序列硬件抠图合成正常播放。

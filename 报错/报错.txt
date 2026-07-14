@@ -1,54 +1,387 @@
--- Adding linker script E:/Passport/esp32/v5.5.1/esp-idf/components/soc/esp32p4/ld/esp32p4.peripherals.ld 
--- ESP_LCD_NV3023: 1.0.0
--- ADC_BATTERY_ESTIMATION: 0.2.0
--- ADC_MIC: 0.2.0
--- BUTTON: 4.1.3
--- ESP_LCD_AXS15231B: 1.0.1
--- ESP_LCD_GC9A01: 2.0.1
--- ESP_LCD_ILI9341: 1.2.0
--- ESP_LCD_JD9165: 1.0.2
--- ESP_LCD_JD9365: 1.0.2
--- ESP_LCD_PANEL_IO_ADDITIONS: 1.0.1
--- ESP_LCD_SPD2010: 1.0.2
--- ESP_LCD_ST7701: 1.1.3
--- ESP_LCD_ST77916: 1.0.1
--- ESP_LCD_ST7796: 1.3.2
--- LVGL version: 9.2.2
--- ESP_MMAP_ASSETS: 1.3.1
--- Using Hosted Wi-Fi
--- Using new driver components (IDF >= 5.0)
--- KNOB: 1.0.0
--- I2C_BUS: 1.5.2
--- ESP_LCD_JD9365_10_1: 1.0.3
--- ESP_LCD_SH8601: 1.0.2
--- ESP_LCD_ST7703: 1.0.3
--- Component idf::espressif__esp_hosted will be linked with -Wl,--whole-archive
--- Component idf::main will be linked with -Wl,--whole-archive
--- Components: 78__esp-ml307 78__esp-opus 78__esp-opus-encoder 78__esp-wifi-connect 78__esp_lcd_nv3023 78__xiaozhi-fonts app_trace app_update bootloader bootloader_support bt cmock console cxx driver efuse esp-tls esp_adc esp_app_format esp_bootloader_format esp_coex esp_common esp_driver_ana_cmpr esp_driver_bitscrambler esp_driver_cam esp_driver_dac esp_driver_gpio esp_driver_gptimer esp_driver_i2c esp_driver_i2s esp_driver_isp esp_driver_jpeg esp_driver_ledc esp_driver_mcpwm esp_driver_parlio esp_driver_pcnt esp_driver_ppa esp_driver_rmt esp_driver_sdio esp_driver_sdm esp_driver_sdmmc esp_driver_sdspi esp_driver_spi esp_driver_touch_sens esp_driver_tsens esp_driver_twai esp_driver_uart esp_driver_usb_serial_jtag esp_eth esp_event esp_gdbstub esp_hid esp_http_client esp_http_server esp_https_ota esp_https_server esp_hw_support esp_lcd esp_local_ctrl esp_mm esp_netif esp_netif_stack esp_partition esp_phy esp_pm esp_psram esp_ringbuf esp_rom esp_security esp_system esp_timer esp_vfs_console esp_wifi espcoredump espressif__adc_battery_estimation espressif__adc_mic espressif__button espressif__cmake_utilities espressif__dl_fft espressif__eppp_link espressif__esp-dsp espressif__esp-sr espressif__esp32-camera espressif__esp_codec_dev espressif__esp_hosted espressif__esp_io_expander espressif__esp_io_expander_tca9554 espressif__esp_io_expander_tca95xx_16bit espressif__esp_jpeg espressif__esp_lcd_axs15231b espressif__esp_lcd_gc9a01 espressif__esp_lcd_ili9341 espressif__esp_lcd_ili9881c espressif__esp_lcd_jd9165 espressif__esp_lcd_jd9365 espressif__esp_lcd_panel_io_additions espressif__esp_lcd_spd2010 espressif__esp_lcd_st7701 espressif__esp_lcd_st77916 espressif__esp_lcd_st7796 espressif__esp_lcd_touch espressif__esp_lcd_touch_cst816s espressif__esp_lcd_touch_ft5x06 espressif__esp_lcd_touch_gt911 espressif__esp_lvgl_port espressif__esp_mmap_assets espressif__esp_serial_slave_link espressif__esp_wifi_remote espressif__i2c_bus espressif__knob espressif__led_strip esptool_py fatfs freertos hal heap http_parser idf_test ieee802154 json log lvgl__lvgl lwip main mbedtls mqtt newlib nvs_flash nvs_sec_provider openthread partition_table protobuf-c protocomm pthread riscv rt sdmmc soc spi_flash spiffs tcp_transport tny-robotics__sh1106-esp-idf ulp unity usb vfs waveshare__esp_lcd_jd9365_10_1 waveshare__esp_lcd_sh8601 waveshare__esp_lcd_st7703 waveshare__esp_lcd_touch_cst9217 wear_levelling wifi_provisioning wpa_supplicant
--- Component paths: E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/78__esp-ml307 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/78__esp-opus E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/78__esp-opus-encoder E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/78__esp-wifi-connect E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/78__esp_lcd_nv3023 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/78__xiaozhi-fonts E:/Passport/esp32/v5.5.1/esp-idf/components/app_trace E:/Passport/esp32/v5.5.1/esp-idf/components/app_update E:/Passport/esp32/v5.5.1/esp-idf/components/bootloader E:/Passport/esp32/v5.5.1/esp-idf/components/bootloader_support E:/Passport/esp32/v5.5.1/esp-idf/components/bt E:/Passport/esp32/v5.5.1/esp-idf/components/cmock E:/Passport/esp32/v5.5.1/esp-idf/components/console E:/Passport/esp32/v5.5.1/esp-idf/components/cxx E:/Passport/esp32/v5.5.1/esp-idf/components/driver E:/Passport/esp32/v5.5.1/esp-idf/components/efuse E:/Passport/esp32/v5.5.1/esp-idf/components/esp-tls E:/Passport/esp32/v5.5.1/esp-idf/components/esp_adc E:/Passport/esp32/v5.5.1/esp-idf/components/esp_app_format E:/Passport/esp32/v5.5.1/esp-idf/components/esp_bootloader_format E:/Passport/esp32/v5.5.1/esp-idf/components/esp_coex E:/Passport/esp32/v5.5.1/esp-idf/components/esp_common E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_ana_cmpr E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_bitscrambler E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_cam E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_dac E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_gpio E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_gptimer E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_i2c E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_i2s E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_isp E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_jpeg E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_ledc E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_mcpwm E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_parlio E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_pcnt E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_ppa E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_rmt E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_sdio E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_sdm E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_sdmmc E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_sdspi E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_spi E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_touch_sens E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_tsens E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_twai E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_uart E:/Passport/esp32/v5.5.1/esp-idf/components/esp_driver_usb_serial_jtag E:/Passport/esp32/v5.5.1/esp-idf/components/esp_eth E:/Passport/esp32/v5.5.1/esp-idf/components/esp_event E:/Passport/esp32/v5.5.1/esp-idf/components/esp_gdbstub E:/Passport/esp32/v5.5.1/esp-idf/components/esp_hid E:/Passport/esp32/v5.5.1/esp-idf/components/esp_http_client E:/Passport/esp32/v5.5.1/esp-idf/components/esp_http_server E:/Passport/esp32/v5.5.1/esp-idf/components/esp_https_ota E:/Passport/esp32/v5.5.1/esp-idf/components/esp_https_server E:/Passport/esp32/v5.5.1/esp-idf/components/esp_hw_support E:/Passport/esp32/v5.5.1/esp-idf/components/esp_lcd E:/Passport/esp32/v5.5.1/esp-idf/components/esp_local_ctrl E:/Passport/esp32/v5.5.1/esp-idf/components/esp_mm E:/Passport/esp32/v5.5.1/esp-idf/components/esp_netif E:/Passport/esp32/v5.5.1/esp-idf/components/esp_netif_stack E:/Passport/esp32/v5.5.1/esp-idf/components/esp_partition E:/Passport/esp32/v5.5.1/esp-idf/components/esp_phy E:/Passport/esp32/v5.5.1/esp-idf/components/esp_pm E:/Passport/esp32/v5.5.1/esp-idf/components/esp_psram E:/Passport/esp32/v5.5.1/esp-idf/components/esp_ringbuf E:/Passport/esp32/v5.5.1/esp-idf/components/esp_rom E:/Passport/esp32/v5.5.1/esp-idf/components/esp_security E:/Passport/esp32/v5.5.1/esp-idf/components/esp_system E:/Passport/esp32/v5.5.1/esp-idf/components/esp_timer E:/Passport/esp32/v5.5.1/esp-idf/components/esp_vfs_console E:/Passport/esp32/v5.5.1/esp-idf/components/esp_wifi E:/Passport/esp32/v5.5.1/esp-idf/components/espcoredump E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__adc_battery_estimation E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__adc_mic E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__button E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__cmake_utilities E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__dl_fft E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__eppp_link E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp-dsp E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp-sr E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp32-camera E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_codec_dev E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_hosted E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_io_expander E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_io_expander_tca9554 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_io_expander_tca95xx_16bit E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_jpeg E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_axs15231b E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_gc9a01 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_ili9341 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_ili9881c E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_jd9165 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_jd9365 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_panel_io_additions E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_spd2010 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_st7701 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_st77916 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_st7796 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_touch E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_touch_cst816s E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_touch_ft5x06 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lcd_touch_gt911 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_lvgl_port E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_mmap_assets E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_serial_slave_link E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_wifi_remote E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__i2c_bus E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__knob E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__led_strip E:/Passport/esp32/v5.5.1/esp-idf/components/esptool_py E:/Passport/esp32/v5.5.1/esp-idf/components/fatfs E:/Passport/esp32/v5.5.1/esp-idf/components/freertos E:/Passport/esp32/v5.5.1/esp-idf/components/hal E:/Passport/esp32/v5.5.1/esp-idf/components/heap E:/Passport/esp32/v5.5.1/esp-idf/components/http_parser E:/Passport/esp32/v5.5.1/esp-idf/components/idf_test E:/Passport/esp32/v5.5.1/esp-idf/components/ieee802154 E:/Passport/esp32/v5.5.1/esp-idf/components/json E:/Passport/esp32/v5.5.1/esp-idf/components/log E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/lvgl__lvgl E:/Passport/esp32/v5.5.1/esp-idf/components/lwip E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/main E:/Passport/esp32/v5.5.1/esp-idf/components/mbedtls E:/Passport/esp32/v5.5.1/esp-idf/components/mqtt E:/Passport/esp32/v5.5.1/esp-idf/components/newlib E:/Passport/esp32/v5.5.1/esp-idf/components/nvs_flash E:/Passport/esp32/v5.5.1/esp-idf/components/nvs_sec_provider E:/Passport/esp32/v5.5.1/esp-idf/components/openthread E:/Passport/esp32/v5.5.1/esp-idf/components/partition_table E:/Passport/esp32/v5.5.1/esp-idf/components/protobuf-c E:/Passport/esp32/v5.5.1/esp-idf/components/protocomm E:/Passport/esp32/v5.5.1/esp-idf/components/pthread E:/Passport/esp32/v5.5.1/esp-idf/components/riscv E:/Passport/esp32/v5.5.1/esp-idf/components/rt E:/Passport/esp32/v5.5.1/esp-idf/components/sdmmc E:/Passport/esp32/v5.5.1/esp-idf/components/soc E:/Passport/esp32/v5.5.1/esp-idf/components/spi_flash E:/Passport/esp32/v5.5.1/esp-idf/components/spiffs E:/Passport/esp32/v5.5.1/esp-idf/components/tcp_transport E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/tny-robotics__sh1106-esp-idf E:/Passport/esp32/v5.5.1/esp-idf/components/ulp E:/Passport/esp32/v5.5.1/esp-idf/components/unity E:/Passport/esp32/v5.5.1/esp-idf/components/usb E:/Passport/esp32/v5.5.1/esp-idf/components/vfs E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/waveshare__esp_lcd_jd9365_10_1 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/waveshare__esp_lcd_sh8601 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/waveshare__esp_lcd_st7703 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/waveshare__esp_lcd_touch_cst9217 E:/Passport/esp32/v5.5.1/esp-idf/components/wear_levelling E:/Passport/esp32/v5.5.1/esp-idf/components/wifi_provisioning E:/Passport/esp32/v5.5.1/esp-idf/components/wpa_supplicant
--- Configuring done (36.6s)
--- Generating done (11.9s)
--- Build files have been written to: E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/build
-
-[52/78] Performing build step for 'bootloader'       
-[1/1] C:\WINDOWS\system32\cmd.exe /C "cd /D E:\Passport\espp4\sparepart\JC4880P443C_I_W\1-Demo\idf_examples\ESP-IDF\xiaozhi-esp32sp1\build\bootloader\esp-idf\esptool_py && E:\Passport\esp32\.espressif\python_env\idf5.5_py3.11_env\Scripts\python.exe E:/Passport/esp32/v5.5.1/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x2000 E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/build/bootloader/bootloader.bin"
-Bootloader binary size 0x4400 bytes. 0x1c00 bytes (29%) free.
-[73/78] Generating esp-idf/esp_system/ld/sections.ld 
-info: INFO: Symbol TAIJIPAI_I2S_TYPE_STD defined in multiple locations (see below). Please check if this is a correct behavior or a random name match:
-    E:\Passport\espp4\sparepart\JC4880P443C_I_W\1-Demo\idf_examples\ESP-IDF\xiaozhi-esp32sp1\main\Kconfig.projbuild:498
-    E:\Passport\espp4\sparepart\JC4880P443C_I_W\1-Demo\idf_examples\ESP-IDF\xiaozhi-esp32sp1\main\Kconfig.projbuild:510
-info: INFO: Symbol TAIJIPAI_I2S_TYPE_PDM defined in multiple locations (see below). Please check if this is a correct behavior or a random name match:
-    E:\Passport\espp4\sparepart\JC4880P443C_I_W\1-Demo\idf_examples\ESP-IDF\xiaozhi-esp32sp1\main\Kconfig.projbuild:512
-    E:\Passport\espp4\sparepart\JC4880P443C_I_W\1-Demo\idf_examples\ESP-IDF\xiaozhi-esp32sp1\main\Kconfig.projbuild:500
-info: INFO: Choice I2S_TYPE_TAIJIPI_S3 defined in multiple locations (see below). Please check if this is a correct behavior or a random name match:
-    E:\Passport\espp4\sparepart\JC4880P443C_I_W\1-Demo\idf_examples\ESP-IDF\xiaozhi-esp32sp1\main\Kconfig.projbuild:504
-    E:\Passport\espp4\sparepart\JC4880P443C_I_W\1-Demo\idf_examples\ESP-IDF\xiaozhi-esp32sp1\main\Kconfig.projbuild:492
-[75/78] Linking CXX executable xiaozhi.elf           
-FAILED: xiaozhi.elf
-C:\WINDOWS\system32\cmd.exe /C "cd . && E:\Passport\esp32\.espressif\tools\riscv32-esp-elf\esp-14.2.0_20241119\riscv32-esp-elf\bin\riscv32-esp-elf-g++.exe -march=rv32imafc_zicsr_zifencei_xesppie -mabi=ilp32f -nostartfiles -march=rv32imafc_zicsr_zifencei_xesppie -mabi=ilp32f    -Wl,--cref -Wl,--defsym=IDF_TARGET_ESP32P4=0 -Wl,--Map=E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/build/xiaozhi.map -Wl,--no-warn-rwx-segments -Wl,--orphan-handling=warn -fno-rtti -fno-lto -Wl,--gc-sections -Wl,--warn-common -T rom.api.ld -T esp32p4.peripherals.ld -T esp32p4.rom.ld -T esp32p4.rom.api.ld -T esp32p4.rom.rvfp.ld -T esp32p4.rom.wdt.ld -T esp32p4.rom.systimer.ld -T esp32p4.rom.version.ld -T esp32p4.rom.libc.ld -T esp32p4.rom.libc-suboptimal_for_misaligned_mem.ld -T esp32p4.rom.newlib.ld -T memory.ld -T sections.ld -Wl,--enable-non-contiguous-regions @CMakeFiles\xiaozhi.elf.rsp -o xiaozhi.elf && cd ."
-E:/Passport/esp32/.espressif/tools/riscv32-esp-elf/esp-14.2.0_20241119/riscv32-esp-elf/bin/../lib/gcc/riscv32-esp-elf/14.2.0/../../../../riscv32-esp-elf/bin/ld.exe: esp-idf/main/libmain.a(sd_test.cc.obj): in function `sd_mount_task(void*)':
-E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/main/sd_test.cc:100:(.text._ZL13sd_mount_taskPv+0x2ac): undefined reference to `image_display_init'
-collect2.exe: error: ld returned 1 exit status       
-ninja: build stopped: subcommand failed.
-
- *  终端进程“E:\Passport\esp32\.espressif\tools\ninja\1.12.1\ninja.exe”已终止，退出代码: 1。 
+Build:Jul 10 2024
+rst:0x17 (CHIP_USB_UART_RESET),boot:0xc (SPI_FAST_FLASH_BOOT)
+Core0 Saved PC:0x4ff0435a
+--- 0x4ff0435a: esp_cpu_wait_for_intr at E:/Passport/esp32/v5.5.1/esp-idf/components/esp_hw_support/cpu.c:57
+Core1 Saved PC:0x4ff0435a
+--- 0x4ff0435a: esp_cpu_wait_for_intr at E:/Passport/esp32/v5.5.1/esp-idf/components/esp_hw_support/cpu.c:57
+SPI mode:DIO, clock div:1
+load:0x4ff33ce0,len:0x5a0
+load:0x4ff29ed0,len:0xca0
+load:0x4ff2cbd0,len:0x3160
+entry 0x4ff29ed0
+I (43) hex_psram: vendor id    : 0x0d (AP)
+I (44) hex_psram: Latency      : 0x01 (Fixed)        
+I (44) hex_psram: DriveStr.    : 0x00 (25 Ohm)       
+I (45) hex_psram: dev id       : 0x03 (generation 4) 
+I (49) hex_psram: density      : 0x07 (256 Mbit)
+I (53) hex_psram: good-die     : 0x06 (Pass)
+I (57) hex_psram: SRF          : 0x02 (Slow Refresh) 
+I (62) hex_psram: BurstType    : 0x00 ( Wrap)        
+I (66) hex_psram: BurstLen     : 0x03 (2048 Byte)    
+I (71) hex_psram: BitMode      : 0x01 (X16 Mode)     
+I (75) hex_psram: Readlatency  : 0x04 (14 cycles@Fixed)
+I (80) hex_psram: DriveStrength: 0x00 (1/1)
+I (84) MSPI DQS: tuning success, best phase id is 0
+I (256) MSPI DQS: tuning success, best delayline id is 17
+I esp_psram: Found 32MB PSRAM device
+I esp_psram: Speed: 200MHz
+I (393) mmu_psram: .rodata xip on psram
+I (486) mmu_psram: .text xip on psram
+I (487) hex_psram: psram CS IO is dedicated
+I (488) cpu_start: Multicore app
+I (497) cpu_start: Pro cpu start user code
+I (497) cpu_start: cpu freq: 360000000 Hz
+I (498) app_init: Application information:
+I (498) app_init: Project name:     xiaozhi
+I (501) app_init: App version:      1.8.2
+I (505) app_init: Compile time:     Jul 13 2026 21:41:57
+I (510) app_init: ELF file SHA256:  7809be2bc...     
+I (514) app_init: ESP-IDF:          v5.5.1-dirty
+I (519) efuse_init: Min chip rev:     v0.1
+I (523) efuse_init: Max chip rev:     v1.99
+I (527) efuse_init: Chip rev:         v1.3
+I (530) heap_init: Initializing. RAM available for dynamic allocation:
+I (537) heap_init: At 4FF1D350 len 0001DC70 (119 KiB): RAM
+I (542) heap_init: At 4FF3AFC0 len 00004BF0 (18 KiB): RAM
+I (547) heap_init: At 4FF56300 len 00049D00 (295 KiB): RAM
+I (552) heap_init: At 501080A0 len 00007F60 (31 KiB): RTCRAM
+I (558) heap_init: At 30100068 len 00001F98 (7 KiB): TCM
+I (563) esp_psram: Adding pool of 28672K of PSRAM memory to heap allocator
+I (569) esp_psram: Adding pool of 9K of PSRAM memory gap generated due to end address alignment of irom to the heap allocator
+I (580) esp_psram: Adding pool of 59K of PSRAM memory gap generated due to end address alignment of drom to the heap allocator
+W (592) spi_flash: Detected boya flash chip but using generic driver. For optimal functionality, enable `SPI_FLASH_SUPPORT_BOYA_CHIP` in menuconfig
+I (604) spi_flash: detected chip: generic
+I (608) spi_flash: flash io: qio
+I (611) host_init: ESP Hosted : Host chip_ip[18]     
+I (615) H_API: ESP-Hosted starting. Hosted_Tasks: prio:23, stack: 5120 RPC_task_stack: 5120
+I (624) H_API: ** add_esp_wifi_remote_channels **    
+I (629) H_SDIO_DRV: sdio_data_to_rx_buf_task started
+I (633) main_task: Started on CPU0
+I (636) esp_psram: Reserving pool of 48K of internal memory for DMA/internal allocations
+I (643) main_task: Calling app_main()
+I (650) Board: UUID=b9cfc8c8-87b4-4ebd-94c5-db804a346209 SKU=guition-jc4880p443
+I (654) button: IoT Button Version: 4.1.3
+I (658) jc4880p443: MIPI DSI PHY Powered on
+I (663) jc4880p443: Install MIPI DSI LCD control panel
+I (666) st7701: version: 1.1.3
+I (707) st7701_mipi: LCD ID: FF FF FF
+I (707) st7701_mipi:  st7701->madctl_val: 0x0, st7701->colmod_val: 0x55
+I (847) Display: Power management not supported
+I (847) LcdDisplay: Turning display on
+I (847) LcdDisplay: Initialize LVGL library
+I (847) LcdDisplay: Initialize LVGL port
+I (851) LVGL: Starting LVGL task
+I (854) LcdDisplay: Adding LCD display
+E (858) lcd_panel: esp_lcd_panel_swap_xy(50): swap_xy is not supported by this panel
+I (874) Backlight: Set brightness to 75
+I (874) Application: STATE: starting
+I (875) SD_TEST: Initializing SD card via SDMMC...   
+I (876) SD_TEST: Pins: CLK=43, CMD=44, D0=39, D1=40, D2=41, D3=42
+W (882) ldo: The voltage value 0 is out of the recommended range [500, 2700]
+I (889) SD_TEST: LDO power control initialized successfully
+I (895) Es8311AudioCodec: Duplex channels created    
+I (915) ES8311: Work in Slave mode
+I (918) Es8311AudioCodec: Es8311AudioCodec initialized
+I (918) AudioCodec: Set input enable to true
+I (918) I2S_IF: channel mode 0 bits:16/16 channel:2 mask:1
+W (921) i2s_common: dma frame num is adjusted to 256 to align the dma buffer with 64, bufsize = 512       
+I (930) I2S_IF: STD Mode 1 bits:16/16 channel:2 sample_rate:16000 mask:1
+I (936) I2S_IF: channel mode 0 bits:16/16 channel:2 mask:1
+W (942) i2s_common: dma frame num is adjusted to 256 to align the dma buffer with 64, bufsize = 512       
+I (945) SD_TEST: SD card mounted successfully!       
+Name: SD16G
+Type: SDHC
+Speed: 20.00 MHz (limit: 20.00 MHz)
+Size: luMB
+CSD: ver=2, sector_size=512, capacity=61157376 read_bl_len=9
+SSR: bus_width=4
+I (968) SD_TEST: Listing /sdcard directory:
+I (972) I2S_IF: STD Mode 0 bits:16/16 channel:2 sample_rate:16000 mask:1
+I (972) SD_TEST:   SYSTEM~1
+I (981) SD_TEST:   FEAST.XI
+I (983) SD_TEST:   FRONT1.WAV
+I (986) SD_TEST:   FRONT2.WAV
+I (989) SD_TEST:   FRONT3.WAV
+I (991) SD_TEST:   FRONT4.WAV
+I (994) SD_TEST:   LOGINC~1.XI
+I (997) SD_TEST:   SUNRISE.WAV
+I (1000) SD_TEST:   ARK
+I (1002) SD_TEST:   HAPPY003.JPG
+I (1005) SD_TEST:   HAPPY001.JPG
+I (1008) SD_TEST:   HAPPY002.JPG
+I (1011) SD_TEST:   HAPPY120.JPG
+I (1013) SD_TEST:   HAPPY004.JPG
+I (1016) SD_TEST:   HAPPY005.JPG
+I (1019) SD_TEST:   HAPPY006.JPG
+I (1022) SD_TEST:   HAPPY007.JPG
+I (1025) SD_TEST:   HAPPY008.JPG
+I (1028) SD_TEST:   HAPPY009.JPG
+I (1032) SD_TEST:   HAPPY010.JPG
+I (1034) SD_TEST:   HAPPY011.JPG
+I (1037) SD_TEST:   HAPPY012.JPG
+I (1040) SD_TEST:   HAPPY013.JPG
+I (1043) SD_TEST:   HAPPY014.JPG
+I (1046) SD_TEST:   HAPPY015.JPG
+I (1049) SD_TEST:   HAPPY016.JPG
+I (1052) SD_TEST:   HAPPY017.JPG
+I (1055) SD_TEST:   HAPPY018.JPG
+I (1058) SD_TEST:   HAPPY019.JPG
+I (1061) SD_TEST:   HAPPY020.JPG
+I (1064) SD_TEST:   HAPPY021.JPG
+I (1067) SD_TEST:   HAPPY022.JPG
+I (1070) SD_TEST:   HAPPY023.JPG
+I (1072) SD_TEST:   HAPPY024.JPG
+I (1075) SD_TEST:   HAPPY025.JPG
+I (1079) SD_TEST:   HAPPY026.JPG
+I (1081) SD_TEST:   HAPPY027.JPG
+I (1084) SD_TEST:   HAPPY028.JPG
+I (1087) SD_TEST:   HAPPY029.JPG
+I (1090) SD_TEST:   HAPPY030.JPG
+I (1093) SD_TEST:   HAPPY031.JPG
+I (1096) SD_TEST:   HAPPY032.JPG
+I (1099) SD_TEST:   HAPPY033.JPG
+I (1102) SD_TEST:   HAPPY034.JPG
+I (1105) SD_TEST:   HAPPY035.JPG
+I (1108) SD_TEST:   HAPPY036.JPG
+I (1111) SD_TEST:   HAPPY037.JPG
+I (1114) SD_TEST:   HAPPY038.JPG
+I (1117) SD_TEST:   HAPPY039.JPG
+I (1120) SD_TEST:   HAPPY040.JPG
+I (1123) SD_TEST:   HAPPY041.JPG
+I (1126) SD_TEST:   HAPPY042.JPG
+I (1129) SD_TEST:   HAPPY043.JPG
+I (1132) SD_TEST:   HAPPY044.JPG
+I (1134) SD_TEST:   HAPPY045.JPG
+I (1137) SD_TEST:   HAPPY046.JPG
+I (1140) SD_TEST:   HAPPY047.JPG
+I (1143) SD_TEST:   HAPPY048.JPG
+I (1146) SD_TEST:   HAPPY049.JPG
+I (1149) SD_TEST:   HAPPY050.JPG
+I (1152) SD_TEST:   HAPPY051.JPG
+I (1155) SD_TEST:   HAPPY052.JPG
+I (1158) SD_TEST:   HAPPY053.JPG
+I (1161) SD_TEST:   HAPPY054.JPG
+I (1164) SD_TEST:   HAPPY055.JPG
+I (1167) SD_TEST:   HAPPY056.JPG
+I (1170) SD_TEST:   HAPPY057.JPG
+I (1173) SD_TEST:   HAPPY058.JPG
+I (1176) SD_TEST:   HAPPY059.JPG
+I (1179) SD_TEST:   HAPPY060.JPG
+I (1182) SD_TEST:   HAPPY061.JPG
+I (1185) SD_TEST:   HAPPY062.JPG
+I (1188) SD_TEST:   HAPPY063.JPG
+I (1191) SD_TEST:   HAPPY064.JPG
+I (1193) SD_TEST:   HAPPY065.JPG
+I (1196) SD_TEST:   HAPPY066.JPG
+I (1199) SD_TEST:   HAPPY067.JPG
+I (1202) SD_TEST:   HAPPY068.JPG
+I (1205) SD_TEST:   HAPPY069.JPG
+I (1208) SD_TEST:   HAPPY070.JPG
+I (1211) SD_TEST:   HAPPY071.JPG
+I (1214) SD_TEST:   HAPPY072.JPG
+I (1217) SD_TEST:   HAPPY073.JPG
+I (1220) SD_TEST:   HAPPY074.JPG
+I (1223) SD_TEST:   HAPPY075.JPG
+I (1226) SD_TEST:   HAPPY076.JPG
+I (1229) SD_TEST:   HAPPY077.JPG
+I (1232) SD_TEST:   HAPPY078.JPG
+I (1235) SD_TEST:   HAPPY079.JPG
+I (1238) SD_TEST:   HAPPY080.JPG
+I (1241) SD_TEST:   HAPPY081.JPG
+I (1244) SD_TEST:   HAPPY082.JPG
+I (1247) SD_TEST:   HAPPY083.JPG
+I (1250) SD_TEST:   HAPPY084.JPG
+I (1253) SD_TEST:   HAPPY085.JPG
+I (1255) SD_TEST:   HAPPY086.JPG
+I (1258) SD_TEST:   HAPPY087.JPG
+I (1261) SD_TEST:   HAPPY088.JPG
+I (1264) SD_TEST:   HAPPY089.JPG
+I (1268) SD_TEST:   HAPPY090.JPG
+I (1270) SD_TEST:   HAPPY091.JPG
+I (1273) SD_TEST:   HAPPY092.JPG
+I (1276) SD_TEST:   HAPPY093.JPG
+I (1279) SD_TEST:   HAPPY094.JPG
+I (1282) SD_TEST:   HAPPY095.JPG
+I (1285) SD_TEST:   HAPPY096.JPG
+I (1288) SD_TEST:   HAPPY097.JPG
+I (1291) SD_TEST:   HAPPY098.JPG
+I (1294) SD_TEST:   HAPPY099.JPG
+I (1297) SD_TEST:   HAPPY100.JPG
+I (1300) SD_TEST:   HAPPY101.JPG
+I (1303) SD_TEST:   HAPPY102.JPG
+I (1306) SD_TEST:   HAPPY103.JPG
+I (1309) SD_TEST:   HAPPY104.JPG
+I (1312) SD_TEST:   HAPPY105.JPG
+I (1315) SD_TEST:   HAPPY106.JPG
+I (1317) SD_TEST:   HAPPY107.JPG
+I (1320) SD_TEST:   HAPPY108.JPG
+I (1323) SD_TEST:   HAPPY109.JPG
+I (1326) SD_TEST:   HAPPY110.JPG
+I (1329) SD_TEST:   HAPPY111.JPG
+I (1332) SD_TEST:   HAPPY112.JPG
+I (1335) SD_TEST:   HAPPY113.JPG
+I (1338) SD_TEST:   HAPPY114.JPG
+I (1341) SD_TEST:   HAPPY115.JPG
+I (1344) SD_TEST:   HAPPY116.JPG
+I (1347) SD_TEST:   HAPPY117.JPG
+I (1350) SD_TEST:   HAPPY118.JPG
+I (1353) SD_TEST:   HAPPY119.JPG
+I (1364) SD_TEST:   BACKGR~1.JPG
+I (1364) AppImageDisplay: Initializing image display...
+I (1384) PPACompositor: PPA BLEND client registered
+E (1384) PPACompositor: Cannot open /sdcard/background.jpg
+E (1385) AppImageDisplay: Background load failed, continuing without bg
+I (1390) AppImageDisplay: Found image: HAPPY003.JPG  
+I (1394) AppImageDisplay: Found image: HAPPY001.JPG  
+I (1399) AppImageDisplay: Found image: HAPPY002.JPG
+I (1403) AppImageDisplay: Found image: HAPPY120.JPG  
+I (1408) AppImageDisplay: Found image: HAPPY004.JPG  
+I (1412) AppImageDisplay: Found image: HAPPY005.JPG
+I (1417) AppImageDisplay: Found image: HAPPY006.JPG  
+I (1422) AppImageDisplay: Found image: HAPPY007.JPG  
+I (1426) AppImageDisplay: Found image: HAPPY008.JPG  
+I (1431) AppImageDisplay: Found image: HAPPY009.JPG
+I (1436) AppImageDisplay: Found image: HAPPY010.JPG  
+I (1440) AppImageDisplay: Found image: HAPPY011.JPG  
+I (1445) AppImageDisplay: Found image: HAPPY012.JPG
+I (1449) AppImageDisplay: Found image: HAPPY013.JPG  
+I (1454) AppImageDisplay: Found image: HAPPY014.JPG  
+I (1458) AppImageDisplay: Found image: HAPPY015.JPG
+I (1463) AppImageDisplay: Found image: HAPPY016.JPG  
+I (1468) AppImageDisplay: Found image: HAPPY017.JPG  
+I (1472) AppImageDisplay: Found image: HAPPY018.JPG  
+I (1477) AppImageDisplay: Found image: HAPPY019.JPG
+I (1481) AppImageDisplay: Found image: HAPPY020.JPG  
+I (1486) AppImageDisplay: Found image: HAPPY021.JPG  
+I (1491) AppImageDisplay: Found image: HAPPY022.JPG
+I (1495) AppImageDisplay: Found image: HAPPY023.JPG  
+I (1500) AppImageDisplay: Found image: HAPPY024.JPG  
+I (1504) AppImageDisplay: Found image: HAPPY025.JPG  
+I (1509) AppImageDisplay: Found image: HAPPY026.JPG
+I (1514) AppImageDisplay: Found image: HAPPY027.JPG  
+I (1518) AppImageDisplay: Found image: HAPPY028.JPG  
+I (1523) AppImageDisplay: Found image: HAPPY029.JPG
+I (1527) AppImageDisplay: Found image: HAPPY030.JPG  
+I (1532) AppImageDisplay: Found image: HAPPY031.JPG  
+I (1537) AppImageDisplay: Found image: HAPPY032.JPG  
+I (1541) AppImageDisplay: Found image: HAPPY033.JPG
+I (1546) AppImageDisplay: Found image: HAPPY034.JPG  
+I (1550) AppImageDisplay: Found image: HAPPY035.JPG  
+I (1555) AppImageDisplay: Found image: HAPPY036.JPG
+I (1560) AppImageDisplay: Found image: HAPPY037.JPG  
+I (1564) AppImageDisplay: Found image: HAPPY038.JPG  
+I (1569) AppImageDisplay: Found image: HAPPY039.JPG
+I (1573) AppImageDisplay: Found image: HAPPY040.JPG  
+I (1578) AppImageDisplay: Found image: HAPPY041.JPG  
+I (1583) AppImageDisplay: Found image: HAPPY042.JPG  
+I (1587) AppImageDisplay: Found image: HAPPY043.JPG  
+I (1592) AppImageDisplay: Found image: HAPPY044.JPG  
+I (1596) AppImageDisplay: Found image: HAPPY045.JPG  
+I (1601) AppImageDisplay: Found image: HAPPY046.JPG
+I (1606) AppImageDisplay: Found image: HAPPY047.JPG  
+I (1610) AppImageDisplay: Found image: HAPPY048.JPG  
+I (1615) AppImageDisplay: Found image: HAPPY049.JPG
+I (1619) AppImageDisplay: Found image: HAPPY050.JPG  
+I (1624) AppImageDisplay: Found image: HAPPY051.JPG  
+I (1629) AppImageDisplay: Found image: HAPPY052.JPG  
+I (1633) AppImageDisplay: Found image: HAPPY053.JPG
+I (1638) AppImageDisplay: Found image: HAPPY054.JPG  
+I (1642) AppImageDisplay: Found image: HAPPY055.JPG  
+I (1647) AppImageDisplay: Found image: HAPPY056.JPG
+I (1652) AppImageDisplay: Found image: HAPPY057.JPG  
+I (1657) AppImageDisplay: Found image: HAPPY058.JPG  
+I (1661) AppImageDisplay: Found image: HAPPY059.JPG
+I (1665) AppImageDisplay: Found image: HAPPY060.JPG  
+I (1670) AppImageDisplay: Found image: HAPPY061.JPG  
+I (1675) AppImageDisplay: Found image: HAPPY062.JPG  
+I (1679) AppImageDisplay: Found image: HAPPY063.JPG
+I (1684) AppImageDisplay: Found image: HAPPY064.JPG  
+I (1688) AppImageDisplay: Found image: HAPPY065.JPG  
+I (1693) AppImageDisplay: Found image: HAPPY066.JPG
+I (1698) AppImageDisplay: Found image: HAPPY067.JPG  
+I (1702) AppImageDisplay: Found image: HAPPY068.JPG  
+I (1707) AppImageDisplay: Found image: HAPPY069.JPG  
+I (1711) AppImageDisplay: Found image: HAPPY070.JPG  
+I (1716) AppImageDisplay: Found image: HAPPY071.JPG  
+I (1721) AppImageDisplay: Found image: HAPPY072.JPG  
+I (1725) AppImageDisplay: Found image: HAPPY073.JPG
+I (1730) AppImageDisplay: Found image: HAPPY074.JPG  
+I (1734) AppImageDisplay: Found image: HAPPY075.JPG  
+I (1739) AppImageDisplay: Found image: HAPPY076.JPG
+I (1744) AppImageDisplay: Found image: HAPPY077.JPG  
+I (1748) AppImageDisplay: Found image: HAPPY078.JPG  
+I (1753) AppImageDisplay: Found image: HAPPY079.JPG
+I (1757) AppImageDisplay: Found image: HAPPY080.JPG  
+I (1762) AppImageDisplay: Found image: HAPPY081.JPG  
+I (1767) AppImageDisplay: Found image: HAPPY082.JPG  
+I (1771) AppImageDisplay: Found image: HAPPY083.JPG
+I (1776) AppImageDisplay: Found image: HAPPY084.JPG  
+I (1780) AppImageDisplay: Found image: HAPPY085.JPG  
+I (1785) AppImageDisplay: Found image: HAPPY086.JPG
+I (1790) AppImageDisplay: Found image: HAPPY087.JPG  
+I (1794) AppImageDisplay: Found image: HAPPY088.JPG  
+I (1799) AppImageDisplay: Found image: HAPPY089.JPG  
+I (1804) AppImageDisplay: Found image: HAPPY090.JPG
+I (1808) AppImageDisplay: Found image: HAPPY091.JPG  
+I (1813) AppImageDisplay: Found image: HAPPY092.JPG  
+I (1817) AppImageDisplay: Found image: HAPPY093.JPG
+I (1822) AppImageDisplay: Found image: HAPPY094.JPG  
+I (1826) AppImageDisplay: Found image: HAPPY095.JPG  
+I (1831) AppImageDisplay: Found image: HAPPY096.JPG  
+I (1836) AppImageDisplay: Found image: HAPPY097.JPG
+I (1840) AppImageDisplay: Found image: HAPPY098.JPG  
+I (1845) AppImageDisplay: Found image: HAPPY099.JPG  
+I (1849) AppImageDisplay: Found image: HAPPY100.JPG
+I (1854) AppImageDisplay: Found image: HAPPY101.JPG  
+I (1859) AppImageDisplay: Found image: HAPPY102.JPG  
+I (1863) AppImageDisplay: Found image: HAPPY103.JPG
+I (1868) AppImageDisplay: Found image: HAPPY104.JPG  
+I (1872) AppImageDisplay: Found image: HAPPY105.JPG  
+I (1877) AppImageDisplay: Found image: HAPPY106.JPG  
+I (1882) AppImageDisplay: Found image: HAPPY107.JPG
+I (1886) AppImageDisplay: Found image: HAPPY108.JPG  
+I (1891) AppImageDisplay: Found image: HAPPY109.JPG  
+I (1895) AppImageDisplay: Found image: HAPPY110.JPG
+I (1900) AppImageDisplay: Found image: HAPPY111.JPG  
+I (1905) AppImageDisplay: Found image: HAPPY112.JPG  
+I (1909) AppImageDisplay: Found image: HAPPY113.JPG
+I (1914) AppImageDisplay: Found image: HAPPY114.JPG  
+I (1918) AppImageDisplay: Found image: HAPPY115.JPG  
+I (1923) AppImageDisplay: Found image: HAPPY116.JPG  
+I (1928) AppImageDisplay: Found image: HAPPY117.JPG
+I (1932) AppImageDisplay: Found image: HAPPY118.JPG  
+I (1937) AppImageDisplay: Found image: HAPPY119.JPG  
+I (1942) Adev_Codec: Open codec device OK
+I (1946) AudioCodec: Set output enable to true       
+I (1949) AudioCodec: Audio codec started
+I (1950) AppImageDisplay: Found image: BACKGR~1.JPG  
+I (1957) AppImageDisplay: Total images found: 121
+E (1962) PPACompositor: PPA not initialized
+E (1966) AppImageDisplay: PPA composite failed for: /sdcard/HAPPY003.JPG
+I (1974) Application: STATE: configuring
+I (1977) DnsServer: Starting DNS server
+I (1980) transport: Attempt connection with slave: retry[0]
+W (1985) H_SDIO_DRV: Reset slave using GPIO[54]      
+I (1989) os_wrapper_esp: GPIO [54] configured
+I (3513) sdio_wrapper: SDIO master: Slot 1, Data-Lines: 4-bit Freq(KHz)[40000 KHz]
+I (3513) sdio_wrapper: GPIOs: CLK[18] CMD[19] D0[14] D1[15] D2[16] D3[17] Slave_Reset[54]
+I (3517) sdio_wrapper: Queues: Tx[20] Rx[20] SDIO-Rx-Mode[1]
+I (3556) sdio_wrapper: Function 0 Blocksize: 512
+I (3556) sdio_wrapper: Function 1 Blocksize: 512     
+I (3656) H_SDIO_DRV: Card init success, TRANSPORT_RX_ACTIVE
+I (3656) transport: set_transport_state: 1
+I (3656) transport: Waiting for esp_hosted slave to be ready
+I (3729) H_SDIO_DRV: SDIO Host operating in STREAMING MODE
+I (3729) H_SDIO_DRV: Open data path at slave
+I (3729) H_SDIO_DRV: Starting SDIO process rx task   
+I (3756) H_SDIO_DRV: Received ESP_PRIV_IF type message
+I (3757) transport: Received INIT event from ESP32 peripheral
+I (3757) transport: EVENT: 12
+I (3758) transport: Identified slave [esp32c6]
+I (3763) transport: EVENT: 11
+I (3765) transport: capabilities: 0xd
+I (3769) transport: Features supported are:
+I (3773) transport:      * WLAN
+I (3775) transport:        - HCI over SDIO
+I (3779) transport:        - BLE only
+I (3782) transport: EVENT: 13

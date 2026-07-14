@@ -16,29 +16,11 @@
 #include "esp_heap_caps.h"
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
-#include "driver/jpeg_decode.h"
+#include "PPACompositor.h"
 
 #define TAG "AppImageDisplay"
 
-#define APP_SUPPORT_IMAGE_FILE_EXT ".jpg"
 #define SD_MOUNT_POINT            "/sdcard"
-#define APP_IMAGE_FRAME_BUF_SIZE  (480 * 800 * 2)  // 适配当前屏幕 480x800
-#define APP_CACHE_BUF_SIZE        (64 * 1024)
-
-static jpeg_decoder_handle_t jpgd_handle = NULL;
-static jpeg_decode_engine_cfg_t decode_eng_cfg = {
-    .timeout_ms = 40,
-};
-static jpeg_decode_cfg_t decode_cfg_rgb = {
-    .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
-    .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
-};
-static jpeg_decode_memory_alloc_cfg_t rx_mem_cfg = {
-    .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER,
-};
-static jpeg_decode_memory_alloc_cfg_t tx_mem_cfg = {
-    .buffer_direction = JPEG_DEC_ALLOC_INPUT_BUFFER,
-};
 
 static lv_obj_t *s_image_canvas = NULL;
 static uint8_t *s_output_buf = NULL;
@@ -47,107 +29,20 @@ static int s_current_index = 0;
 static int s_image_count = 0;
 static char s_image_paths[256][300];
 
-// 解码并显示图片
+// 解码+PPA抠图合成+显示
 static bool decode_and_display_image(const char *image_path)
 {
-    if (!image_path) {
+    if (!image_path) return false;
+
+    uint8_t *comp_buf = ppa_composite_frame(image_path);
+    if (!comp_buf) {
+        ESP_LOGE(TAG, "PPA composite failed for: %s", image_path);
         return false;
     }
 
-    ESP_LOGI(TAG, "Displaying image: %s", image_path);
-
-    // 打开文件
-    FILE *image_fp = fopen(image_path, "rb");
-    if (image_fp == NULL) {
-        ESP_LOGE(TAG, "Failed to open image file: %s", image_path);
-        return false;
-    }
-
-    // 获取文件大小
-    fseek(image_fp, 0, SEEK_END);
-    int image_size = ftell(image_fp);
-    fseek(image_fp, 0, SEEK_SET);
-
-    if (image_size <= 0) {
-        ESP_LOGE(TAG, "Invalid image file size");
-        fclose(image_fp);
-        return false;
-    }
-
-    // 分配输入缓冲区
-    size_t input_buffer_size = 0;
-    uint8_t *input_buf = (uint8_t *)jpeg_alloc_decoder_mem(image_size, &tx_mem_cfg, &input_buffer_size);
-    if (input_buf == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate input buffer");
-        fclose(image_fp);
-        return false;
-    }
-
-    // 读取文件
-    fread(input_buf, 1, input_buffer_size, image_fp);
-    fclose(image_fp);
-
-    // 获取图片信息
-    jpeg_decode_picture_info_t image_info;
-    esp_err_t ret = jpeg_decoder_get_info(input_buf, input_buffer_size, &image_info);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to get JPEG info");
-        free(input_buf);
-        return false;
-    }
-
-    ESP_LOGI(TAG, "Image: %dx%d", image_info.width, image_info.height);
-
-    // 分配输出缓冲区（如果需要）
-    size_t required_size = image_info.width * image_info.height * 2;
-    if (s_output_buf == NULL || s_output_buf_size < required_size) {
-        if (s_output_buf) {
-            free(s_output_buf);
-        }
-        s_output_buf = (uint8_t *)jpeg_alloc_decoder_mem(required_size, &rx_mem_cfg, &s_output_buf_size);
-        if (s_output_buf == NULL) {
-            ESP_LOGE(TAG, "Failed to allocate output buffer");
-            free(input_buf);
-            return false;
-        }
-    }
-
-    // 解码图片
-    uint32_t out_size = 0;
-    
-    // 删除旧的解码器
-    if (jpgd_handle) {
-        jpeg_del_decoder_engine(jpgd_handle);
-    }
-    
-    // 创建新的解码器
-    ret = jpeg_new_decoder_engine(&decode_eng_cfg, &jpgd_handle);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to create JPEG decoder");
-        free(input_buf);
-        return false;
-    }
-
-    // 解码
-    ret = jpeg_decoder_process(jpgd_handle, &decode_cfg_rgb, 
-                               input_buf, input_buffer_size, 
-                               s_output_buf, s_output_buf_size, 
-                               &out_size);
-    free(input_buf);
-
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "JPEG decode failed");
-        jpeg_del_decoder_engine(jpgd_handle);
-        jpgd_handle = NULL;
-        return false;
-    }
-
-    // 显示图片
     lvgl_port_lock(0);
     if (s_image_canvas) {
-        lv_canvas_set_buffer(s_image_canvas, s_output_buf, 
-                            image_info.width, image_info.height, 
-                            LV_COLOR_FORMAT_RGB565);
+        lv_canvas_set_buffer(s_image_canvas, comp_buf, 480, 800, LV_COLOR_FORMAT_RGB565);
         lv_obj_invalidate(s_image_canvas);
     }
     lvgl_port_unlock();
@@ -155,14 +50,13 @@ static bool decode_and_display_image(const char *image_path)
     return true;
 }
 
-// 显示指定索引的图片
+// 显示指定索引的图片（全部走PPA合成通道）
 bool display_image_by_index(int index)
 {
     if (index < 0 || index >= s_image_count) {
         ESP_LOGE(TAG, "Invalid image index: %d (total: %d)", index, s_image_count);
         return false;
     }
-
     s_current_index = index;
     return decode_and_display_image(s_image_paths[index]);
 }
@@ -182,10 +76,9 @@ static int search_image_files(void)
     while ((dir = readdir(d)) != NULL && s_image_count < 256) {
         if (dir->d_type != DT_DIR) {
             const char *ext = strrchr(dir->d_name, '.');
-            if (ext && (strcasecmp(ext, ".jpg") == 0 || 
-                       strcasecmp(ext, ".jpeg") == 0 ||
-                       strcasecmp(ext, ".bmp") == 0 ||
-                       strcasecmp(ext, ".png") == 0)) {
+            if (ext && (strcasecmp(ext, ".png") == 0 ||
+                       strcasecmp(ext, ".jpg") == 0 ||
+                       strcasecmp(ext, ".jpeg") == 0)) {
                 snprintf(s_image_paths[s_image_count], sizeof(s_image_paths[0]), 
                         "%s/%s", SD_MOUNT_POINT, dir->d_name);
                 ESP_LOGI(TAG, "Found image: %s", dir->d_name);
@@ -204,7 +97,18 @@ bool image_display_init(void)
 {
     ESP_LOGI(TAG, "Initializing image display...");
 
-    // 查找图片文件
+    // 初始化PPA硬件合成器
+    if (!ppa_init()) {
+        ESP_LOGE(TAG, "PPA init failed");
+        return false;
+    }
+
+    // 加载静态背景
+    if (!ppa_load_background("/sdcard/background.jpg")) {
+        ESP_LOGE(TAG, "Background load failed, continuing without bg");
+    }
+
+    // 查找前景图片文件（不搜background.jpg）
     if (search_image_files() == 0) {
         ESP_LOGW(TAG, "No images found on SD card");
         return false;
@@ -214,14 +118,13 @@ bool image_display_init(void)
     lvgl_port_lock(0);
     s_image_canvas = lv_canvas_create(lv_scr_act());
     lv_obj_set_pos(s_image_canvas, 0, 0);
-    // 设置黑色背景
     static lv_style_t canvas_style;
     lv_style_init(&canvas_style);
     lv_style_set_bg_color(&canvas_style, lv_color_black());
     lv_obj_add_style(s_image_canvas, &canvas_style, 0);
     lvgl_port_unlock();
 
-    // 显示第一张图片
+    // 显示第一张（PPA合成）
     s_current_index = 0;
     return decode_and_display_image(s_image_paths[0]);
 }
@@ -341,16 +244,7 @@ int video_get_fps(void)
 // 清理图片显示
 void image_display_cleanup(void)
 {
-    if (jpgd_handle) {
-        jpeg_del_decoder_engine(jpgd_handle);
-        jpgd_handle = NULL;
-    }
-    
-    if (s_output_buf) {
-        free(s_output_buf);
-        s_output_buf = NULL;
-        s_output_buf_size = 0;
-    }
+    ppa_deinit();
 
     if (s_image_canvas) {
         lvgl_port_lock(0);
