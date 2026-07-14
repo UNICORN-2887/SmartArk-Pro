@@ -213,3 +213,83 @@ E (911) jc4880p443: SD card mount failed: ESP_ERR_TIMEOUT
 - `sdkconfig` — 开启FATFS长文件名
 
 **验证结果**: ✅ 成功 — PPA BLEND初始化成功，background.jpg加载，120帧HAPPY序列硬件抠图合成正常播放。
+
+---
+
+## 7. 七牛云OTA接入 + 帧预加载 + 30FPS稳定播放
+
+**日期**: 2026-07-14
+
+**起因**:
+1. 接入七牛云OTA后帧率降至3FPS
+2. SD卡fopen/fread每帧耗时~300ms拖垮性能
+3. 唤醒词检测抢占CPU加剧帧率下降
+
+**解决方案**:
+
+### 帧预加载到PSRAM
+- 启动时一次性读取全部120张JPEG（~7MB）到PSRAM缓存
+- 每帧解码直接从内存读取，消除SD卡IO瓶颈
+- **关键bug修复**: `char[256][300]` 不是 `const char**`，需要构造指针数组
+
+### 视频优先级提升
+- `video_playback_task` 优先级从 5 → 15，高于唤醒词检测
+
+### 背景图过滤
+- 搜索帧文件时跳过 `background.jpg`
+
+**涉及文件**:
+- `main/apps/image_display/PPACompositor.cpp` — 新增 `ppa_preload_frames()`/`ppa_free_cache()`，`ppa_composite_frame` 改为索引参数
+- `main/apps/image_display/PPACompositor.h` — 更新接口
+- `main/apps/image_display/ImageDisplay.cpp` — 预加载调用+过滤背景图+指针数组修复
+
+**验证结果**: ✅ 成功 — **30+ FPS稳定播放**，唤醒词和对话同时正常工作。
+
+---
+
+## 7. 七牛云OTA接入 + 动态人物延迟显示 + SD卡挂载/显示分离
+
+**日期**: 2026-07-14
+
+**起因**: 
+1. 需要将ESP32-P4板接入七牛云OTA服务（`xrobo.qiniuapi.com`）
+2. 配网阶段动图会遮挡"手机连接热点XXX"界面
+3. 需要在对话模式启动后才展示动态人物和背景
+
+**解决方案**:
+
+### 7.1 七牛云OTA接入
+- 从参考工程 (`xiaozhi-esp32_aicam_1.8.5_MCPpro`) 移植完整 OTA 实现
+- `ota.cc`/`ota.h` 替换：新增 `BuildOtaRequestBody()` 构建七牛云协议请求体
+- 请求体包含：application版本/elf_sha256、board类型/名称、mac_address、uuid、chip_model、flash_size、psram_size、chip_info、partition_table
+- 响应解析：activation、mqtt、websocket、server_time、firmware 五段
+- OTA URL：`https://xrobo.qiniuapi.com/v1/ota/`（在 `Kconfig.projbuild` → `OTU_URL` 配置）
+- 修复 `Upgrade()` 中 `esp_ota_begin` 返回值判断错误（`!= ESP_OK`）
+
+### 7.2 SD卡挂载与显示分离
+**核心教训**：SD卡必须在 WiFi 之前挂载，但**显示必须延迟到对话模式后**。
+
+- **为什么分离**：
+  - ESP32-P4 的 SDMMC 外设被 SD卡（Slot 0, GPIO39-44）和 ESP-Hosted WiFi（Slot 1, GPIO14-19）共享
+  - 配网阶段需要显示"手机连接热点XXX"界面，不能被图片遮挡
+  - 进入对话模式后才展示数字人动画
+
+- **启动顺序**：
+  ```
+  I2C → LCD → 背光 → [SD卡异步挂载] → 显示 → 音频 → WiFi → OTA → 协议 → 对话模式 → [图片/视频加载]
+  ```
+  - `sdcard_init()`（异步任务）：`Application::Start()` 中 display 初始化后立即调用
+  - `image_display_init()` + `video_playback_start(30)`：`MainEventLoop()` 之前，协议启动成功之后
+
+### 7.3 WiFi连接失败处理
+- `wifi_board.cc`：连接失败后 `WifiStation::Stop()` 然后 `EnterWifiConfigMode()` 会因 WiFi 已关闭而崩溃
+- 当前保留原逻辑，但标注此已知问题
+
+**涉及文件**:
+- `main/ota.cc` — 从参考工程完整替换（七牛云协议 BuildOtaRequestBody + Upgrade修复）
+- `main/ota.h` — 新增 `GetFirmwareUrl()`、`StartUpgradeFromUrl()`、`BuildOtaRequestBody()`
+- `main/application.cc` — sdcard_init()移回早期位置；image_display_init()+video_playback_start()延迟到对话模式
+- `main/sd_test.cc` — 重构为 do_sd_mount()/sdcard_mount_sync()/sdcard_init() 三态接口
+- `main/boards/common/wifi_board.cc` — WiFi连接失败后重启进入配网模式
+
+**验证结果**: ✅ 成功 — 七牛云OTA正常通信，配网阶段屏幕干净，联网成功后背景+120帧角色动画自动播放。

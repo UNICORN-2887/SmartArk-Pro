@@ -96,29 +96,62 @@ bool ppa_init(void) {
     return true;
 }
 
+// ─── Frame Cache ───────────────────────────────────────────────
+
+#define MAX_CACHE 200
+static uint8_t *s_jpg_cache[MAX_CACHE];
+static size_t s_jpg_cache_size[MAX_CACHE];
+static int s_cache_count = 0;
+
+void ppa_preload_frames(const char *paths[], int count) {
+    if (count > MAX_CACHE) count = MAX_CACHE;
+    ESP_LOGI(TAG, "Preloading %d frames...", count);
+    for (int i = 0; i < count; i++) {
+        FILE *fp = fopen(paths[i], "rb");
+        if (!fp) { s_jpg_cache[i] = NULL; s_jpg_cache_size[i] = 0; continue; }
+        fseek(fp, 0, SEEK_END);
+        size_t sz = ftell(fp);
+        fseek(fp, 0, SEEK_SET);
+        s_jpg_cache[i] = (uint8_t*)heap_caps_malloc(sz, MALLOC_CAP_SPIRAM);
+        s_jpg_cache_size[i] = sz;
+        if (s_jpg_cache[i]) fread(s_jpg_cache[i], 1, sz, fp);
+        fclose(fp);
+    }
+    s_cache_count = count;
+    ESP_LOGI(TAG, "Preloaded %d frames", count);
+}
+
+void ppa_free_cache(void) {
+    for (int i = 0; i < s_cache_count; i++) {
+        if (s_jpg_cache[i]) free(s_jpg_cache[i]);
+    }
+    s_cache_count = 0;
+}
+
 // ─── Composite & Return Output Buffer ─────────────────────────
 
-uint8_t* ppa_composite_frame(const char *frame_path) {
+uint8_t* ppa_composite_frame(int frame_index) {
     if (!s_fg_buf || !s_comp_buf) {
         ESP_LOGE(TAG, "PPA buffers not initialized");
         return NULL;
     }
 
-    // ── Step 1: JPEG decode foreground ──
-    FILE *fp = fopen(frame_path, "rb");
-    if (!fp) { ESP_LOGE(TAG, "Cannot open %s", frame_path); return NULL; }
-    fseek(fp, 0, SEEK_END);
-    size_t jpg_size = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-    uint8_t *jpg_data = (uint8_t*)heap_caps_malloc(jpg_size, MALLOC_CAP_SPIRAM);
-    fread(jpg_data, 1, jpg_size, fp);
-    fclose(fp);
+    // ── Step 1: JPEG decode foreground from cache or file ──
+    size_t jpg_size;
+    uint8_t *jpg_data;
+
+    if (frame_index >= 0 && frame_index < s_cache_count && s_jpg_cache[frame_index]) {
+        jpg_size = s_jpg_cache_size[frame_index];
+        jpg_data = s_jpg_cache[frame_index];
+    } else {
+        ESP_LOGE(TAG, "Frame %d not cached", frame_index);
+        return NULL;
+    }
 
     jpeg_decode_memory_alloc_cfg_t tx_cfg = { .buffer_direction = JPEG_DEC_ALLOC_INPUT_BUFFER };
     size_t tx_size;
     uint8_t *tx_buf = (uint8_t*)jpeg_alloc_decoder_mem(jpg_size, &tx_cfg, &tx_size);
     memcpy(tx_buf, jpg_data, jpg_size);
-    free(jpg_data);
 
     if (!s_jpg_handle) {
         jpeg_new_decoder_engine(&s_jpg_eng_cfg, &s_jpg_handle);

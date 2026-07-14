@@ -1,387 +1,416 @@
-Build:Jul 10 2024
-rst:0x17 (CHIP_USB_UART_RESET),boot:0xc (SPI_FAST_FLASH_BOOT)
-Core0 Saved PC:0x4ff0435a
---- 0x4ff0435a: esp_cpu_wait_for_intr at E:/Passport/esp32/v5.5.1/esp-idf/components/esp_hw_support/cpu.c:57
-Core1 Saved PC:0x4ff0435a
---- 0x4ff0435a: esp_cpu_wait_for_intr at E:/Passport/esp32/v5.5.1/esp-idf/components/esp_hw_support/cpu.c:57
-SPI mode:DIO, clock div:1
-load:0x4ff33ce0,len:0x5a0
-load:0x4ff29ed0,len:0xca0
-load:0x4ff2cbd0,len:0x3160
-entry 0x4ff29ed0
-I (43) hex_psram: vendor id    : 0x0d (AP)
-I (44) hex_psram: Latency      : 0x01 (Fixed)        
-I (44) hex_psram: DriveStr.    : 0x00 (25 Ohm)       
-I (45) hex_psram: dev id       : 0x03 (generation 4) 
-I (49) hex_psram: density      : 0x07 (256 Mbit)
-I (53) hex_psram: good-die     : 0x06 (Pass)
-I (57) hex_psram: SRF          : 0x02 (Slow Refresh) 
-I (62) hex_psram: BurstType    : 0x00 ( Wrap)        
-I (66) hex_psram: BurstLen     : 0x03 (2048 Byte)    
-I (71) hex_psram: BitMode      : 0x01 (X16 Mode)     
-I (75) hex_psram: Readlatency  : 0x04 (14 cycles@Fixed)
-I (80) hex_psram: DriveStrength: 0x00 (1/1)
-I (84) MSPI DQS: tuning success, best phase id is 0
-I (256) MSPI DQS: tuning success, best delayline id is 17
-I esp_psram: Found 32MB PSRAM device
-I esp_psram: Speed: 200MHz
-I (393) mmu_psram: .rodata xip on psram
-I (486) mmu_psram: .text xip on psram
-I (487) hex_psram: psram CS IO is dedicated
-I (488) cpu_start: Multicore app
-I (497) cpu_start: Pro cpu start user code
-I (497) cpu_start: cpu freq: 360000000 Hz
-I (498) app_init: Application information:
-I (498) app_init: Project name:     xiaozhi
-I (501) app_init: App version:      1.8.2
-I (505) app_init: Compile time:     Jul 13 2026 21:41:57
-I (510) app_init: ELF file SHA256:  7809be2bc...     
-I (514) app_init: ESP-IDF:          v5.5.1-dirty
-I (519) efuse_init: Min chip rev:     v0.1
-I (523) efuse_init: Max chip rev:     v1.99
-I (527) efuse_init: Chip rev:         v1.3
-I (530) heap_init: Initializing. RAM available for dynamic allocation:
-I (537) heap_init: At 4FF1D350 len 0001DC70 (119 KiB): RAM
-I (542) heap_init: At 4FF3AFC0 len 00004BF0 (18 KiB): RAM
-I (547) heap_init: At 4FF56300 len 00049D00 (295 KiB): RAM
-I (552) heap_init: At 501080A0 len 00007F60 (31 KiB): RTCRAM
-I (558) heap_init: At 30100068 len 00001F98 (7 KiB): TCM
-I (563) esp_psram: Adding pool of 28672K of PSRAM memory to heap allocator
-I (569) esp_psram: Adding pool of 9K of PSRAM memory gap generated due to end address alignment of irom to the heap allocator
-I (580) esp_psram: Adding pool of 59K of PSRAM memory gap generated due to end address alignment of drom to the heap allocator
-W (592) spi_flash: Detected boya flash chip but using generic driver. For optimal functionality, enable `SPI_FLASH_SUPPORT_BOYA_CHIP` in menuconfig
-I (604) spi_flash: detected chip: generic
-I (608) spi_flash: flash io: qio
-I (611) host_init: ESP Hosted : Host chip_ip[18]     
-I (615) H_API: ESP-Hosted starting. Hosted_Tasks: prio:23, stack: 5120 RPC_task_stack: 5120
-I (624) H_API: ** add_esp_wifi_remote_channels **    
-I (629) H_SDIO_DRV: sdio_data_to_rx_buf_task started
-I (633) main_task: Started on CPU0
-I (636) esp_psram: Reserving pool of 48K of internal memory for DMA/internal allocations
-I (643) main_task: Calling app_main()
-I (650) Board: UUID=b9cfc8c8-87b4-4ebd-94c5-db804a346209 SKU=guition-jc4880p443
-I (654) button: IoT Button Version: 4.1.3
-I (658) jc4880p443: MIPI DSI PHY Powered on
-I (663) jc4880p443: Install MIPI DSI LCD control panel
-I (666) st7701: version: 1.1.3
-I (707) st7701_mipi: LCD ID: FF FF FF
-I (707) st7701_mipi:  st7701->madctl_val: 0x0, st7701->colmod_val: 0x55
-I (847) Display: Power management not supported
-I (847) LcdDisplay: Turning display on
-I (847) LcdDisplay: Initialize LVGL library
-I (847) LcdDisplay: Initialize LVGL port
-I (851) LVGL: Starting LVGL task
-I (854) LcdDisplay: Adding LCD display
-E (858) lcd_panel: esp_lcd_panel_swap_xy(50): swap_xy is not supported by this panel
-I (874) Backlight: Set brightness to 75
-I (874) Application: STATE: starting
-I (875) SD_TEST: Initializing SD card via SDMMC...   
-I (876) SD_TEST: Pins: CLK=43, CMD=44, D0=39, D1=40, D2=41, D3=42
-W (882) ldo: The voltage value 0 is out of the recommended range [500, 2700]
-I (889) SD_TEST: LDO power control initialized successfully
-I (895) Es8311AudioCodec: Duplex channels created    
-I (915) ES8311: Work in Slave mode
-I (918) Es8311AudioCodec: Es8311AudioCodec initialized
-I (918) AudioCodec: Set input enable to true
-I (918) I2S_IF: channel mode 0 bits:16/16 channel:2 mask:1
-W (921) i2s_common: dma frame num is adjusted to 256 to align the dma buffer with 64, bufsize = 512       
-I (930) I2S_IF: STD Mode 1 bits:16/16 channel:2 sample_rate:16000 mask:1
-I (936) I2S_IF: channel mode 0 bits:16/16 channel:2 mask:1
-W (942) i2s_common: dma frame num is adjusted to 256 to align the dma buffer with 64, bufsize = 512       
-I (945) SD_TEST: SD card mounted successfully!       
+E (862) lcd_panel: esp_lcd_panel_swap_xy(50): swap_xy is not supported by this panel
+I (878) Backlight: Set brightness to 75
+I (878) Application: STATE: starting
+I (879) SD_TEST: Initializing SD card via SDMMC...
+W (880) ldo: The voltage value 0 is out of the recommended range [500, 2700]
+I (888) Es8311AudioCodec: Duplex channels created
+I (896) ES8311: Work in Slave mode
+I (899) Es8311AudioCodec: Es8311AudioCodec initialized
+I (899) AudioCodec: Set input enable to true
+I (915) I2S_IF: channel mode 0 bits:16/16 channel:2 mask:1
+W (915) i2s_common: dma frame num is adjusted to 256 to align the dma buffer with 64, bufsize = 512
+I (918) I2S_IF: STD Mode 1 bits:16/16 channel:2 sample_rate:16000 mask:1
+I (925) I2S_IF: channel mode 0 bits:16/16 channel:2 mask:1
+W (930) i2s_common: dma frame num is adjusted to 256 to align the dma buffer with 64, bufsize = 512
+I (936) SD_TEST: SD card mounted!
 Name: SD16G
 Type: SDHC
-Speed: 20.00 MHz (limit: 20.00 MHz)
+Speed: 400.00 kHz (limit: 400.00 kHz)
 Size: luMB
 CSD: ver=2, sector_size=512, capacity=61157376 read_bl_len=9
 SSR: bus_width=4
-I (968) SD_TEST: Listing /sdcard directory:
-I (972) I2S_IF: STD Mode 0 bits:16/16 channel:2 sample_rate:16000 mask:1
-I (972) SD_TEST:   SYSTEM~1
-I (981) SD_TEST:   FEAST.XI
-I (983) SD_TEST:   FRONT1.WAV
-I (986) SD_TEST:   FRONT2.WAV
-I (989) SD_TEST:   FRONT3.WAV
-I (991) SD_TEST:   FRONT4.WAV
-I (994) SD_TEST:   LOGINC~1.XI
-I (997) SD_TEST:   SUNRISE.WAV
-I (1000) SD_TEST:   ARK
-I (1002) SD_TEST:   HAPPY003.JPG
-I (1005) SD_TEST:   HAPPY001.JPG
-I (1008) SD_TEST:   HAPPY002.JPG
-I (1011) SD_TEST:   HAPPY120.JPG
-I (1013) SD_TEST:   HAPPY004.JPG
-I (1016) SD_TEST:   HAPPY005.JPG
-I (1019) SD_TEST:   HAPPY006.JPG
-I (1022) SD_TEST:   HAPPY007.JPG
-I (1025) SD_TEST:   HAPPY008.JPG
-I (1028) SD_TEST:   HAPPY009.JPG
-I (1032) SD_TEST:   HAPPY010.JPG
-I (1034) SD_TEST:   HAPPY011.JPG
-I (1037) SD_TEST:   HAPPY012.JPG
-I (1040) SD_TEST:   HAPPY013.JPG
-I (1043) SD_TEST:   HAPPY014.JPG
-I (1046) SD_TEST:   HAPPY015.JPG
-I (1049) SD_TEST:   HAPPY016.JPG
-I (1052) SD_TEST:   HAPPY017.JPG
-I (1055) SD_TEST:   HAPPY018.JPG
-I (1058) SD_TEST:   HAPPY019.JPG
-I (1061) SD_TEST:   HAPPY020.JPG
-I (1064) SD_TEST:   HAPPY021.JPG
-I (1067) SD_TEST:   HAPPY022.JPG
-I (1070) SD_TEST:   HAPPY023.JPG
-I (1072) SD_TEST:   HAPPY024.JPG
-I (1075) SD_TEST:   HAPPY025.JPG
-I (1079) SD_TEST:   HAPPY026.JPG
-I (1081) SD_TEST:   HAPPY027.JPG
-I (1084) SD_TEST:   HAPPY028.JPG
-I (1087) SD_TEST:   HAPPY029.JPG
-I (1090) SD_TEST:   HAPPY030.JPG
-I (1093) SD_TEST:   HAPPY031.JPG
-I (1096) SD_TEST:   HAPPY032.JPG
-I (1099) SD_TEST:   HAPPY033.JPG
-I (1102) SD_TEST:   HAPPY034.JPG
-I (1105) SD_TEST:   HAPPY035.JPG
-I (1108) SD_TEST:   HAPPY036.JPG
-I (1111) SD_TEST:   HAPPY037.JPG
-I (1114) SD_TEST:   HAPPY038.JPG
-I (1117) SD_TEST:   HAPPY039.JPG
-I (1120) SD_TEST:   HAPPY040.JPG
-I (1123) SD_TEST:   HAPPY041.JPG
-I (1126) SD_TEST:   HAPPY042.JPG
-I (1129) SD_TEST:   HAPPY043.JPG
-I (1132) SD_TEST:   HAPPY044.JPG
-I (1134) SD_TEST:   HAPPY045.JPG
-I (1137) SD_TEST:   HAPPY046.JPG
-I (1140) SD_TEST:   HAPPY047.JPG
-I (1143) SD_TEST:   HAPPY048.JPG
-I (1146) SD_TEST:   HAPPY049.JPG
-I (1149) SD_TEST:   HAPPY050.JPG
-I (1152) SD_TEST:   HAPPY051.JPG
-I (1155) SD_TEST:   HAPPY052.JPG
-I (1158) SD_TEST:   HAPPY053.JPG
-I (1161) SD_TEST:   HAPPY054.JPG
-I (1164) SD_TEST:   HAPPY055.JPG
-I (1167) SD_TEST:   HAPPY056.JPG
-I (1170) SD_TEST:   HAPPY057.JPG
-I (1173) SD_TEST:   HAPPY058.JPG
-I (1176) SD_TEST:   HAPPY059.JPG
-I (1179) SD_TEST:   HAPPY060.JPG
-I (1182) SD_TEST:   HAPPY061.JPG
-I (1185) SD_TEST:   HAPPY062.JPG
-I (1188) SD_TEST:   HAPPY063.JPG
-I (1191) SD_TEST:   HAPPY064.JPG
-I (1193) SD_TEST:   HAPPY065.JPG
-I (1196) SD_TEST:   HAPPY066.JPG
-I (1199) SD_TEST:   HAPPY067.JPG
-I (1202) SD_TEST:   HAPPY068.JPG
-I (1205) SD_TEST:   HAPPY069.JPG
-I (1208) SD_TEST:   HAPPY070.JPG
-I (1211) SD_TEST:   HAPPY071.JPG
-I (1214) SD_TEST:   HAPPY072.JPG
-I (1217) SD_TEST:   HAPPY073.JPG
-I (1220) SD_TEST:   HAPPY074.JPG
-I (1223) SD_TEST:   HAPPY075.JPG
-I (1226) SD_TEST:   HAPPY076.JPG
-I (1229) SD_TEST:   HAPPY077.JPG
-I (1232) SD_TEST:   HAPPY078.JPG
-I (1235) SD_TEST:   HAPPY079.JPG
-I (1238) SD_TEST:   HAPPY080.JPG
-I (1241) SD_TEST:   HAPPY081.JPG
-I (1244) SD_TEST:   HAPPY082.JPG
-I (1247) SD_TEST:   HAPPY083.JPG
-I (1250) SD_TEST:   HAPPY084.JPG
-I (1253) SD_TEST:   HAPPY085.JPG
-I (1255) SD_TEST:   HAPPY086.JPG
-I (1258) SD_TEST:   HAPPY087.JPG
-I (1261) SD_TEST:   HAPPY088.JPG
-I (1264) SD_TEST:   HAPPY089.JPG
-I (1268) SD_TEST:   HAPPY090.JPG
-I (1270) SD_TEST:   HAPPY091.JPG
-I (1273) SD_TEST:   HAPPY092.JPG
-I (1276) SD_TEST:   HAPPY093.JPG
-I (1279) SD_TEST:   HAPPY094.JPG
-I (1282) SD_TEST:   HAPPY095.JPG
-I (1285) SD_TEST:   HAPPY096.JPG
-I (1288) SD_TEST:   HAPPY097.JPG
-I (1291) SD_TEST:   HAPPY098.JPG
-I (1294) SD_TEST:   HAPPY099.JPG
-I (1297) SD_TEST:   HAPPY100.JPG
-I (1300) SD_TEST:   HAPPY101.JPG
-I (1303) SD_TEST:   HAPPY102.JPG
-I (1306) SD_TEST:   HAPPY103.JPG
-I (1309) SD_TEST:   HAPPY104.JPG
-I (1312) SD_TEST:   HAPPY105.JPG
-I (1315) SD_TEST:   HAPPY106.JPG
-I (1317) SD_TEST:   HAPPY107.JPG
-I (1320) SD_TEST:   HAPPY108.JPG
-I (1323) SD_TEST:   HAPPY109.JPG
-I (1326) SD_TEST:   HAPPY110.JPG
-I (1329) SD_TEST:   HAPPY111.JPG
-I (1332) SD_TEST:   HAPPY112.JPG
-I (1335) SD_TEST:   HAPPY113.JPG
-I (1338) SD_TEST:   HAPPY114.JPG
-I (1341) SD_TEST:   HAPPY115.JPG
-I (1344) SD_TEST:   HAPPY116.JPG
-I (1347) SD_TEST:   HAPPY117.JPG
-I (1350) SD_TEST:   HAPPY118.JPG
-I (1353) SD_TEST:   HAPPY119.JPG
-I (1364) SD_TEST:   BACKGR~1.JPG
-I (1364) AppImageDisplay: Initializing image display...
-I (1384) PPACompositor: PPA BLEND client registered
-E (1384) PPACompositor: Cannot open /sdcard/background.jpg
-E (1385) AppImageDisplay: Background load failed, continuing without bg
-I (1390) AppImageDisplay: Found image: HAPPY003.JPG  
-I (1394) AppImageDisplay: Found image: HAPPY001.JPG  
-I (1399) AppImageDisplay: Found image: HAPPY002.JPG
-I (1403) AppImageDisplay: Found image: HAPPY120.JPG  
-I (1408) AppImageDisplay: Found image: HAPPY004.JPG  
-I (1412) AppImageDisplay: Found image: HAPPY005.JPG
-I (1417) AppImageDisplay: Found image: HAPPY006.JPG  
-I (1422) AppImageDisplay: Found image: HAPPY007.JPG  
-I (1426) AppImageDisplay: Found image: HAPPY008.JPG  
-I (1431) AppImageDisplay: Found image: HAPPY009.JPG
-I (1436) AppImageDisplay: Found image: HAPPY010.JPG  
-I (1440) AppImageDisplay: Found image: HAPPY011.JPG  
-I (1445) AppImageDisplay: Found image: HAPPY012.JPG
-I (1449) AppImageDisplay: Found image: HAPPY013.JPG  
-I (1454) AppImageDisplay: Found image: HAPPY014.JPG  
-I (1458) AppImageDisplay: Found image: HAPPY015.JPG
-I (1463) AppImageDisplay: Found image: HAPPY016.JPG  
-I (1468) AppImageDisplay: Found image: HAPPY017.JPG  
-I (1472) AppImageDisplay: Found image: HAPPY018.JPG  
-I (1477) AppImageDisplay: Found image: HAPPY019.JPG
-I (1481) AppImageDisplay: Found image: HAPPY020.JPG  
-I (1486) AppImageDisplay: Found image: HAPPY021.JPG  
-I (1491) AppImageDisplay: Found image: HAPPY022.JPG
-I (1495) AppImageDisplay: Found image: HAPPY023.JPG  
-I (1500) AppImageDisplay: Found image: HAPPY024.JPG  
-I (1504) AppImageDisplay: Found image: HAPPY025.JPG  
-I (1509) AppImageDisplay: Found image: HAPPY026.JPG
-I (1514) AppImageDisplay: Found image: HAPPY027.JPG  
-I (1518) AppImageDisplay: Found image: HAPPY028.JPG  
-I (1523) AppImageDisplay: Found image: HAPPY029.JPG
-I (1527) AppImageDisplay: Found image: HAPPY030.JPG  
-I (1532) AppImageDisplay: Found image: HAPPY031.JPG  
-I (1537) AppImageDisplay: Found image: HAPPY032.JPG  
-I (1541) AppImageDisplay: Found image: HAPPY033.JPG
-I (1546) AppImageDisplay: Found image: HAPPY034.JPG  
-I (1550) AppImageDisplay: Found image: HAPPY035.JPG  
-I (1555) AppImageDisplay: Found image: HAPPY036.JPG
-I (1560) AppImageDisplay: Found image: HAPPY037.JPG  
-I (1564) AppImageDisplay: Found image: HAPPY038.JPG  
-I (1569) AppImageDisplay: Found image: HAPPY039.JPG
-I (1573) AppImageDisplay: Found image: HAPPY040.JPG  
-I (1578) AppImageDisplay: Found image: HAPPY041.JPG  
-I (1583) AppImageDisplay: Found image: HAPPY042.JPG  
-I (1587) AppImageDisplay: Found image: HAPPY043.JPG  
-I (1592) AppImageDisplay: Found image: HAPPY044.JPG  
-I (1596) AppImageDisplay: Found image: HAPPY045.JPG  
-I (1601) AppImageDisplay: Found image: HAPPY046.JPG
-I (1606) AppImageDisplay: Found image: HAPPY047.JPG  
-I (1610) AppImageDisplay: Found image: HAPPY048.JPG  
-I (1615) AppImageDisplay: Found image: HAPPY049.JPG
-I (1619) AppImageDisplay: Found image: HAPPY050.JPG  
-I (1624) AppImageDisplay: Found image: HAPPY051.JPG  
-I (1629) AppImageDisplay: Found image: HAPPY052.JPG  
-I (1633) AppImageDisplay: Found image: HAPPY053.JPG
-I (1638) AppImageDisplay: Found image: HAPPY054.JPG  
-I (1642) AppImageDisplay: Found image: HAPPY055.JPG  
-I (1647) AppImageDisplay: Found image: HAPPY056.JPG
-I (1652) AppImageDisplay: Found image: HAPPY057.JPG  
-I (1657) AppImageDisplay: Found image: HAPPY058.JPG  
-I (1661) AppImageDisplay: Found image: HAPPY059.JPG
-I (1665) AppImageDisplay: Found image: HAPPY060.JPG  
-I (1670) AppImageDisplay: Found image: HAPPY061.JPG  
-I (1675) AppImageDisplay: Found image: HAPPY062.JPG  
-I (1679) AppImageDisplay: Found image: HAPPY063.JPG
-I (1684) AppImageDisplay: Found image: HAPPY064.JPG  
-I (1688) AppImageDisplay: Found image: HAPPY065.JPG  
-I (1693) AppImageDisplay: Found image: HAPPY066.JPG
-I (1698) AppImageDisplay: Found image: HAPPY067.JPG  
-I (1702) AppImageDisplay: Found image: HAPPY068.JPG  
-I (1707) AppImageDisplay: Found image: HAPPY069.JPG  
-I (1711) AppImageDisplay: Found image: HAPPY070.JPG  
-I (1716) AppImageDisplay: Found image: HAPPY071.JPG  
-I (1721) AppImageDisplay: Found image: HAPPY072.JPG  
-I (1725) AppImageDisplay: Found image: HAPPY073.JPG
-I (1730) AppImageDisplay: Found image: HAPPY074.JPG  
-I (1734) AppImageDisplay: Found image: HAPPY075.JPG  
-I (1739) AppImageDisplay: Found image: HAPPY076.JPG
-I (1744) AppImageDisplay: Found image: HAPPY077.JPG  
-I (1748) AppImageDisplay: Found image: HAPPY078.JPG  
-I (1753) AppImageDisplay: Found image: HAPPY079.JPG
-I (1757) AppImageDisplay: Found image: HAPPY080.JPG  
-I (1762) AppImageDisplay: Found image: HAPPY081.JPG  
-I (1767) AppImageDisplay: Found image: HAPPY082.JPG  
-I (1771) AppImageDisplay: Found image: HAPPY083.JPG
-I (1776) AppImageDisplay: Found image: HAPPY084.JPG  
-I (1780) AppImageDisplay: Found image: HAPPY085.JPG  
-I (1785) AppImageDisplay: Found image: HAPPY086.JPG
-I (1790) AppImageDisplay: Found image: HAPPY087.JPG  
-I (1794) AppImageDisplay: Found image: HAPPY088.JPG  
-I (1799) AppImageDisplay: Found image: HAPPY089.JPG  
-I (1804) AppImageDisplay: Found image: HAPPY090.JPG
-I (1808) AppImageDisplay: Found image: HAPPY091.JPG  
-I (1813) AppImageDisplay: Found image: HAPPY092.JPG  
-I (1817) AppImageDisplay: Found image: HAPPY093.JPG
-I (1822) AppImageDisplay: Found image: HAPPY094.JPG  
-I (1826) AppImageDisplay: Found image: HAPPY095.JPG  
-I (1831) AppImageDisplay: Found image: HAPPY096.JPG  
-I (1836) AppImageDisplay: Found image: HAPPY097.JPG
-I (1840) AppImageDisplay: Found image: HAPPY098.JPG  
-I (1845) AppImageDisplay: Found image: HAPPY099.JPG  
-I (1849) AppImageDisplay: Found image: HAPPY100.JPG
-I (1854) AppImageDisplay: Found image: HAPPY101.JPG  
-I (1859) AppImageDisplay: Found image: HAPPY102.JPG  
-I (1863) AppImageDisplay: Found image: HAPPY103.JPG
-I (1868) AppImageDisplay: Found image: HAPPY104.JPG  
-I (1872) AppImageDisplay: Found image: HAPPY105.JPG  
-I (1877) AppImageDisplay: Found image: HAPPY106.JPG  
-I (1882) AppImageDisplay: Found image: HAPPY107.JPG
-I (1886) AppImageDisplay: Found image: HAPPY108.JPG  
-I (1891) AppImageDisplay: Found image: HAPPY109.JPG  
-I (1895) AppImageDisplay: Found image: HAPPY110.JPG
-I (1900) AppImageDisplay: Found image: HAPPY111.JPG  
-I (1905) AppImageDisplay: Found image: HAPPY112.JPG  
-I (1909) AppImageDisplay: Found image: HAPPY113.JPG
-I (1914) AppImageDisplay: Found image: HAPPY114.JPG  
-I (1918) AppImageDisplay: Found image: HAPPY115.JPG  
-I (1923) AppImageDisplay: Found image: HAPPY116.JPG  
-I (1928) AppImageDisplay: Found image: HAPPY117.JPG
-I (1932) AppImageDisplay: Found image: HAPPY118.JPG  
-I (1937) AppImageDisplay: Found image: HAPPY119.JPG  
-I (1942) Adev_Codec: Open codec device OK
-I (1946) AudioCodec: Set output enable to true       
-I (1949) AudioCodec: Audio codec started
-I (1950) AppImageDisplay: Found image: BACKGR~1.JPG  
-I (1957) AppImageDisplay: Total images found: 121
-E (1962) PPACompositor: PPA not initialized
-E (1966) AppImageDisplay: PPA composite failed for: /sdcard/HAPPY003.JPG
-I (1974) Application: STATE: configuring
-I (1977) DnsServer: Starting DNS server
-I (1980) transport: Attempt connection with slave: retry[0]
-W (1985) H_SDIO_DRV: Reset slave using GPIO[54]      
-I (1989) os_wrapper_esp: GPIO [54] configured
-I (3513) sdio_wrapper: SDIO master: Slot 1, Data-Lines: 4-bit Freq(KHz)[40000 KHz]
-I (3513) sdio_wrapper: GPIOs: CLK[18] CMD[19] D0[14] D1[15] D2[16] D3[17] Slave_Reset[54]
-I (3517) sdio_wrapper: Queues: Tx[20] Rx[20] SDIO-Rx-Mode[1]
-I (3556) sdio_wrapper: Function 0 Blocksize: 512
-I (3556) sdio_wrapper: Function 1 Blocksize: 512     
-I (3656) H_SDIO_DRV: Card init success, TRANSPORT_RX_ACTIVE
-I (3656) transport: set_transport_state: 1
-I (3656) transport: Waiting for esp_hosted slave to be ready
-I (3729) H_SDIO_DRV: SDIO Host operating in STREAMING MODE
-I (3729) H_SDIO_DRV: Open data path at slave
-I (3729) H_SDIO_DRV: Starting SDIO process rx task   
-I (3756) H_SDIO_DRV: Received ESP_PRIV_IF type message
-I (3757) transport: Received INIT event from ESP32 peripheral
-I (3757) transport: EVENT: 12
-I (3758) transport: Identified slave [esp32c6]
-I (3763) transport: EVENT: 11
-I (3765) transport: capabilities: 0xd
-I (3769) transport: Features supported are:
-I (3773) transport:      * WLAN
-I (3775) transport:        - HCI over SDIO
-I (3779) transport:        - BLE only
-I (3782) transport: EVENT: 13
+I (955) I2S_IF: STD Mode 0 bits:16/16 channel:2 sample_rate:16000 mask:1
+I (959) SD_TEST:   System Volume Information
+I (965) SD_TEST:   feast.xi
+I (968) SD_TEST:   front1.wav
+I (971) SD_TEST:   front2.wav
+I (973) SD_TEST:   front3.wav
+I (976) SD_TEST:   front4.wav
+I (979) SD_TEST:   logincheck.xi
+I (982) SD_TEST:   sunrise.wav
+I (988) SD_TEST:   Ark
+I (988) SD_TEST:   happy003.jpg
+I (989) SD_TEST:   happy001.jpg
+I (992) SD_TEST:   happy002.jpg
+I (995) SD_TEST:   happy120.jpg
+I (998) SD_TEST:   happy004.jpg
+I (1001) SD_TEST:   happy005.jpg
+I (1004) SD_TEST:   happy006.jpg
+I (1007) SD_TEST:   happy007.jpg
+I (1010) SD_TEST:   happy008.jpg
+I (1013) SD_TEST:   happy009.jpg
+I (1019) SD_TEST:   happy010.jpg
+I (1019) SD_TEST:   happy011.jpg
+I (1021) SD_TEST:   happy012.jpg
+I (1024) SD_TEST:   happy013.jpg
+I (1027) SD_TEST:   happy014.jpg
+I (1030) SD_TEST:   happy015.jpg
+I (1033) SD_TEST:   happy016.jpg
+I (1036) SD_TEST:   happy017.jpg
+I (1039) SD_TEST:   happy018.jpg
+I (1042) SD_TEST:   happy019.jpg
+I (1045) SD_TEST:   happy020.jpg
+I (1048) SD_TEST:   happy021.jpg
+I (1051) SD_TEST:   happy022.jpg
+I (1054) SD_TEST:   happy023.jpg
+I (1057) SD_TEST:   happy024.jpg
+I (1060) SD_TEST:   happy025.jpg
+I (1066) SD_TEST:   happy026.jpg
+I (1066) SD_TEST:   happy027.jpg
+I (1069) SD_TEST:   happy028.jpg
+I (1072) SD_TEST:   happy029.jpg
+I (1075) SD_TEST:   happy030.jpg
+I (1078) SD_TEST:   happy031.jpg
+I (1081) SD_TEST:   happy032.jpg
+I (1083) SD_TEST:   happy033.jpg
+I (1086) SD_TEST:   happy034.jpg
+I (1089) SD_TEST:   happy035.jpg
+I (1092) SD_TEST:   happy036.jpg
+I (1095) SD_TEST:   happy037.jpg
+I (1098) SD_TEST:   happy038.jpg
+I (1101) SD_TEST:   happy039.jpg
+I (1104) SD_TEST:   happy040.jpg
+I (1107) SD_TEST:   happy041.jpg
+I (1113) SD_TEST:   happy042.jpg
+I (1114) SD_TEST:   happy043.jpg
+I (1116) SD_TEST:   happy044.jpg
+I (1119) SD_TEST:   happy045.jpg
+I (1122) SD_TEST:   happy046.jpg
+I (1125) SD_TEST:   happy047.jpg
+I (1128) SD_TEST:   happy048.jpg
+I (1131) SD_TEST:   happy049.jpg
+I (1134) SD_TEST:   happy050.jpg
+I (1137) SD_TEST:   happy051.jpg
+I (1140) SD_TEST:   happy052.jpg
+I (1142) SD_TEST:   happy053.jpg
+I (1145) SD_TEST:   happy054.jpg
+I (1148) SD_TEST:   happy055.jpg
+I (1151) SD_TEST:   happy056.jpg
+I (1154) SD_TEST:   happy057.jpg
+I (1158) Adev_Codec: Open codec device OK
+I (1161) SD_TEST:   happy058.jpg
+I (1164) SD_TEST:   happy059.jpg
+I (1167) SD_TEST:   happy060.jpg
+I (1170) SD_TEST:   happy061.jpg
+I (1173) SD_TEST:   happy062.jpg
+I (1176) SD_TEST:   happy063.jpg
+I (1179) SD_TEST:   happy064.jpg
+I (1182) SD_TEST:   happy065.jpg
+I (1185) SD_TEST:   happy066.jpg
+I (1188) SD_TEST:   happy067.jpg
+I (1190) SD_TEST:   happy068.jpg
+I (1193) SD_TEST:   happy069.jpg
+I (1196) SD_TEST:   happy070.jpg
+I (1199) SD_TEST:   happy071.jpg
+I (1202) SD_TEST:   happy072.jpg
+I (1205) SD_TEST:   happy073.jpg
+I (1209) AudioCodec: Set output enable to true
+I (1212) SD_TEST:   happy074.jpg
+I (1215) SD_TEST:   happy075.jpg
+I (1218) SD_TEST:   happy076.jpg
+I (1221) SD_TEST:   happy077.jpg
+I (1224) SD_TEST:   happy078.jpg
+I (1227) SD_TEST:   happy079.jpg
+I (1230) SD_TEST:   happy080.jpg
+I (1233) SD_TEST:   happy081.jpg
+I (1236) SD_TEST:   happy082.jpg
+I (1239) SD_TEST:   happy083.jpg
+I (1242) SD_TEST:   happy084.jpg
+I (1245) SD_TEST:   happy085.jpg
+I (1248) SD_TEST:   happy086.jpg
+I (1251) SD_TEST:   happy087.jpg
+I (1254) SD_TEST:   happy088.jpg
+I (1257) SD_TEST:   happy089.jpg
+I (1260) AudioCodec: Audio codec started
+I (1263) SD_TEST:   happy090.jpg
+I (1266) SD_TEST:   happy091.jpg
+I (1269) SD_TEST:   happy092.jpg
+I (1272) SD_TEST:   happy093.jpg
+I (1275) SD_TEST:   happy094.jpg
+I (1278) SD_TEST:   happy095.jpg
+I (1281) SD_TEST:   happy096.jpg
+I (1284) SD_TEST:   happy097.jpg
+I (1287) SD_TEST:   happy098.jpg
+I (1290) SD_TEST:   happy099.jpg
+I (1293) SD_TEST:   happy100.jpg
+I (1296) SD_TEST:   happy101.jpg
+I (1299) SD_TEST:   happy102.jpg
+I (1302) SD_TEST:   happy103.jpg
+I (1305) SD_TEST:   happy104.jpg
+I (1307) SD_TEST:   happy105.jpg
+I (1313) transport: Attempt connection with slave: retry[0]
+I (1314) SD_TEST:   happy106.jpg
+I (1319) SD_TEST:   happy107.jpg
+I (1322) SD_TEST:   happy108.jpg
+I (1325) SD_TEST:   happy109.jpg
+I (1328) SD_TEST:   happy110.jpg
+I (1330) SD_TEST:   happy111.jpg
+I (1333) SD_TEST:   happy112.jpg
+I (1336) SD_TEST:   happy113.jpg
+I (1339) SD_TEST:   happy114.jpg
+I (1342) SD_TEST:   happy115.jpg
+I (1345) SD_TEST:   happy116.jpg
+I (1348) SD_TEST:   happy117.jpg
+I (1351) SD_TEST:   happy118.jpg
+I (1354) SD_TEST:   happy119.jpg
+W (1357) H_SDIO_DRV: Reset slave using GPIO[54]
+I (1361) os_wrapper_esp: GPIO [54] configured
+I (1436) SD_TEST:   background.jpg
+I (2885) sdio_wrapper: SDIO master: Slot 1, Data-Lines: 4-bit Freq(KHz)[40000 KHz]
+I (2885) sdio_wrapper: GPIOs: CLK[18] CMD[19] D0[14] D1[15] D2[16] D3[17] Slave_Reset[54]
+I (2889) sdio_wrapper: Queues: Tx[20] Rx[20] SDIO-Rx-Mode[1]
+I (2928) sdio_wrapper: Function 0 Blocksize: 512
+I (2928) sdio_wrapper: Function 1 Blocksize: 512
+I (3028) H_SDIO_DRV: Card init success, TRANSPORT_RX_ACTIVE
+I (3028) transport: set_transport_state: 1
+I (3028) transport: Waiting for esp_hosted slave to be ready
+I (3033) H_SDIO_DRV: SDIO Host operating in STREAMING MODE
+I (3033) H_SDIO_DRV: Starting SDIO process rx task
+I (3036) H_SDIO_DRV: Open data path at slave
+I (3072) H_SDIO_DRV: Received ESP_PRIV_IF type message
+I (3072) transport: Received INIT event from ESP32 peripheral
+I (3073) transport: EVENT: 12
+I (3074) transport: Identified slave [esp32c6]
+I (3078) transport: EVENT: 11
+I (3081) transport: capabilities: 0xd
+I (3085) transport: Features supported are:
+I (3088) transport:      * WLAN
+I (3091) transport:        - HCI over SDIO
+I (3095) transport:        - BLE only
+I (3098) transport: EVENT: 13
+W (3100) transport: Version mismatch: Host [2.12.0] > Co-proc [2.3.0] ==> Upgrade co-proc to avoid RPC timeouts
+I (3110) transport: ESP board type is : 13
+
+I (3114) transport: Base transport is set-up, TRANSPORT_TX_ACTIVE
+I (3120) H_API: Transport active
+I (3123) transport: Slave chip Id[12]
+I (3127) transport: raw_tp_dir[-], flow_ctrl: low[60] high[80]
+I (3132) transport: transport_delayed_init
+I (3136) esp_cli: Registering command: crash
+I (3140) esp_cli: Registering command: reboot
+I (3144) esp_cli: Registering command: mem-dump
+I (3148) esp_cli: Registering command: task-dump
+I (3153) esp_cli: Registering command: cpu-dump
+I (3157) esp_cli: Registering command: heap-trace
+I (3161) esp_cli: Registering command: sock-dump
+I (3166) esp_cli: Registering command: host-power-save
+I (3171) hci_stub_drv: Host BT Support: Disabled
+I (3175) H_SDIO_DRV: Received INIT event
+I (3178) H_SDIO_DRV: Event type: 0x22
+I (3182) H_SDIO_DRV: Write thread started
+I (3847) RPC_WRAP: ESP Event: wifi station started
+I (3847) rpc_req: Scan start Req
+
+I (3880) RPC_WRAP: ESP Event: wifi station started
+I (3884) RPC_WRAP: ESP Event: StaScanDone
+I (3893) wifi: Wait for next scan
+I (3904) rpc_req: Scan start Req
+
+W (3918) rpc_rsp: Hosted RPC_Resp [0x21e], uid [7], resp code [12294]
+I (8937) RPC_WRAP: ESP Event: Station mode: Connected
+I (8937) esp_wifi_remote: esp_wifi_internal_reg_rxcb: sta: 0x48146922
+--- 0x48146922: wifi_sta_receive at E:/Passport/esp32/v5.5.1/esp-idf/components/esp_wifi/src/wifi_netif.c:39
+I (9975) wifi: Got IP: 192.168.242.58
+I (9975) esp_netif_handlers: sta ip: 192.168.242.58, mask: 255.255.255.0, gw: 192.168.242.69
+I (9979) Application: STATE: activating
+I (9979) Ota: Current version: 1.8.2
+I (10003) Ota: OTA Request Body: {"application":{"version":"1.8.2","elf_sha256":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"},"board":{"type":"guition-jc4880p443","name":"guition-jc4880p443","ssid":"royal7","rssi":0},"mac_address":"9c:13:9e:dc:2d:e4","uuid":"e19b1cd3-f7e5-4170-8016-a6a9d5645cd2","chip_model_name":"esp32p4","flash_size":16777216,"psram_size":0,"version":0,"chip_info":{"model":0,"cores":0,"revision":0,"features":0},"partition_table":[{"label":"","type":0,"subtype":0,"address":0,"size":0}]}
+I (10214) esp-x509-crt-bundle: Certificate validated
+I (10580) Ota: OTA Response: {"server_time":{"timestamp":1784036889228,"timeZone":"Asia/Shanghai","timezone_offset":480},"firmware":{"version":"1.8.2","url":"https://xrobo.qiniuapi.com/v1/ota/INVALID_FIRMWARE_FOR_TEST"},"websocket":{"url":"ws://xrobo-io.qiniuapi.com/v1/ws/","token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJkYXRhIjoiY0dXT0R5d2l2RDhWdGxRcm1ITVVJWnF6SmxlUWl0LVhvT2FWa0dwcVNqMEJzOUw0TlA3T2NBdTRUVTRJVExLSTJsVTRoa2pqZGxabWdvUE00Mnk1SDJrVnVOUkpCRE5wcGhpTFoxaEEifQ.FEwKQgNK0xuM2Xqna6sUuwISkCqGylmwZGFbZ1C8jjA"}}
+I (10614) Ota: Websocket url: ws://xrobo-io.qiniuapi.com/v1/ws/
+I (10622) Ota: Websocket token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJkYXRhIjoiY0dXT0R5d2l2RDhWdGxRcm1ITVVJWnF6SmxlUWl0LVhvT2FWa0dwcVNqMEJzOUw0TlA3T2NBdTRUVTRJVExLSTJsVTRoa2pqZGxabWdvUE00Mnk1SDJrVnVOUkpCRE5wcGhpTFoxaEEifQ.FEwKQgNK0xuM2Xqna6sUuwISkCqGylmwZGFbZ1C8jjA
+I (10643) Ota: Got websocket configuration
+I (10647) Ota: Time synchronized: 633
+I (10650) Ota: Firmware version in response: 1.8.2
+I (10655) Ota: Firmware URL: https://xrobo.qiniuapi.com/v1/ota/INVALID_FIRMWARE_FOR_TEST
+I (10663) Ota: Current is the latest version
+I (10667) Ota: Running partition: ota_0
+I (10673) MCP: Add tool: self.get_device_status
+I (10675) MCP: Add tool: self.audio_speaker.set_volume
+I (10679) MCP: Add tool: self.screen.set_brightness
+I (10684) MCP: Add tool: self.screen.set_theme
+I (10688) Application: STATE: idle
+I (10692) MODEL_LOADER: The storage free size is 65536 KB
+I (10696) MODEL_LOADER: The partition size is 4032 KB
+I (10701) MODEL_LOADER: Successfully load srmodels
+I (10706) CustomWakeWord: multinet:mn7_cn
+Build fst from commands.
+Quantized MultiNet7:rnnt_ctc_2.0, name:mn7_cn, (Jun 16 2025 16:18:50)
+Quantized MultiNet7 search method: 2, time out:2.0 s
+set det threshold to 0.500000
+Build fst from commands.
+1 active speech commands:
+Command 1: kai er xi
+I (11577) CustomWakeWord: Custom wake word: kai er xi
+W (11578) AFE_CONFIG: wakenet model not found. please load wakenet model...
+I (11584) AFE: AFE Version: (1MIC_V250121)
+I (11587) AFE: Input PCM Config: total 1 channels(1 microphone, 0 playback), sample rate:16000
+I (11596) AFE: AFE Pipeline: [input] -> |VAD(WebRTC)| -> [output]
+I (11601) CustomWakeWord: Audio detection task started, feed size: 512 fetch size: 512
+W (11609) AFE: afe_disable_wakenet: WakeNet is not initialized!
+
+I (11622) SystemInfo: free sram: 256875 minimal sram: 209903
+I (11623) AppImageDisplay: Initializing image display...
+I (11645) PPACompositor: PPA BLEND client registered
+I (12582) PPACompositor: Background loaded: /sdcard/background.jpg (480x800)
+I (12599) AppImageDisplay: Found image: happy003.jpg
+I (12599) AppImageDisplay: Found image: happy001.jpg
+I (12599) AppImageDisplay: Found image: happy002.jpg
+I (12602) AppImageDisplay: Found image: happy120.jpg
+I (12607) AppImageDisplay: Found image: happy004.jpg
+I (12612) AppImageDisplay: Found image: happy005.jpg
+I (12616) AppImageDisplay: Found image: happy006.jpg
+I (12625) AppImageDisplay: Found image: happy007.jpg
+I (12626) AppImageDisplay: Found image: happy008.jpg
+I (12630) AppImageDisplay: Found image: happy009.jpg
+I (12638) AppImageDisplay: Found image: happy010.jpg
+I (12640) AppImageDisplay: Found image: happy011.jpg
+I (12644) AppImageDisplay: Found image: happy012.jpg
+I (12654) AppImageDisplay: Found image: happy013.jpg
+I (12654) AppImageDisplay: Found image: happy014.jpg
+I (12658) AppImageDisplay: Found image: happy015.jpg
+I (12663) AppImageDisplay: Found image: happy016.jpg
+I (12668) AppImageDisplay: Found image: happy017.jpg
+I (12672) AppImageDisplay: Found image: happy018.jpg
+I (12677) AppImageDisplay: Found image: happy019.jpg
+I (12686) AppImageDisplay: Found image: happy020.jpg
+I (12687) AppImageDisplay: Found image: happy021.jpg
+I (12691) AppImageDisplay: Found image: happy022.jpg
+I (12696) AppImageDisplay: Found image: happy023.jpg
+I (12701) AppImageDisplay: Found image: happy024.jpg
+I (12705) AppImageDisplay: Found image: happy025.jpg
+I (12718) AppImageDisplay: Found image: happy026.jpg
+I (12718) AppImageDisplay: Found image: happy027.jpg
+I (12719) AppImageDisplay: Found image: happy028.jpg
+I (12724) AppImageDisplay: Found image: happy029.jpg
+I (12729) AppImageDisplay: Found image: happy030.jpg
+I (12733) AppImageDisplay: Found image: happy031.jpg
+I (12738) AppImageDisplay: Found image: happy032.jpg
+I (12743) AppImageDisplay: Found image: happy033.jpg
+I (12751) AppImageDisplay: Found image: happy034.jpg
+I (12752) AppImageDisplay: Found image: happy035.jpg
+I (12757) AppImageDisplay: Found image: happy036.jpg
+I (12762) AppImageDisplay: Found image: happy037.jpg
+I (12766) AppImageDisplay: Found image: happy038.jpg
+I (12771) AppImageDisplay: Found image: happy039.jpg
+I (12776) AppImageDisplay: Found image: happy040.jpg
+I (12780) AppImageDisplay: Found image: happy041.jpg
+I (12788) AppImageDisplay: Found image: happy042.jpg
+I (12790) AppImageDisplay: Found image: happy043.jpg
+I (12794) AppImageDisplay: Found image: happy044.jpg
+I (12799) AppImageDisplay: Found image: happy045.jpg
+I (12804) AppImageDisplay: Found image: happy046.jpg
+I (12808) AppImageDisplay: Found image: happy047.jpg
+I (12827) AppImageDisplay: Found image: happy048.jpg
+I (12827) AppImageDisplay: Found image: happy049.jpg
+I (12829) AppImageDisplay: Found image: happy050.jpg
+I (12834) AppImageDisplay: Found image: happy051.jpg
+I (12839) AppImageDisplay: Found image: happy052.jpg
+I (12851) AppImageDisplay: Found image: happy053.jpg
+I (12851) AppImageDisplay: Found image: happy054.jpg
+I (12853) AppImageDisplay: Found image: happy055.jpg
+I (12858) AppImageDisplay: Found image: happy056.jpg
+I (12862) AppImageDisplay: Found image: happy057.jpg
+I (12870) AppImageDisplay: Found image: happy058.jpg
+I (12872) AppImageDisplay: Found image: happy059.jpg
+I (12886) AppImageDisplay: Found image: happy060.jpg
+I (12887) AppImageDisplay: Found image: happy061.jpg
+I (12888) AppImageDisplay: Found image: happy062.jpg
+I (12893) AppImageDisplay: Found image: happy063.jpg
+I (12898) AppImageDisplay: Found image: happy064.jpg
+I (12902) AppImageDisplay: Found image: happy065.jpg
+I (12915) AppImageDisplay: Found image: happy066.jpg
+I (12916) AppImageDisplay: Found image: happy067.jpg
+I (12916) AppImageDisplay: Found image: happy068.jpg
+I (12921) AppImageDisplay: Found image: happy069.jpg
+I (12926) AppImageDisplay: Found image: happy070.jpg
+I (12931) AppImageDisplay: Found image: happy071.jpg
+I (12935) AppImageDisplay: Found image: happy072.jpg
+I (12945) AppImageDisplay: Found image: happy073.jpg
+I (12949) AppImageDisplay: Found image: happy074.jpg
+I (12949) AppImageDisplay: Found image: happy075.jpg
+I (12954) AppImageDisplay: Found image: happy076.jpg
+I (12959) AppImageDisplay: Found image: happy077.jpg
+I (12963) AppImageDisplay: Found image: happy078.jpg
+I (12968) AppImageDisplay: Found image: happy079.jpg
+I (12974) AppImageDisplay: Found image: happy080.jpg
+I (12977) AppImageDisplay: Found image: happy081.jpg
+I (12982) AppImageDisplay: Found image: happy082.jpg
+I (12987) AppImageDisplay: Found image: happy083.jpg
+I (12991) AppImageDisplay: Found image: happy084.jpg
+I (12996) AppImageDisplay: Found image: happy085.jpg
+I (13006) AppImageDisplay: Found image: happy086.jpg
+I (13006) AppImageDisplay: Found image: happy087.jpg
+I (13010) AppImageDisplay: Found image: happy088.jpg
+I (13015) AppImageDisplay: Found image: happy089.jpg
+I (13023) AppImageDisplay: Found image: happy090.jpg
+I (13024) AppImageDisplay: Found image: happy091.jpg
+I (13029) AppImageDisplay: Found image: happy092.jpg
+I (13038) AppImageDisplay: Found image: happy093.jpg
+I (13038) AppImageDisplay: Found image: happy094.jpg
+I (13043) AppImageDisplay: Found image: happy095.jpg
+I (13048) AppImageDisplay: Found image: happy096.jpg
+I (13052) AppImageDisplay: Found image: happy097.jpg
+I (13057) AppImageDisplay: Found image: happy098.jpg
+I (13062) AppImageDisplay: Found image: happy099.jpg
+I (13070) AppImageDisplay: Found image: happy100.jpg
+I (13071) AppImageDisplay: Found image: happy101.jpg
+I (13076) AppImageDisplay: Found image: happy102.jpg
+I (13081) AppImageDisplay: Found image: happy103.jpg
+I (13085) AppImageDisplay: Found image: happy104.jpg
+I (13090) AppImageDisplay: Found image: happy105.jpg
+I (13100) AppImageDisplay: Found image: happy106.jpg
+I (13100) AppImageDisplay: Found image: happy107.jpg
+I (13104) AppImageDisplay: Found image: happy108.jpg
+I (13109) AppImageDisplay: Found image: happy109.jpg
+I (13113) AppImageDisplay: Found image: happy110.jpg
+I (13118) AppImageDisplay: Found image: happy111.jpg
+I (13123) AppImageDisplay: Found image: happy112.jpg
+I (13127) AppImageDisplay: Found image: happy113.jpg
+I (13147) AppImageDisplay: Found image: happy114.jpg
+I (13147) AppImageDisplay: Found image: happy115.jpg
+I (13148) AppImageDisplay: Found image: happy116.jpg
+I (13153) AppImageDisplay: Found image: happy117.jpg
+I (13158) AppImageDisplay: Found image: happy118.jpg
+I (13171) AppImageDisplay: Found image: happy119.jpg
+I (13275) AppImageDisplay: Total images found: 120
+I (13275) PPACompositor: Preloading 120 frames...
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -0.000208, nb log prob: -inf, normed log prob: -0.000104, num_blanks:56
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -inf, nb log prob: -inf, normed log prob: nan, num_blanks:0
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -0.000256, nb log prob: -inf, normed log prob: -0.000128, num_blanks:56
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -inf, nb log prob: -inf, normed log prob: nan, num_blanks:0
+unfinished id:[148 315 ], str: _kan_ta, state id: 0, command id: 0, b log prob: -0.001097, nb log prob: -inf, normed log prob: -0.000274, num_blanks:2
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -inf, nb log prob: -inf, normed log prob: nan, num_blanks:0
+I (20311) SystemInfo: free sram: 194243 minimal sram: 192011
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -0.000233, nb log prob: -inf, normed log prob: -0.000116, num_blanks:56
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -inf, nb log prob: -inf, normed log prob: nan, num_blanks:0
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -0.000132, nb log prob: -inf, normed log prob: -0.000066, num_blanks:56
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -inf, nb log prob: -inf, normed log prob: nan, num_blanks:0
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -0.000227, nb log prob: -inf, normed log prob: -0.000113, num_blanks:56
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -inf, nb log prob: -inf, normed log prob: nan, num_blanks:0
+I (28311) AudioCodec: Set output enable to false
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -0.001436, nb log prob: -inf, normed log prob: -0.000718, num_blanks:56
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -inf, nb log prob: -inf, normed log prob: nan, num_blanks:0
+I (30311) SystemInfo: free sram: 194199 minimal sram: 191807
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: 0.000000, nb log prob: -inf, normed log prob: 0.000000, num_blanks:56
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -inf, nb log prob: -inf, normed log prob: nan, num_blanks:0
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -0.000299, nb log prob: -inf, normed log prob: -0.000150, num_blanks:56
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -inf, nb log prob: -inf, normed log prob: nan, num_blanks:0
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -0.000216, nb log prob: -inf, normed log prob: -0.000108, num_blanks:56
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -inf, nb log prob: -inf, normed log prob: nan, num_blanks:0
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -0.000179, nb log prob: -inf, normed log prob: -0.000090, num_blanks:56
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -inf, nb log prob: -inf, normed log prob: nan, num_blanks:0
+I (40311) SystemInfo: free sram: 194191 minimal sram: 191807
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -0.000175, nb log prob: -inf, normed log prob: -0.000088, num_blanks:56
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -inf, nb log prob: -inf, normed log prob: nan, num_blanks:0
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -0.000183, nb log prob: -inf, normed log prob: -0.000092, num_blanks:56
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -inf, nb log prob: -inf, normed log prob: nan, num_blanks:0
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -0.000229, nb log prob: -inf, normed log prob: -0.000114, num_blanks:56
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -inf, nb log prob: -inf, normed log prob: nan, num_blanks:0
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -0.000153, nb log prob: -inf, normed log prob: -0.000076, num_blanks:56
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -inf, nb log prob: -inf, normed log prob: nan, num_blanks:0
+I (50311) SystemInfo: free sram: 194143 minimal sram: 191807
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -0.000299, nb log prob: -inf, normed log prob: -0.000150, num_blanks:56
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -inf, nb log prob: -inf, normed log prob: nan, num_blanks:0
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -0.000156, nb log prob: -inf, normed log prob: -0.000078, num_blanks:56
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -inf, nb log prob: -inf, normed log prob: nan, num_blanks:0

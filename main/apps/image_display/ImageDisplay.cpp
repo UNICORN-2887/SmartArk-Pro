@@ -29,16 +29,11 @@ static int s_current_index = 0;
 static int s_image_count = 0;
 static char s_image_paths[256][300];
 
-// 解码+PPA抠图合成+显示
-static bool decode_and_display_image(const char *image_path)
+// PPA抠图合成+显示（从预加载缓存，frame_index）
+static bool decode_and_display_image(int frame_index)
 {
-    if (!image_path) return false;
-
-    uint8_t *comp_buf = ppa_composite_frame(image_path);
-    if (!comp_buf) {
-        ESP_LOGE(TAG, "PPA composite failed for: %s", image_path);
-        return false;
-    }
+    uint8_t *comp_buf = ppa_composite_frame(frame_index);
+    if (!comp_buf) return false;
 
     lvgl_port_lock(0);
     if (s_image_canvas) {
@@ -46,11 +41,10 @@ static bool decode_and_display_image(const char *image_path)
         lv_obj_invalidate(s_image_canvas);
     }
     lvgl_port_unlock();
-
     return true;
 }
 
-// 显示指定索引的图片（全部走PPA合成通道）
+// 显示指定索引的图片
 bool display_image_by_index(int index)
 {
     if (index < 0 || index >= s_image_count) {
@@ -58,7 +52,7 @@ bool display_image_by_index(int index)
         return false;
     }
     s_current_index = index;
-    return decode_and_display_image(s_image_paths[index]);
+    return decode_and_display_image(index);
 }
 
 // 查找SD卡中的图片文件
@@ -76,10 +70,10 @@ static int search_image_files(void)
     while ((dir = readdir(d)) != NULL && s_image_count < 256) {
         if (dir->d_type != DT_DIR) {
             const char *ext = strrchr(dir->d_name, '.');
-            if (ext && (strcasecmp(ext, ".png") == 0 ||
-                       strcasecmp(ext, ".jpg") == 0 ||
+            if (ext && (strcasecmp(ext, ".jpg") == 0 ||
                        strcasecmp(ext, ".jpeg") == 0)) {
-                snprintf(s_image_paths[s_image_count], sizeof(s_image_paths[0]), 
+                if (strcasestr(dir->d_name, "background")) continue; // skip bg
+                snprintf(s_image_paths[s_image_count], sizeof(s_image_paths[0]),
                         "%s/%s", SD_MOUNT_POINT, dir->d_name);
                 ESP_LOGI(TAG, "Found image: %s", dir->d_name);
                 s_image_count++;
@@ -108,11 +102,16 @@ bool image_display_init(void)
         ESP_LOGE(TAG, "Background load failed, continuing without bg");
     }
 
-    // 查找前景图片文件（不搜background.jpg）
+    // 查找前景图片文件（跳过background.jpg）
     if (search_image_files() == 0) {
         ESP_LOGW(TAG, "No images found on SD card");
         return false;
     }
+
+    // 预加载所有帧到PSRAM
+    const char* path_ptrs[256];
+    for (int i = 0; i < s_image_count; i++) path_ptrs[i] = s_image_paths[i];
+    ppa_preload_frames(path_ptrs, s_image_count);
 
     // 创建显示画布
     lvgl_port_lock(0);
@@ -124,9 +123,9 @@ bool image_display_init(void)
     lv_obj_add_style(s_image_canvas, &canvas_style, 0);
     lvgl_port_unlock();
 
-    // 显示第一张（PPA合成）
+    // 显示第一张（PPA合成，从缓存）
     s_current_index = 0;
-    return decode_and_display_image(s_image_paths[0]);
+    return decode_and_display_image(0);
 }
 
 // 显示下一张图片
@@ -227,7 +226,7 @@ bool video_playback_start(int fps)
     s_video_fps = (fps > 0 && fps <= 120) ? fps : 30;
     ESP_LOGI(TAG, "Starting video playback at %d FPS (total: %d images)", s_video_fps, s_image_count);
 
-    xTaskCreate(video_playback_task, "video_play", 4096, NULL, 5, &s_video_task);
+    xTaskCreate(video_playback_task, "video_play", 4096, NULL, 15, &s_video_task);
     return true;
 }
 
@@ -244,6 +243,7 @@ int video_get_fps(void)
 // 清理图片显示
 void image_display_cleanup(void)
 {
+    ppa_free_cache();
     ppa_deinit();
 
     if (s_image_canvas) {

@@ -3,6 +3,7 @@
 
 #include <functional>
 #include <string>
+#include <memory>
 
 #include <esp_err.h>
 #include "board.h"
@@ -21,10 +22,12 @@ public:
     bool HasActivationCode() { return has_activation_code_; }
     bool HasServerTime() { return has_server_time_; }
     bool StartUpgrade(std::function<void(int progress, size_t speed)> callback);
+    bool StartUpgradeFromUrl(const std::string& url, std::function<void(int progress, size_t speed)> callback);
     void MarkCurrentVersionValid();
 
     const std::string& GetFirmwareVersion() const { return firmware_version_; }
     const std::string& GetCurrentVersion() const { return current_version_; }
+    const std::string& GetFirmwareUrl() const { return firmware_url_; }
     const std::string& GetActivationMessage() const { return activation_message_; }
     const std::string& GetActivationCode() const { return activation_code_; }
     std::string GetCheckVersionUrl();
@@ -52,6 +55,7 @@ private:
     bool IsNewVersionAvailable(const std::string& currentVersion, const std::string& newVersion);
     std::string GetActivationPayload();
     std::unique_ptr<Http> SetupHttp();
+    std::string BuildOtaRequestBody(); // 新增：构建符合七牛云协议的请求体
 };
 
-#endif // _OTA_H
+#endif // _OTA_H_

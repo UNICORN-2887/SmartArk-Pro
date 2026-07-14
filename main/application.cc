@@ -332,7 +332,7 @@ void Application::Start() {
     /* Setup the display */
     auto display = board.GetDisplay();
 
-    /* Initialize SD card (test) */
+    /* Initialize SD card (must mount before WiFi starts using SDMMC bus) */
     sdcard_init();
 
     /* Setup the audio service */
@@ -508,7 +508,14 @@ void Application::Start() {
 
     // Print heap stats
     SystemInfo::PrintHeapStats();
-    
+
+    // Start image/video display now that conversation mode is active
+    extern bool image_display_init(void);
+    extern bool video_playback_start(int fps);
+    if (image_display_init()) {
+        video_playback_start(30);
+    }
+
     // Enter the main event loop
     MainEventLoop();
 }
