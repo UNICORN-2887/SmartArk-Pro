@@ -27,6 +27,7 @@ set(SOURCES "audio/audio_codec.cc"
             "sd_test.cc"
             "apps/image_display/ImageDisplay.cpp"
             "apps/image_display/PPACompositor.cpp"
+            "apps/image_display/MjpegPlayer.cpp"
             )
 
 set(INCLUDE_DIRS "." "display" "audio" "protocols" "apps/image_display")

@@ -29,7 +29,7 @@ static int s_current_index = 0;
 static int s_image_count = 0;
 static char s_image_paths[256][300];
 
-// PPA抠图合成+显示（从预加载缓存，frame_index）
+// PPA抠图合成+显示（frame_index，自动MJPEG或缓存模式）
 static bool decode_and_display_image(int frame_index)
 {
     uint8_t *comp_buf = ppa_composite_frame(frame_index);
@@ -44,13 +44,8 @@ static bool decode_and_display_image(int frame_index)
     return true;
 }
 
-// 显示指定索引的图片
-bool display_image_by_index(int index)
-{
-    if (index < 0 || index >= s_image_count) {
-        ESP_LOGE(TAG, "Invalid image index: %d (total: %d)", index, s_image_count);
-        return false;
-    }
+bool display_image_by_index(int index) {
+    if (index < 0 || index >= s_image_count) return false;
     s_current_index = index;
     return decode_and_display_image(index);
 }
@@ -70,10 +65,10 @@ static int search_image_files(void)
     while ((dir = readdir(d)) != NULL && s_image_count < 256) {
         if (dir->d_type != DT_DIR) {
             const char *ext = strrchr(dir->d_name, '.');
-            if (ext && (strcasecmp(ext, ".jpg") == 0 ||
+            if (ext && (strcasecmp(ext, ".png") == 0 ||
+                       strcasecmp(ext, ".jpg") == 0 ||
                        strcasecmp(ext, ".jpeg") == 0)) {
-                if (strcasestr(dir->d_name, "background")) continue; // skip bg
-                snprintf(s_image_paths[s_image_count], sizeof(s_image_paths[0]),
+                snprintf(s_image_paths[s_image_count], sizeof(s_image_paths[0]), 
                         "%s/%s", SD_MOUNT_POINT, dir->d_name);
                 ESP_LOGI(TAG, "Found image: %s", dir->d_name);
                 s_image_count++;
@@ -102,16 +97,20 @@ bool image_display_init(void)
         ESP_LOGE(TAG, "Background load failed, continuing without bg");
     }
 
-    // 查找前景图片文件（跳过background.jpg）
-    if (search_image_files() == 0) {
-        ESP_LOGW(TAG, "No images found on SD card");
+    // 优先MJPEG模式（内存高效），回退逐文件+预加载
+    int mjpeg_frames = 0;
+    if (ppa_open_mjpeg("/sdcard/thinking.mjpeg", &mjpeg_frames)) {
+        s_image_count = mjpeg_frames;
+        ESP_LOGI(TAG, "MJPEG mode: thinking (%d frames)", mjpeg_frames);
+    } else if (search_image_files() == 0) {
+        ESP_LOGW(TAG, "No images found");
         return false;
+    } else {
+        // 预加载逐文件模式
+        const char* path_ptrs[256];
+        for (int i = 0; i < s_image_count; i++) path_ptrs[i] = s_image_paths[i];
+        ppa_preload_frames(path_ptrs, s_image_count);
     }
-
-    // 预加载所有帧到PSRAM
-    const char* path_ptrs[256];
-    for (int i = 0; i < s_image_count; i++) path_ptrs[i] = s_image_paths[i];
-    ppa_preload_frames(path_ptrs, s_image_count);
 
     // 创建显示画布
     lvgl_port_lock(0);
@@ -123,7 +122,6 @@ bool image_display_init(void)
     lv_obj_add_style(s_image_canvas, &canvas_style, 0);
     lvgl_port_unlock();
 
-    // 显示第一张（PPA合成，从缓存）
     s_current_index = 0;
     return decode_and_display_image(0);
 }
@@ -180,34 +178,48 @@ static void video_playback_task(void *arg)
     s_frame_count = 0;
     s_last_fps_time = esp_timer_get_time();
 
+    // 测试：轮流播放 thinking ↔ neutral（每3秒切换）
+    const char *emotions[] = {"thinking", "neutral"};
+    const int emotion_count = 2;
+    int emotion_idx = 0;
+    int switch_counter = 0;
+    const int SWITCH_INTERVAL = 3;
+
     while (s_video_running) {
         int64_t frame_start = esp_timer_get_time();
 
         // 显示下一帧
-        if (!image_display_next()) {
-            // 循环回到第一帧
-            s_current_index = 0;
+        if (!image_display_next()) s_current_index = 0;
+        s_frame_count++;
+        switch_counter++;
+
+        // 每3秒切换表情
+        if (switch_counter >= SWITCH_INTERVAL * s_video_fps) {
+            switch_counter = 0;
+            emotion_idx = (emotion_idx + 1) % emotion_count;
+            char path[64];
+            snprintf(path, sizeof(path), "/sdcard/%s.mjpeg", emotions[emotion_idx]);
+            int count = 0;
+            if (ppa_open_mjpeg(path, &count)) {
+                s_image_count = count;
+                s_current_index = 0;
+            }
         }
 
-        s_frame_count++;
-
-        // 每秒统计一次FPS
+        // 每秒统计FPS
         int64_t now = esp_timer_get_time();
         if (now - s_last_fps_time >= 1000000) {
             s_fps_display = s_frame_count;
             s_frame_count = 0;
             s_last_fps_time = now;
-            ESP_LOGI(TAG, "Video FPS: %d (target: %d)", s_fps_display, s_video_fps);
+            ESP_LOGI(TAG, "FPS:%d [%s]", s_fps_display, emotions[emotion_idx]);
         }
 
         // 帧率控制
         int64_t frame_time = esp_timer_get_time() - frame_start;
         int32_t wait_ms = (1000 / s_video_fps) - (frame_time / 1000);
-        if (wait_ms > 0) {
-            vTaskDelay(pdMS_TO_TICKS(wait_ms));
-        }
+        if (wait_ms > 0) vTaskDelay(pdMS_TO_TICKS(wait_ms));
     }
-
     s_video_task = NULL;
     vTaskDelete(NULL);
 }
@@ -226,7 +238,7 @@ bool video_playback_start(int fps)
     s_video_fps = (fps > 0 && fps <= 120) ? fps : 30;
     ESP_LOGI(TAG, "Starting video playback at %d FPS (total: %d images)", s_video_fps, s_image_count);
 
-    xTaskCreate(video_playback_task, "video_play", 4096, NULL, 15, &s_video_task);
+    xTaskCreate(video_playback_task, "video_play", 4096, NULL, 5, &s_video_task);
     return true;
 }
 
@@ -243,7 +255,6 @@ int video_get_fps(void)
 // 清理图片显示
 void image_display_cleanup(void)
 {
-    ppa_free_cache();
     ppa_deinit();
 
     if (s_image_canvas) {

@@ -212,7 +212,34 @@ E (911) jc4880p443: SD card mount failed: ESP_ERR_TIMEOUT
 - `main/CMakeLists.txt` — 添加PPACompositor.cpp
 - `sdkconfig` — 开启FATFS长文件名
 
-**验证结果**: ✅ 成功 — PPA BLEND初始化成功，background.jpg加载，120帧HAPPY序列硬件抠图合成正常播放。
+**验证结果**: ✅ 成功 — 30+ FPS稳定播放，WiFi+SD卡同时工作正常。
+
+---
+
+## 8. MJPEG表情切换 + 原始v3picOK SDMMC恢复
+
+**日期**: 2026-07-15
+
+**起因**:
+1. 引入MJPEG格式后需要交叉播放 thinking/neutral 两套表情
+2. SD卡在WiFi连接后重启时挂载失败，需恢复原始v3picOK的sd_test.cc
+
+**关键发现**:
+- **sd_test.cc必须使用原始v3picOK版本**（`SDMMC_FREQ_SDR50`、无gpio_reset_pin、无重试）
+- SDMMC探测频率(400kHz)会导致SD卡操作时间过长，与WiFi SDIO冲突
+- SDR50(50MHz)高速模式数据传输快，占用总线时间短，WiFi不受影响
+- MJPEG文件通过fseek定位帧 → fread读取 → 硬件JPEG解码 → PPA合成
+- 表情切换：`ppa_open_mjpeg("/sdcard/{name}.mjpeg")` 即可切换
+
+**涉及文件**:
+- `main/sd_test.cc` — 恢复为v3picOK原始版本
+- `main/apps/image_display/PPACompositor.cpp` — 帧缓存+MJPEG双模式
+- `main/apps/image_display/PPACompositor.h` — 新增ppa_preload_frames/ppa_open_mjpeg
+- `main/apps/image_display/ImageDisplay.cpp` — MJPEG优先+表情切换+终端显示表情名
+- `main/apps/image_display/MjpegPlayer.cpp` — MJPEG文件fseek读取
+- `main/CMakeLists.txt` — 添加MjpegPlayer.cpp
+
+**验证结果**: ✅ 成功 — SD卡+WiFi共存，thinking↔neutral每3秒切换，FPS稳定，终端显示表情名。
 
 ---
 

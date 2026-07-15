@@ -11,6 +11,7 @@
 #include "esp_log.h"
 #include "driver/ppa.h"
 #include "driver/jpeg_decode.h"
+#include "MjpegPlayer.h"
 
 #define TAG "PPACompositor"
 
@@ -96,62 +97,62 @@ bool ppa_init(void) {
     return true;
 }
 
-// ─── Frame Cache ───────────────────────────────────────────────
+// ─── Frame Cache + MJPEG ──────────────────────────────────────
 
 #define MAX_CACHE 200
 static uint8_t *s_jpg_cache[MAX_CACHE];
 static size_t s_jpg_cache_size[MAX_CACHE];
 static int s_cache_count = 0;
+static bool s_use_mjpeg = false;
 
 void ppa_preload_frames(const char *paths[], int count) {
     if (count > MAX_CACHE) count = MAX_CACHE;
-    ESP_LOGI(TAG, "Preloading %d frames...", count);
     for (int i = 0; i < count; i++) {
         FILE *fp = fopen(paths[i], "rb");
-        if (!fp) { s_jpg_cache[i] = NULL; s_jpg_cache_size[i] = 0; continue; }
+        if (!fp) { s_jpg_cache[i] = NULL; continue; }
         fseek(fp, 0, SEEK_END);
-        size_t sz = ftell(fp);
-        fseek(fp, 0, SEEK_SET);
+        size_t sz = ftell(fp); fseek(fp, 0, SEEK_SET);
         s_jpg_cache[i] = (uint8_t*)heap_caps_malloc(sz, MALLOC_CAP_SPIRAM);
         s_jpg_cache_size[i] = sz;
         if (s_jpg_cache[i]) fread(s_jpg_cache[i], 1, sz, fp);
         fclose(fp);
     }
     s_cache_count = count;
-    ESP_LOGI(TAG, "Preloaded %d frames", count);
+    ESP_LOGI(TAG, "Preloaded %d frames to PSRAM", count);
 }
 
-void ppa_free_cache(void) {
-    for (int i = 0; i < s_cache_count; i++) {
-        if (s_jpg_cache[i]) free(s_jpg_cache[i]);
-    }
-    s_cache_count = 0;
+bool ppa_open_mjpeg(const char *path, int *out_frame_count) {
+    if (!mjpeg_open(path)) return false;
+    s_use_mjpeg = true;
+    *out_frame_count = mjpeg_get_frame_count();
+    ESP_LOGI(TAG, "MJPEG mode: %s (%d frames)", path, *out_frame_count);
+    return true;
 }
 
 // ─── Composite & Return Output Buffer ─────────────────────────
 
 uint8_t* ppa_composite_frame(int frame_index) {
-    if (!s_fg_buf || !s_comp_buf) {
-        ESP_LOGE(TAG, "PPA buffers not initialized");
-        return NULL;
-    }
+    if (!s_fg_buf || !s_comp_buf) return NULL;
 
-    // ── Step 1: JPEG decode foreground from cache or file ──
+    // ── Step 1: Get JPEG data ──
     size_t jpg_size;
-    uint8_t *jpg_data;
+    uint8_t *jpg_data = NULL;
+    bool need_free = false;
 
-    if (frame_index >= 0 && frame_index < s_cache_count && s_jpg_cache[frame_index]) {
+    if (s_use_mjpeg) {
+        if (!mjpeg_get_frame(frame_index, &jpg_data, &jpg_size)) return NULL;
+        need_free = true;
+    } else {
+        if (frame_index < 0 || frame_index >= s_cache_count || !s_jpg_cache[frame_index]) return NULL;
         jpg_size = s_jpg_cache_size[frame_index];
         jpg_data = s_jpg_cache[frame_index];
-    } else {
-        ESP_LOGE(TAG, "Frame %d not cached", frame_index);
-        return NULL;
     }
 
     jpeg_decode_memory_alloc_cfg_t tx_cfg = { .buffer_direction = JPEG_DEC_ALLOC_INPUT_BUFFER };
     size_t tx_size;
     uint8_t *tx_buf = (uint8_t*)jpeg_alloc_decoder_mem(jpg_size, &tx_cfg, &tx_size);
     memcpy(tx_buf, jpg_data, jpg_size);
+    if (need_free) free(jpg_data);
 
     if (!s_jpg_handle) {
         jpeg_new_decoder_engine(&s_jpg_eng_cfg, &s_jpg_handle);
@@ -219,6 +220,10 @@ uint8_t* ppa_composite_frame(int frame_index) {
 }
 
 void ppa_deinit(void) {
+    mjpeg_close();
+    s_use_mjpeg = false;
+    for (int i = 0; i < s_cache_count; i++) { if (s_jpg_cache[i]) free(s_jpg_cache[i]); }
+    s_cache_count = 0;
     if (s_jpg_handle) { jpeg_del_decoder_engine(s_jpg_handle); s_jpg_handle = NULL; }
     if (s_ppa_client) { ppa_unregister_client(s_ppa_client); s_ppa_client = NULL; }
     if (s_bg_buf) { free(s_bg_buf); s_bg_buf = NULL; }
