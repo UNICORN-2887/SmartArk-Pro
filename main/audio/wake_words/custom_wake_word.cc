@@ -64,9 +64,12 @@ bool CustomWakeWord::Initialize(AudioCodec* codec) {
     ESP_LOGI(TAG, "multinet:%s", mn_name_);
     multinet_ = esp_mn_handle_from_name(mn_name_);
     multinet_model_data_ = multinet_->create(mn_name_, 2000);  // 2秒超时
-    multinet_->set_det_threshold(multinet_model_data_, 0.5);
+    multinet_->set_det_threshold(multinet_model_data_, 0.05); // 极低阈值
     esp_mn_commands_clear();
-    esp_mn_commands_add(1, CONFIG_CUSTOM_WAKE_WORD);  // 添加自定义唤醒词作为命令词
+    esp_mn_commands_add(1, CONFIG_CUSTOM_WAKE_WORD);     // ni hao kai er xi
+    esp_mn_commands_add(2, "ni hao xiao zhi");           // 保底
+    esp_mn_commands_add(3, "kai er xi");                 // 短唤醒词
+    esp_mn_commands_add(4, "ni hao kai er xi");          // 重复(强制FST重建)
     esp_mn_commands_update();
     
     // 打印所有的命令词
@@ -161,39 +164,23 @@ void CustomWakeWord::AudioDetectionTask() {
         // 存储音频数据用于语音识别
         StoreWakeWordData(res->data, res->data_size / sizeof(int16_t));
 
-        // 直接使用multinet检测自定义唤醒词
+        // detect + 不依赖DETECTED状态直接查结果
         esp_mn_state_t mn_state = multinet_->detect(multinet_model_data_, res->data);
-        
-        if (mn_state == ESP_MN_STATE_DETECTING) {
-            // 仍在检测中，继续
-            continue;
-        } else if (mn_state == ESP_MN_STATE_DETECTED) {
-            // 检测到自定义唤醒词
-            esp_mn_results_t *mn_result = multinet_->get_results(multinet_model_data_);
-            ESP_LOGI(TAG, "Custom wake word detected: command_id=%d, string=%s, prob=%f", 
+        esp_mn_results_t *mn_result = multinet_->get_results(multinet_model_data_);
+
+        if (mn_result && mn_result->command_id[0] >= 1 && mn_result->command_id[0] <= 3) {
+            ESP_LOGI(TAG, "Wake word detected: id=%d, str=%s, prob=%f",
                     mn_result->command_id[0], mn_result->string, mn_result->prob[0]);
-            
-            if (mn_result->command_id[0] == 1) {  // 自定义唤醒词
-                ESP_LOGI(TAG, "Custom wake word '%s' detected successfully!", CONFIG_CUSTOM_WAKE_WORD);
-                
-                // 停止检测
-                Stop();
-                last_detected_wake_word_ = CONFIG_CUSTOM_WAKE_WORD_DISPLAY;
-                
-                // 调用回调
-                if (wake_word_detected_callback_) {
-                    wake_word_detected_callback_(last_detected_wake_word_);
-                }
-                
-                // 清理multinet状态，准备下次检测
-                multinet_->clean(multinet_model_data_);
-                ESP_LOGI(TAG, "Ready for next detection");
+
+            Stop();
+            last_detected_wake_word_ = CONFIG_CUSTOM_WAKE_WORD_DISPLAY;
+            if (wake_word_detected_callback_) {
+                wake_word_detected_callback_(last_detected_wake_word_);
             }
-        } else if (mn_state == ESP_MN_STATE_TIMEOUT) {
-            // 超时，清理状态继续检测
-            ESP_LOGD(TAG, "Command word detection timeout, cleaning state");
             multinet_->clean(multinet_model_data_);
-            continue;
+            ESP_LOGI(TAG, "Ready for next detection");
+        } else if (mn_state == ESP_MN_STATE_TIMEOUT) {
+            multinet_->clean(multinet_model_data_);
         }
     }
     
@@ -212,7 +199,7 @@ void CustomWakeWord::StoreWakeWordData(const int16_t* data, size_t samples) {
 void CustomWakeWord::EncodeWakeWordData() {
     wake_word_opus_.clear();
     if (wake_word_encode_task_stack_ == nullptr) {
-        wake_word_encode_task_stack_ = (StackType_t*)heap_caps_malloc(4096 * 8, MALLOC_CAP_SPIRAM);
+        wake_word_encode_task_stack_ = (StackType_t*)heap_caps_malloc(4096 * 12, MALLOC_CAP_SPIRAM);
     }
     wake_word_encode_task_ = xTaskCreateStatic([](void* arg) {
         auto this_ = (CustomWakeWord*)arg;
@@ -240,7 +227,7 @@ void CustomWakeWord::EncodeWakeWordData() {
             this_->wake_word_cv_.notify_all();
         }
         vTaskDelete(NULL);
-    }, "encode_detect_packets", 4096 * 8, this, 2, wake_word_encode_task_stack_, &wake_word_encode_task_buffer_);
+    }, "encode_detect_packets", 4096 * 12, this, 2, wake_word_encode_task_stack_, &wake_word_encode_task_buffer_);
 }
 
 bool CustomWakeWord::GetWakeWordOpus(std::vector<uint8_t>& opus) {

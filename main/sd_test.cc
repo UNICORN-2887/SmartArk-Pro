@@ -8,8 +8,14 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sd_pwr_ctrl_by_on_chip_ldo.h"
+#include "apps/image_display/PPACompositor.h"
+#include "freertos/event_groups.h"
 
 static const char *TAG = "SD_TEST";
+
+// Event group for signaling SD card + preload completion
+static EventGroupHandle_t s_sd_event_group = NULL;
+#define SD_READY_BIT BIT0
 
 // SD卡引脚（Slot 0）
 #define SD_CLK_GPIO  GPIO_NUM_43
@@ -18,17 +24,10 @@ static const char *TAG = "SD_TEST";
 #define SD_D1_GPIO   GPIO_NUM_40
 #define SD_D2_GPIO   GPIO_NUM_41
 #define SD_D3_GPIO   GPIO_NUM_42
+#define SD_MOUNT_POINT "/sdcard"
 
-// ESP-Hosted 会先初始化 SDMMC host，需要 workaround
-static esp_err_t sdmmc_host_init_dummy(void)
-{
-    return ESP_OK;
-}
-
-static esp_err_t sdmmc_host_deinit_dummy(void)
-{
-    return ESP_OK;
-}
+static esp_err_t sdmmc_host_init_dummy(void) { return ESP_OK; }
+static esp_err_t sdmmc_host_deinit_dummy(void) { return ESP_OK; }
 
 static void sd_mount_task(void *pvParameters)
 {
@@ -55,8 +54,6 @@ static void sd_mount_task(void *pvParameters)
     host.pwr_ctrl_handle = pwr_ctrl_handle;
     host.slot = SDMMC_HOST_SLOT_0;
     host.max_freq_khz = SDMMC_FREQ_SDR50;
-    
-    // ESP-Hosted 已经初始化了 SDMMC host，跳过初始化
     host.init = &sdmmc_host_init_dummy;
     host.deinit = &sdmmc_host_deinit_dummy;
     
@@ -72,7 +69,7 @@ static void sd_mount_task(void *pvParameters)
     
     esp_vfs_fat_mount_config_t mount_config = {
         .format_if_mount_failed = false,
-        .max_files = 5,
+        .max_files = 30,
         .allocation_unit_size = 16 * 1024,
     };
     
@@ -91,21 +88,60 @@ static void sd_mount_task(void *pvParameters)
     ESP_LOGI(TAG, "SD card mounted successfully!");
     sdmmc_card_print_info(stdout, card);
     
-    // 读取文件
-    ESP_LOGI(TAG, "Listing /sdcard directory:");
-    DIR *d = opendir("/sdcard");
-    if (d) {
-        struct dirent *dir;
-        while ((dir = readdir(d)) != NULL) {
-            ESP_LOGI(TAG, "  %s", dir->d_name);
-        }
-        closedir(d);
+    // 预加载 MJPEG — thinking(默认) + neutral(备切)
+    ESP_LOGI(TAG, "Preloading MJPEG...");
+    int loaded = ppa_preload_mjpeg("/sdcard/thinking.mjpeg");
+    if (loaded < 10) {
+        loaded = ppa_preload_mjpeg("/sdcard/neutral.mjpeg");
     }
-    
+    if (loaded < 10) {
+        // MJPEG全失败 — 回退逐JPG
+        ESP_LOGI(TAG, "MJPEG failed, falling back to JPGs...");
+        DIR *d = opendir(SD_MOUNT_POINT);
+        if (d) {
+            char (*paths)[300] = (char(*)[300])malloc(256 * 300);
+            const char **ptrs = (const char**)malloc(256 * sizeof(const char*));
+            int img_count = 0;
+            struct dirent *dir;
+            while ((dir = readdir(d)) != NULL && img_count < 256) {
+                if (dir->d_type == DT_DIR) continue;
+                const char *name = dir->d_name;
+                if (strcasecmp(name, "background.jpg") == 0) continue;
+                const char *ext = strrchr(name, '.');
+                if (ext && (strcasecmp(ext, ".jpg") == 0 ||
+                           strcasecmp(ext, ".jpeg") == 0 ||
+                           strcasecmp(ext, ".png") == 0)) {
+                    snprintf(paths[img_count], 300, "%s/%s", SD_MOUNT_POINT, name);
+                    ptrs[img_count] = paths[img_count];
+                    img_count++;
+                }
+            }
+            closedir(d);
+            if (img_count > 0) ppa_preload_frames(ptrs, img_count);
+            free(ptrs);
+            free(paths);
+        }
+        loaded = ppa_get_cache_count();
+    }
+    ESP_LOGI(TAG, "Preload done: %d frames in PSRAM", loaded);
+
+    // 通知主任务：SD卡 + 预加载完成
+    if (s_sd_event_group) xEventGroupSetBits(s_sd_event_group, SD_READY_BIT);
+
     vTaskDelete(NULL);
 }
 
 void sdcard_init(void)
 {
-    xTaskCreate(sd_mount_task, "sd_mount", 4096, NULL, 5, NULL);
+    if (!s_sd_event_group) s_sd_event_group = xEventGroupCreate();
+    xEventGroupClearBits(s_sd_event_group, SD_READY_BIT);
+    xTaskCreate(sd_mount_task, "sd_mount", 8192, NULL, 5, NULL);
+}
+
+bool sdcard_wait_ready(int timeout_ms)
+{
+    if (!s_sd_event_group) return false;
+    EventBits_t bits = xEventGroupWaitBits(s_sd_event_group, SD_READY_BIT,
+                                            pdTRUE, pdTRUE, pdMS_TO_TICKS(timeout_ms));
+    return (bits & SD_READY_BIT) != 0;
 }

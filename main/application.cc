@@ -332,8 +332,14 @@ void Application::Start() {
     /* Setup the display */
     auto display = board.GetDisplay();
 
-    /* Initialize SD card (must mount before WiFi starts using SDMMC bus) */
+    /* Initialize SD card + preload frames */
     sdcard_init();
+
+    /* Wait for preload to complete */
+    extern bool sdcard_wait_ready(int timeout_ms);
+    if (!sdcard_wait_ready(30000)) {
+        ESP_LOGE("Application", "SD card preload timeout!");
+    }
 
     /* Setup the audio service */
     auto codec = board.GetAudioCodec();

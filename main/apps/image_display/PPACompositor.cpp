@@ -107,18 +107,117 @@ static bool s_use_mjpeg = false;
 
 void ppa_preload_frames(const char *paths[], int count) {
     if (count > MAX_CACHE) count = MAX_CACHE;
+    int loaded = 0;
     for (int i = 0; i < count; i++) {
         FILE *fp = fopen(paths[i], "rb");
         if (!fp) { s_jpg_cache[i] = NULL; continue; }
         fseek(fp, 0, SEEK_END);
         size_t sz = ftell(fp); fseek(fp, 0, SEEK_SET);
-        s_jpg_cache[i] = (uint8_t*)heap_caps_malloc(sz, MALLOC_CAP_SPIRAM);
-        s_jpg_cache_size[i] = sz;
-        if (s_jpg_cache[i]) fread(s_jpg_cache[i], 1, sz, fp);
+        if (sz == 0 || sz > 512 * 1024) { fclose(fp); s_jpg_cache[i] = NULL; continue; }
+
+        uint8_t *buf = (uint8_t*)heap_caps_malloc(sz, MALLOC_CAP_SPIRAM);
+        if (!buf) { fclose(fp); s_jpg_cache[i] = NULL; continue; }
+
+        // Read with retry (SDMMC 0x107 from C6 SDIO polling)
+        bool ok = false;
+        for (int r = 0; r < 20; r++) {
+            clearerr(fp);            // Clear stdio error
+            fseek(fp, 0, SEEK_SET);  // Reset to start of file
+            if (fread(buf, 1, sz, fp) == sz) { ok = true; break; }
+            if (r == 0) ESP_LOGW(TAG, "Frame %d fread retry (0x107)...", i);
+            vTaskDelay(pdMS_TO_TICKS(50));  // 50ms gap — let C6 polling finish
+        }
+        clearerr(fp);  // 确保 FATFS 正确释放文件描述符
         fclose(fp);
+
+        if (ok) {
+            s_jpg_cache[loaded] = buf;
+            s_jpg_cache_size[loaded] = sz;
+            loaded++;
+        } else {
+            free(buf);
+            ESP_LOGE(TAG, "Frame %d failed after retries", i);
+        }
     }
-    s_cache_count = count;
-    ESP_LOGI(TAG, "Preloaded %d frames to PSRAM", count);
+    s_cache_count = loaded;
+    ESP_LOGI(TAG, "Preloaded %d/%d frames to PSRAM", loaded, count);
+}
+
+int ppa_get_cache_count(void) { return s_cache_count; }
+
+int ppa_preload_mjpeg(const char *path) {
+    // 先释放旧帧缓存，避免 PSRAM 碎片化导致 alloc 失败
+    for (int i = 0; i < s_cache_count; i++) {
+        if (s_jpg_cache[i]) { free(s_jpg_cache[i]); s_jpg_cache[i] = NULL; }
+    }
+    s_cache_count = 0;
+
+    // ── Step 1: ONE sequential fread of ENTIRE file into PSRAM ──
+    FILE *fp = fopen(path, "rb");
+    if (!fp) { ESP_LOGE(TAG, "Cannot open %s", path); return 0; }
+
+    fseek(fp, 0, SEEK_END);
+    size_t file_size = ftell(fp);
+    if (file_size == 0 || file_size > 16 * 1024 * 1024) { fclose(fp); return 0; }
+    rewind(fp);
+
+    uint8_t *file_buf = (uint8_t*)heap_caps_malloc(file_size, MALLOC_CAP_SPIRAM);
+    if (!file_buf) { ESP_LOGE(TAG, "PSRAM alloc %u KB failed", (unsigned)(file_size/1024)); fclose(fp); return 0; }
+
+    // Read in small chunks (16KB) — prevents SD card internal GC timeout
+    size_t total = 0;
+    int fails = 0;
+    while (total < file_size && fails < 100) {
+        size_t chunk = file_size - total;
+        if (chunk > 16384) chunk = 16384;  // 16KB per read
+
+        size_t got = fread(file_buf + total, 1, chunk, fp);
+        if (got > 0) { total += got; fails = 0; continue; }
+
+        fails++;
+        clearerr(fp);
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    if (fails >= 100) {
+        ESP_LOGW(TAG, "Giving up at %u/%u KB", (unsigned)(total/1024), (unsigned)(file_size/1024));
+    }
+    clearerr(fp);
+    fclose(fp);
+
+    if (total == 0) { free(file_buf); return 0; }
+    ESP_LOGI(TAG, "Read %u/%u KB in one pass", (unsigned)(total/1024), (unsigned)(file_size/1024));
+
+    // ── Step 2: Parse frames from the PSRAM buffer (zero SD access) ──
+    uint32_t frame_count;
+    memcpy(&frame_count, file_buf, 4);
+    if (frame_count == 0 || frame_count > MAX_CACHE) { free(file_buf); return 0; }
+
+    uint32_t offsets[MAX_CACHE];
+    for (int i = 0; i < (int)frame_count; i++) {
+        memcpy(&offsets[i], file_buf + 4 + i * 4, 4);
+    }
+
+    int loaded = 0;
+    for (int i = 0; i < (int)frame_count && loaded < MAX_CACHE; i++) {
+        size_t start = offsets[i];
+        size_t end = (i < (int)frame_count - 1) ? offsets[i + 1] : total;
+        if (end <= start || end - start > 512 * 1024 || start >= total) continue;
+        size_t sz = end - start;
+
+        uint8_t *buf = (uint8_t*)heap_caps_malloc(sz, MALLOC_CAP_SPIRAM);
+        if (!buf) break;
+        memcpy(buf, file_buf + start, sz);
+
+        s_jpg_cache[loaded] = buf;
+        s_jpg_cache_size[loaded] = sz;
+        loaded++;
+    }
+    free(file_buf);  // Free the raw file buffer
+
+    s_cache_count = loaded;
+    ESP_LOGI(TAG, "MJPEG parsed: %d/%lu frames, %u KB PSRAM file buf freed",
+             loaded, (unsigned long)frame_count, (unsigned)(total/1024));
+    return loaded;
 }
 
 bool ppa_open_mjpeg(const char *path, int *out_frame_count) {

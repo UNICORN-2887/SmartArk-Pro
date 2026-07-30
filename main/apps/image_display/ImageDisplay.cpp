@@ -50,7 +50,7 @@ bool display_image_by_index(int index) {
     return decode_and_display_image(index);
 }
 
-// 查找SD卡中的图片文件
+// 查找SD卡中的图片文件（排除 background.jpg）
 static int search_image_files(void)
 {
     DIR *d = opendir(SD_MOUNT_POINT);
@@ -61,21 +61,24 @@ static int search_image_files(void)
 
     s_image_count = 0;
     struct dirent *dir;
-    
+
     while ((dir = readdir(d)) != NULL && s_image_count < 256) {
         if (dir->d_type != DT_DIR) {
+            // 排除背景图
+            if (strcasecmp(dir->d_name, "background.jpg") == 0) continue;
+
             const char *ext = strrchr(dir->d_name, '.');
             if (ext && (strcasecmp(ext, ".png") == 0 ||
                        strcasecmp(ext, ".jpg") == 0 ||
                        strcasecmp(ext, ".jpeg") == 0)) {
-                snprintf(s_image_paths[s_image_count], sizeof(s_image_paths[0]), 
+                snprintf(s_image_paths[s_image_count], sizeof(s_image_paths[0]),
                         "%s/%s", SD_MOUNT_POINT, dir->d_name);
                 ESP_LOGI(TAG, "Found image: %s", dir->d_name);
                 s_image_count++;
             }
         }
     }
-    
+
     closedir(d);
     ESP_LOGI(TAG, "Total images found: %d", s_image_count);
     return s_image_count;
@@ -97,20 +100,20 @@ bool image_display_init(void)
         ESP_LOGE(TAG, "Background load failed, continuing without bg");
     }
 
-    // 优先MJPEG模式（内存高效），回退逐文件+预加载
-    int mjpeg_frames = 0;
-    if (ppa_open_mjpeg("/sdcard/thinking.mjpeg", &mjpeg_frames)) {
-        s_image_count = mjpeg_frames;
-        ESP_LOGI(TAG, "MJPEG mode: thinking (%d frames)", mjpeg_frames);
-    } else if (search_image_files() == 0) {
-        ESP_LOGW(TAG, "No images found");
-        return false;
-    } else {
-        // 预加载逐文件模式
+    // 帧数据已在 sd_mount_task 中预加载到 PSRAM（WiFi 前），直接用
+    s_image_count = ppa_get_cache_count();
+    if (s_image_count == 0) {
+        ESP_LOGW(TAG, "No preloaded frames — falling back to SD scan");
+        if (search_image_files() == 0) {
+            ESP_LOGW(TAG, "No images found");
+            return false;
+        }
         const char* path_ptrs[256];
         for (int i = 0; i < s_image_count; i++) path_ptrs[i] = s_image_paths[i];
         ppa_preload_frames(path_ptrs, s_image_count);
+        s_image_count = ppa_get_cache_count();
     }
+    ESP_LOGI(TAG, "Using %d preloaded frames", s_image_count);
 
     // 创建显示画布
     lvgl_port_lock(0);
@@ -178,7 +181,7 @@ static void video_playback_task(void *arg)
     s_frame_count = 0;
     s_last_fps_time = esp_timer_get_time();
 
-    // 测试：轮流播放 thinking ↔ neutral（每3秒切换）
+    // 轮流播放 thinking ↔ neutral（每3秒切换）
     const char *emotions[] = {"thinking", "neutral"};
     const int emotion_count = 2;
     int emotion_idx = 0;
@@ -188,21 +191,22 @@ static void video_playback_task(void *arg)
     while (s_video_running) {
         int64_t frame_start = esp_timer_get_time();
 
-        // 显示下一帧
+        // 显示下一帧（PSRAM预加载数据，零SD访问）
         if (!image_display_next()) s_current_index = 0;
         s_frame_count++;
         switch_counter++;
 
-        // 每3秒切换表情
+        // 每3秒切换表情（重新加载MJPEG）
         if (switch_counter >= SWITCH_INTERVAL * s_video_fps) {
             switch_counter = 0;
             emotion_idx = (emotion_idx + 1) % emotion_count;
             char path[64];
             snprintf(path, sizeof(path), "/sdcard/%s.mjpeg", emotions[emotion_idx]);
-            int count = 0;
-            if (ppa_open_mjpeg(path, &count)) {
+            int count = ppa_preload_mjpeg(path);
+            if (count > 0) {
                 s_image_count = count;
                 s_current_index = 0;
+                ESP_LOGI(TAG, "Switched to %s (%d frames)", emotions[emotion_idx], count);
             }
         }
 

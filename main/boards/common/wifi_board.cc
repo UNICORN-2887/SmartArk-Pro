@@ -41,71 +41,102 @@ void WifiBoard::EnterWifiConfigMode() {
     wifi_ap.SetSsidPrefix("Xiaozhi");
     wifi_ap.Start();
 
+    // 记录配网前的SSID数量
+    auto& ssid_manager = SsidManager::GetInstance();
+    size_t ssid_before = ssid_manager.GetSsidList().size();
+
     // 显示 WiFi 配置 AP 的 SSID 和 Web 服务器 URL
     std::string hint = Lang::Strings::CONNECT_TO_HOTSPOT;
     hint += wifi_ap.GetSsid();
     hint += Lang::Strings::ACCESS_VIA_BROWSER;
     hint += wifi_ap.GetWebServerUrl();
     hint += "\n\n";
-    
+
     // 播报配置 WiFi 的提示
     application.Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "", Lang::Sounds::P3_WIFICONFIG);
 
     #if CONFIG_USE_ACOUSTIC_WIFI_PROVISIONING
     audio_wifi_config::ReceiveWifiCredentialsFromAudio(&application, &wifi_ap);
     #endif
-    
-    // Wait forever until reset after configuration
-    while (true) {
-        int free_sram = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-        int min_free_sram = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
-        ESP_LOGI(TAG, "Free internal: %u minimal internal: %u", free_sram, min_free_sram);
-        vTaskDelay(pdMS_TO_TICKS(10000));
+
+    // Phase 1: 轮询检测新SSID（/submit 或 /save 触发SSID保存）
+    ESP_LOGI(TAG, "Waiting for WiFi configuration...");
+    bool ssid_saved = false;
+    for (int i = 0; i < 240; i++) { // 最多等2分钟
+        vTaskDelay(pdMS_TO_TICKS(500));
+        if (ssid_manager.GetSsidList().size() > ssid_before) {
+            ESP_LOGI(TAG, "New SSID detected, waiting for exit signal...");
+            ssid_saved = true;
+            break;
+        }
     }
+
+    // Phase 2: 等待 /exit 或 /reboot（保持 AP 运行直到客户端确认）
+    if (ssid_saved) {
+        for (int i = 0; i < 120; i++) { // 最多等60秒
+            if (wifi_ap.IsExitRequested()) {
+                ESP_LOGI(TAG, "Exit signal received, switching to station mode...");
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(500));
+        }
+    }
+
+    // 停AP，切换回Station模式（不重启！）
+    ESP_LOGI(TAG, "Switching to station mode...");
+    wifi_ap.Stop();
+    wifi_config_mode_ = false;
 }
 
 void WifiBoard::StartNetwork() {
-    // User can press BOOT button while starting to enter WiFi configuration mode
-    if (wifi_config_mode_) {
-        EnterWifiConfigMode();
-        return;
+    auto display = Board::GetInstance().GetDisplay();
+
+    // 如果没有保存的SSID，进入配网模式
+    auto& ssid_manager = SsidManager::GetInstance();
+    if (ssid_manager.GetSsidList().empty() && !wifi_config_mode_) {
+        wifi_config_mode_ = true;
     }
 
-    // If no WiFi SSID is configured, enter WiFi configuration mode
-    auto& ssid_manager = SsidManager::GetInstance();
-    auto ssid_list = ssid_manager.GetSsidList();
-    if (ssid_list.empty()) {
+    // 配网模式（首次使用 或 用户长按进入）
+    if (wifi_config_mode_) {
+        EnterWifiConfigMode();  // 等待配网完成，返回后 wifi_config_mode_ 已清
+        // 配网完成后继续往下走，尝试连接
+    }
+
+    // 尝试连接已保存的WiFi
+    if (ssid_manager.GetSsidList().empty()) {
+        ESP_LOGW(TAG, "Still no WiFi configured, re-entering config mode...");
         wifi_config_mode_ = true;
         EnterWifiConfigMode();
         return;
     }
 
     auto& wifi_station = WifiStation::GetInstance();
-    wifi_station.OnScanBegin([this]() {
-        auto display = Board::GetInstance().GetDisplay();
+    wifi_station.OnScanBegin([this, display]() {
         display->ShowNotification(Lang::Strings::SCANNING_WIFI, 30000);
     });
-    wifi_station.OnConnect([this](const std::string& ssid) {
-        auto display = Board::GetInstance().GetDisplay();
-        std::string notification = Lang::Strings::CONNECT_TO;
-        notification += ssid;
-        notification += "...";
+    wifi_station.OnConnect([this, display](const std::string& ssid) {
+        std::string notification = Lang::Strings::CONNECT_TO + ssid + "...";
         display->ShowNotification(notification.c_str(), 30000);
     });
-    wifi_station.OnConnected([this](const std::string& ssid) {
-        auto display = Board::GetInstance().GetDisplay();
-        std::string notification = Lang::Strings::CONNECTED_TO;
-        notification += ssid;
+    wifi_station.OnConnected([this, display](const std::string& ssid) {
+        std::string notification = Lang::Strings::CONNECTED_TO + ssid;
         display->ShowNotification(notification.c_str(), 30000);
     });
     wifi_station.Start();
 
-    // Try to connect to WiFi, if failed, launch the WiFi configuration AP
+    // 等60秒连接，失败则重新配网
     if (!wifi_station.WaitForConnected(60 * 1000)) {
+        ESP_LOGW(TAG, "WiFi connection failed, entering config mode...");
         wifi_station.Stop();
         wifi_config_mode_ = true;
         EnterWifiConfigMode();
-        return;
+        // 配网后又回到这里重试
+        wifi_station.Start();
+        if (!wifi_station.WaitForConnected(60 * 1000)) {
+            wifi_station.Stop();
+            ESP_LOGW(TAG, "Still failed, continuing without WiFi");
+        }
     }
 }
 
