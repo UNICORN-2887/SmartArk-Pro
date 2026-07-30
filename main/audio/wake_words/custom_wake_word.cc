@@ -2,6 +2,7 @@
 #include "application.h"
 
 #include <esp_log.h>
+#include <esp_timer.h>
 #include <model_path.h>
 #include <arpa/inet.h>
 #include "esp_wn_iface.h"
@@ -64,12 +65,14 @@ bool CustomWakeWord::Initialize(AudioCodec* codec) {
     ESP_LOGI(TAG, "multinet:%s", mn_name_);
     multinet_ = esp_mn_handle_from_name(mn_name_);
     multinet_model_data_ = multinet_->create(mn_name_, 2000);  // 2秒超时
-    multinet_->set_det_threshold(multinet_model_data_, 0.05); // 极低阈值
+    multinet_->set_det_threshold(multinet_model_data_, 0.10); // 过滤噪声误触发（正常唤醒~0.12）
     esp_mn_commands_clear();
-    esp_mn_commands_add(1, CONFIG_CUSTOM_WAKE_WORD);     // ni hao kai er xi
-    esp_mn_commands_add(2, "ni hao xiao zhi");           // 保底
-    esp_mn_commands_add(3, "kai er xi");                 // 短唤醒词
-    esp_mn_commands_add(4, "ni hao kai er xi");          // 重复(强制FST重建)
+    // 注册多唤醒词（不同智能体）
+    esp_mn_commands_add(1, "ni hao kai er xi");          // 凯尔希
+    esp_mn_commands_add(2, "kai er xi");                 // 凯尔希(短)
+    esp_mn_commands_add(3, "ni hao xiao zhi");           // 小智(保底)
+    esp_mn_commands_add(4, "ni hao a mi ya");            // 阿米娅
+    esp_mn_commands_add(5, "a mi ya");                   // 阿米娅(短)
     esp_mn_commands_update();
     
     // 打印所有的命令词
@@ -110,6 +113,14 @@ void CustomWakeWord::OnWakeWordDetected(std::function<void(const std::string& wa
 }
 
 void CustomWakeWord::Start() {
+    // 清除对话期间 AFE 积累的残留音频，防止误触发
+    if (afe_data_ != nullptr) {
+        afe_iface_->reset_buffer(afe_data_);
+    }
+    // 重置 MultiNet 内部状态
+    if (multinet_model_data_ != nullptr && multinet_ != nullptr) {
+        multinet_->clean(multinet_model_data_);
+    }
     xEventGroupSetBits(event_group_, DETECTION_RUNNING_EVENT);
 }
 
@@ -168,12 +179,30 @@ void CustomWakeWord::AudioDetectionTask() {
         esp_mn_state_t mn_state = multinet_->detect(multinet_model_data_, res->data);
         esp_mn_results_t *mn_result = multinet_->get_results(multinet_model_data_);
 
-        if (mn_result && mn_result->command_id[0] >= 1 && mn_result->command_id[0] <= 3) {
-            ESP_LOGI(TAG, "Wake word detected: id=%d, str=%s, prob=%f",
-                    mn_result->command_id[0], mn_result->string, mn_result->prob[0]);
+        // 必须检查 DETECTED 状态，否则 get_results() 返回残留旧数据
+        if (mn_state == ESP_MN_STATE_DETECTED && mn_result && mn_result->command_id[0] >= 1 && mn_result->command_id[0] <= 5) {
+            int id = mn_result->command_id[0];
+
+            // 冷却检查：5秒内不重复触发，防止对话结束后环境噪声误唤醒
+            int64_t now = esp_timer_get_time();
+            if (now - last_detect_time_ < 5000000) {
+                ESP_LOGD(TAG, "Wake word #%d ignored (cooldown, %lld ms since last)",
+                        id, (now - last_detect_time_) / 1000);
+                multinet_->clean(multinet_model_data_);
+                continue;
+            }
+            last_detect_time_ = now;
+
+            // 多唤醒词 → 不同显示名（为智能体切换做准备）
+            static const char *names[] = {
+                "", "你好凯尔希", "凯尔希", "你好小智", "你好阿米娅", "阿米娅"
+            };
+            const char *display = (id >= 1 && id <= 5) ? names[id] : CONFIG_CUSTOM_WAKE_WORD_DISPLAY;
+            ESP_LOGI(TAG, "Wake word #%d: '%s' prob=%.2f → %s",
+                    id, mn_result->string, mn_result->prob[0], display);
 
             Stop();
-            last_detected_wake_word_ = CONFIG_CUSTOM_WAKE_WORD_DISPLAY;
+            last_detected_wake_word_ = display;
             if (wake_word_detected_callback_) {
                 wake_word_detected_callback_(last_detected_wake_word_);
             }
