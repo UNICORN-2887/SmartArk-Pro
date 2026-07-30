@@ -105,6 +105,13 @@ static size_t s_jpg_cache_size[MAX_CACHE];
 static int s_cache_count = 0;
 static bool s_use_mjpeg = false;
 
+// 双缓冲：后台异步预加载下一个表情
+static uint8_t *s_pending_cache[MAX_CACHE];
+static size_t  s_pending_sizes[MAX_CACHE];
+static int     s_pending_count = 0;
+static bool    s_pending_ready = false;
+static TaskHandle_t s_preload_task = NULL;
+
 void ppa_preload_frames(const char *paths[], int count) {
     if (count > MAX_CACHE) count = MAX_CACHE;
     int loaded = 0;
@@ -218,6 +225,117 @@ int ppa_preload_mjpeg(const char *path) {
     ESP_LOGI(TAG, "MJPEG parsed: %d/%lu frames, %u KB PSRAM file buf freed",
              loaded, (unsigned long)frame_count, (unsigned)(total/1024));
     return loaded;
+}
+
+// ── 内部：加载MJPEG到指定缓冲区（不碰活跃缓存）──
+static int load_mjpeg_into(const char *path,
+                           uint8_t *cache[], size_t sizes[], int max_count) {
+    FILE *fp = fopen(path, "rb");
+    if (!fp) { ESP_LOGE(TAG, "Cannot open %s", path); return 0; }
+
+    fseek(fp, 0, SEEK_END);
+    size_t file_size = ftell(fp);
+    if (file_size == 0 || file_size > 16*1024*1024) { fclose(fp); return 0; }
+    rewind(fp);
+
+    uint8_t *file_buf = (uint8_t*)heap_caps_malloc(file_size, MALLOC_CAP_SPIRAM);
+    if (!file_buf) {
+        ESP_LOGE(TAG, "PSRAM alloc %u KB failed", (unsigned)(file_size/1024));
+        fclose(fp); return 0;
+    }
+
+    size_t total = 0;
+    int zero_streak = 0;
+    while (total < file_size) {
+        size_t got = fread(file_buf + total, 1, file_size - total, fp);
+        if (got > 0) { total += got; zero_streak = 0; continue; }
+        if (++zero_streak > 30) break;
+        clearerr(fp);
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    clearerr(fp); fclose(fp);
+    if (total == 0) { free(file_buf); return 0; }
+    ESP_LOGI(TAG, "Read %u/%u KB in one pass", (unsigned)(total/1024), (unsigned)(file_size/1024));
+
+    uint32_t frame_count;
+    memcpy(&frame_count, file_buf, 4);
+    if (frame_count == 0 || frame_count > (uint32_t)max_count) { free(file_buf); return 0; }
+
+    uint32_t offsets[MAX_CACHE];
+    for (int i = 0; i < (int)frame_count; i++)
+        memcpy(&offsets[i], file_buf + 4 + i * 4, 4);
+
+    int loaded = 0;
+    for (int i = 0; i < (int)frame_count && loaded < max_count; i++) {
+        size_t start = offsets[i];
+        size_t end = (i < (int)frame_count - 1) ? offsets[i + 1] : total;
+        if (end <= start || end - start > 512*1024 || start >= total) continue;
+        size_t sz = end - start;
+        uint8_t *buf = (uint8_t*)heap_caps_malloc(sz, MALLOC_CAP_SPIRAM);
+        if (!buf) break;
+        memcpy(buf, file_buf + start, sz);
+        cache[loaded] = buf;
+        sizes[loaded] = sz;
+        loaded++;
+    }
+    free(file_buf);
+    ESP_LOGI(TAG, "Async MJPEG: %d/%lu frames, %u KB buf freed",
+             loaded, (unsigned long)frame_count, (unsigned)(total/1024));
+    return loaded;
+}
+
+// ── 异步预加载到后备缓冲区 ──
+static void preload_task(void *arg) {
+    const char *path = (const char*)arg;
+    // 先清空后备缓冲区
+    for (int i = 0; i < s_pending_count; i++) {
+        if (s_pending_cache[i]) free(s_pending_cache[i]);
+    }
+    s_pending_count = 0;
+    s_pending_ready = false;
+
+    int count = load_mjpeg_into(path, s_pending_cache, s_pending_sizes, MAX_CACHE);
+    if (count > 0) {
+        s_pending_count = count;
+        s_pending_ready = true;
+        ESP_LOGI(TAG, "Pending emotion ready: %d frames (%s)", count, path);
+    }
+    s_preload_task = NULL;
+    vTaskDelete(NULL);
+}
+
+void ppa_preload_mjpeg_async(const char *path) {
+    if (s_preload_task) {
+        // 上一个预加载还在跑，先等它完成
+        return;
+    }
+    // 复制路径字符串（任务可能在函数返回后才用）
+    static char s_path_buf[256];
+    strncpy(s_path_buf, path, sizeof(s_path_buf) - 1);
+    xTaskCreate(preload_task, "mjpeg_preload", 8192, (void*)s_path_buf, 2, &s_preload_task);
+}
+
+int ppa_swap_emotion(void) {
+    if (!s_pending_ready) return 0;
+
+    // 交换活跃 ↔ 后备
+    for (int i = 0; i < MAX_CACHE; i++) {
+        uint8_t *tmp = s_jpg_cache[i];
+        s_jpg_cache[i] = s_pending_cache[i];
+        s_pending_cache[i] = tmp;
+
+        size_t stmp = s_jpg_cache_size[i];
+        s_jpg_cache_size[i] = s_pending_sizes[i];
+        s_pending_sizes[i] = stmp;
+    }
+    int new_count = s_pending_count;
+    s_pending_count = s_cache_count;  // 旧活跃变成后备（等下被异步任务清掉）
+    s_cache_count = new_count;
+    s_pending_ready = false;
+
+    ESP_LOGI(TAG, "Swapped emotion: %d frames active, %d pending",
+             s_cache_count, s_pending_count);
+    return s_cache_count;
 }
 
 bool ppa_open_mjpeg(const char *path, int *out_frame_count) {

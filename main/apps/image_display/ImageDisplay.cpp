@@ -115,6 +115,9 @@ bool image_display_init(void)
     }
     ESP_LOGI(TAG, "Using %d preloaded frames", s_image_count);
 
+    // 启动异步预加载：默认 thinking 已在 active，预取 neutral
+    ppa_preload_mjpeg_async("/sdcard/neutral.mjpeg");
+
     // 创建显示画布
     lvgl_port_lock(0);
     s_image_canvas = lv_canvas_create(lv_scr_act());
@@ -181,7 +184,7 @@ static void video_playback_task(void *arg)
     s_frame_count = 0;
     s_last_fps_time = esp_timer_get_time();
 
-    // 轮流播放 thinking ↔ neutral（每3秒切换）
+    // 双缓冲表情切换：thinking ↔ neutral（零阻塞）
     const char *emotions[] = {"thinking", "neutral"};
     const int emotion_count = 2;
     int emotion_idx = 0;
@@ -191,22 +194,29 @@ static void video_playback_task(void *arg)
     while (s_video_running) {
         int64_t frame_start = esp_timer_get_time();
 
-        // 显示下一帧（PSRAM预加载数据，零SD访问）
+        // 显示下一帧（PSRAM，零SD访问）
         if (!image_display_next()) s_current_index = 0;
         s_frame_count++;
         switch_counter++;
 
-        // 每3秒切换表情（重新加载MJPEG）
+        // 每3秒尝试交换缓冲区（<1ms），然后启动下一个异步预加载
         if (switch_counter >= SWITCH_INTERVAL * s_video_fps) {
             switch_counter = 0;
-            emotion_idx = (emotion_idx + 1) % emotion_count;
-            char path[64];
-            snprintf(path, sizeof(path), "/sdcard/%s.mjpeg", emotions[emotion_idx]);
-            int count = ppa_preload_mjpeg(path);
+
+            int count = ppa_swap_emotion();  // 瞬间交换，零阻塞！
             if (count > 0) {
+                emotion_idx = (emotion_idx + 1) % emotion_count;  // 成功后递增
                 s_image_count = count;
                 s_current_index = 0;
-                ESP_LOGI(TAG, "Switched to %s (%d frames)", emotions[emotion_idx], count);
+                ESP_LOGI(TAG, "Swapped to %s (%d frames)", emotions[emotion_idx], count);
+
+                // 预加载下一个表情（后台异步）
+                int next = (emotion_idx + 1) % emotion_count;
+                char path[64];
+                snprintf(path, sizeof(path), "/sdcard/%s.mjpeg", emotions[next]);
+                ppa_preload_mjpeg_async(path);
+            } else {
+                ESP_LOGW(TAG, "Pending not ready, will retry");
             }
         }
 

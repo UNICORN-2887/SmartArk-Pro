@@ -14,13 +14,20 @@ void ppa_preload_frames(const char *paths[], int count);
 // 获取已预加载的帧数
 int ppa_get_cache_count(void);
 
-// 从MJPEG文件预加载（1次fopen + N次顺序fread，比逐文件快3倍）
+// 从MJPEG文件预加载（同步，阻塞显示~130ms）
 int ppa_preload_mjpeg(const char *path);
 
-// 打开MJPEG文件（内存高效模式，fseek读取，~1.5MB RAM）
+// 异步预加载到后备缓冲区（后台任务，不阻塞显示）
+void ppa_preload_mjpeg_async(const char *path);
+
+// 交换活跃/后备缓冲区（<1ms，零SD访问）
+// 返回新帧数，若后备未就绪返回0
+int ppa_swap_emotion(void);
+
+// 打开MJPEG文件（内存高效模式，fseek读取）
 bool ppa_open_mjpeg(const char *path, int *out_frame_count);
 
-// 解码前景帧并PPA抠图合成（自动选择MJPEG或缓存模式）
+// 解码前景帧并PPA抠图合成
 uint8_t* ppa_composite_frame(int frame_index);
 
 // 释放所有资源
