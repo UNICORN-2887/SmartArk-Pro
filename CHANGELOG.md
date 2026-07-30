@@ -1,5 +1,67 @@
 # 表情动画播放 — 变更记录
 
+## 2026-07-30 #25 — 多唤醒词防误触发 + 智能体切换准备
+
+### 多唤醒词注册（5条命令）
+- `ni hao kai er xi` (command_id=1) → "你好凯尔希"
+- `kai er xi` (command_id=2) → "凯尔希"(短)
+- `ni hao xiao zhi` (command_id=3) → "你好小智"(保底)
+- `ni hao a mi ya` (command_id=4) → "你好阿米娅" ✨新增
+- `a mi ya` (command_id=5) → "阿米娅"(短) ✨新增
+- 显示名映射数组 `names[]`，为智能体切换做准备
+
+### 防误触发三层防护
+**问题**: 对话结束后长时间静音，设备会自动唤醒（假阳性）  
+**根因分析**:
+1. 对话期间 AFE 持续接收麦克风数据，检测 task 被 Stop 不消费 → 音频堆积
+2. 对话结束后 `Start()` 直接放行 → `fetch_with_delay()` 秒吐堆积音频 → MultiNet 误匹配
+3. `get_results()` 在 detect 未匹配时返回残留旧数据（空字符串, prob=0.19, command_id=4）
+
+**三层防护**:
+
+| 层级 | 机制 | 文件 | 解决问题 |
+|------|------|------|----------|
+| 1 | `Start()` 中 `reset_buffer()` + `clean()` | custom_wake_word.cc | 清除对话期间 AFE 堆积的残留音频 |
+| 2 | 阈值 0.05→0.10 | custom_wake_word.cc | 过滤环境噪声低概率假阳性（正常唤醒~0.12） |
+| 3 | 5秒冷却时间 | custom_wake_word.cc | 防止连续误触发 |
+
+### ESP_MN_STATE_DETECTED 状态检查
+- **关键修复**: 加回 `mn_state == ESP_MN_STATE_DETECTED` 判断
+- **原因**: 之前绕过此检查是因为默认阈值0.5太高，自定义唤醒词永远进不了 DETECTED
+- **现在**: 阈值降到 0.10 后，正常唤醒词(prob≈0.12~0.20)能触发 DETECTED 状态
+- **效果**: 过滤掉 `get_results()` 在未检测到匹配时返回的残留旧数据
+
+### 双缓冲异步表情切换修复
+- Bug fix: `emotion_idx` 只在 swap 成功后才递增（之前提前递增导致显示错误表情名）
+- 预期行为: thinking↔neutral 每3秒自动切换，零阻塞（<1ms）
+
+---
+
+## 2026-07-29 #24 — 阿米娅唤醒词 + 双缓冲表情切换
+
+### 新增唤醒词
+- `ni hao a mi ya` (你好阿米娅, command_id=4)
+- `a mi ya` (阿米娅短唤醒, command_id=5)
+- 检测范围扩展至 1~5
+
+### 双缓冲异步表情切换
+**问题**: 表情切换时需从 SD 卡加载 4.4MB MJPEG → 阻塞显示 ~200ms → 画面冻结  
+**方案**: 活跃缓存 + 后备缓存双缓冲
+
+- `s_jpg_cache[]` — 活跃帧（当前播放）
+- `s_pending_cache[]` — 后备帧（后台异步预加载）
+- `ppa_preload_mjpeg_async(path)` — FreeRTOS 后台任务（prio=2, stack=8KB）
+- `ppa_swap_emotion()` — 瞬间交换两个缓存数组（<1ms，零阻塞！）
+- 首次预加载后自动启动下一个表情的异步加载
+- 修复: 预加载前先释放旧帧，防止 PSRAM 碎片化
+
+### 30FPS 表情播放 + 对话共存
+- 视频播放 task prio=5，独立于音频 pipeline
+- 125帧 thinking/neutral MJPEG，30+ FPS 稳定播放
+- 对话期间表情持续播放不中断
+
+---
+
 ## 2026-07-29 #23 — 0x107 真因 + FATFS LFN + 表情切换稳定方案
 
 ### 0x107 (SDMMC超时) 根因分析
