@@ -603,6 +603,29 @@ void Application::OnWakeWordDetected() {
     }
 
     if (device_state_ == kDeviceStateIdle) {
+        auto wake_word = audio_service_.GetLastWakeWord();
+        ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
+
+        // 唤醒词 → 智能体 agent_id 映射
+        static const std::string agent_kaltsit = "0a20483553fe4ff784a016d0fafabfff";
+        static const std::string agent_amiya = "5838c85f30ab4b33a4341bf8b0736e26";
+        std::string target_agent;
+        if (wake_word.find("凯尔希") != std::string::npos) {
+            target_agent = agent_kaltsit;
+        } else if (wake_word.find("阿米娅") != std::string::npos) {
+            target_agent = agent_amiya;
+        }
+        // "你好小智" → target_agent 为空，不发 X-Agent-ID（默认智能体）
+
+        // 智能体变化时断开重连（用新的 X-Agent-ID）
+        if (target_agent != protocol_->agent_id()) {
+            ESP_LOGI(TAG, "Switching agent: '%s' → '%s'", protocol_->agent_id().c_str(), target_agent.c_str());
+            if (protocol_->IsAudioChannelOpened()) {
+                protocol_->CloseAudioChannel();
+            }
+            protocol_->SetAgentId(target_agent);
+        }
+
         audio_service_.EncodeWakeWord();
 
         if (!protocol_->IsAudioChannelOpened()) {
@@ -612,9 +635,6 @@ void Application::OnWakeWordDetected() {
                 return;
             }
         }
-
-        auto wake_word = audio_service_.GetLastWakeWord();
-        ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
 #if CONFIG_USE_AFE_WAKE_WORD || CONFIG_USE_CUSTOM_WAKE_WORD
         // Encode and send the wake word data to the server
         while (auto packet = audio_service_.PopWakeWordPacket()) {

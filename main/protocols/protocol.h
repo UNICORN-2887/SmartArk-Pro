@@ -61,6 +61,9 @@ public:
     void OnAudioChannelClosed(std::function<void()> callback);
     void OnNetworkError(std::function<void(const std::string& message)> callback);
 
+    inline void SetAgentId(const std::string& agent_id) { agent_id_ = agent_id; }
+    inline const std::string& agent_id() const { return agent_id_; }
+
     virtual bool Start() = 0;
     virtual bool OpenAudioChannel() = 0;
     virtual void CloseAudioChannel() = 0;
@@ -83,6 +86,7 @@ protected:
     int server_frame_duration_ = 60;
     bool error_occurred_ = false;
     std::string session_id_;
+    std::string agent_id_;
     std::chrono::time_point<std::chrono::steady_clock> last_incoming_time_;
 
     virtual bool SendText(const std::string& text) = 0;
