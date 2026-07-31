@@ -16,6 +16,8 @@
 static FILE *s_mjpeg_fp = NULL;
 static uint32_t s_frame_count = 0;
 static uint32_t s_frame_offsets[MAX_FRAMES];
+static int s_last_index = -1;    // 上次读取的帧号（用于顺序读取优化）
+
 
 bool mjpeg_open(const char *path)
 {
@@ -42,6 +44,7 @@ bool mjpeg_open(const char *path)
         }
     }
 
+    s_last_index = -1;
     ESP_LOGI(TAG, "Opened %s: %lu frames", path, s_frame_count);
     return true;
 }
@@ -50,7 +53,6 @@ bool mjpeg_get_frame(int index, uint8_t **jpeg_data, size_t *jpeg_size)
 {
     if (!s_mjpeg_fp || index < 0 || index >= (int)s_frame_count) return false;
 
-    // Calculate JPEG size from next frame offset (or EOF for last frame)
     size_t jpg_start = s_frame_offsets[index];
     size_t jpg_end;
     if (index < (int)s_frame_count - 1) {
@@ -60,17 +62,24 @@ bool mjpeg_get_frame(int index, uint8_t **jpeg_data, size_t *jpeg_size)
         jpg_end = ftell(s_mjpeg_fp);
     }
     size_t size = jpg_end - jpg_start;
-    if (size == 0 || size > 512 * 1024) return false; // sanity check
+    if (size == 0 || size > 512 * 1024) return false;
 
     *jpeg_data = (uint8_t*)malloc(size);
     if (!*jpeg_data) return false;
 
-    fseek(s_mjpeg_fp, jpg_start, SEEK_SET);
+    // 顺序读取优化：下一帧紧跟上一帧之后，跳过 fseek
+    bool sequential = (index == s_last_index + 1);
+    if (!sequential) {
+        fseek(s_mjpeg_fp, jpg_start, SEEK_SET);
+    }
+
     if (fread(*jpeg_data, 1, size, s_mjpeg_fp) != size) {
         free(*jpeg_data);
+        s_last_index = -1;
         return false;
     }
 
+    s_last_index = index;
     *jpeg_size = size;
     return true;
 }
@@ -81,4 +90,5 @@ void mjpeg_close(void)
 {
     if (s_mjpeg_fp) { fclose(s_mjpeg_fp); s_mjpeg_fp = NULL; }
     s_frame_count = 0;
+    s_last_index = -1;
 }

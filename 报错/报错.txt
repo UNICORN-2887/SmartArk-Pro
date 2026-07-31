@@ -1,14 +1,65 @@
-Wno-error=extra -Wno-unused-parameter -Wno-sign-compare -Wno-enum-conversion -gdwarf-4 -ggdb -nostartfiles -Os -freorder-blocks -fmacro-prefix-map=E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1=. -fmacro-prefix-map=E:/Passport/esp32/v5.5.1/esp-idf=/IDF -fstrict-volatile-bitfields -fno-jump-tables -fno-tree-switch-conversion -std=gnu++2b -fexceptions -fno-rtti -fuse-cxa-atexit -DESP_LCD_NV3023_VER_MAJOR=1 -DESP_LCD_NV3023_VER_MINOR=0 -DESP_LCD_NV3023_VER_PATCH=0 -DADC_BATTERY_ESTIMATION_VER_MAJOR=0 -DADC_BATTERY_ESTIMATION_VER_MINOR=2 -DADC_BATTERY_ESTIMATION_VER_PATCH=0 -DADC_MIC_VER_MAJOR=0 -DADC_MIC_VER_MINOR=2 -DADC_MIC_VER_PATCH=0 -DBUTTON_VER_MAJOR=4 -DBUTTON_VER_MINOR=1 -DBUTTON_VER_PATCH=3 -DESP_LCD_AXS15231B_VER_MAJOR=1 -DESP_LCD_AXS15231B_VER_MINOR=0 -DESP_LCD_AXS15231B_VER_PATCH=1 -DESP_LCD_GC9A01_VER_MAJOR=2 -DESP_LCD_GC9A01_VER_MINOR=0 -DESP_LCD_GC9A01_VER_PATCH=1 -DESP_LCD_ILI9341_VER_MAJOR=1 -DESP_LCD_ILI9341_VER_MINOR=2 -DESP_LCD_ILI9341_VER_PATCH=0 -DESP_LCD_JD9165_VER_MAJOR=1 -DESP_LCD_JD9165_VER_MINOR=0 -DESP_LCD_JD9165_VER_PATCH=2 -DESP_LCD_JD9365_VER_MAJOR=1 -DESP_LCD_JD9365_VER_MINOR=0 -DESP_LCD_JD9365_VER_PATCH=2 -DESP_LCD_PANEL_IO_ADDITIONS_VER_MAJOR=1 -DESP_LCD_PANEL_IO_ADDITIONS_VER_MINOR=0 -DESP_LCD_PANEL_IO_ADDITIONS_VER_PATCH=1 -DESP_LCD_SPD2010_VER_MAJOR=1 -DESP_LCD_SPD2010_VER_MINOR=0 -DESP_LCD_SPD2010_VER_PATCH=2 -DESP_LCD_ST7701_VER_MAJOR=1 -DESP_LCD_ST7701_VER_MINOR=1 -DESP_LCD_ST7701_VER_PATCH=3 -DESP_LCD_ST77916_VER_MAJOR=1 -DESP_LCD_ST77916_VER_MINOR=0 -DESP_LCD_ST77916_VER_PATCH=1 -DESP_LCD_ST7796_VER_MAJOR=1 -DESP_LCD_ST7796_VER_MINOR=3 -DESP_LCD_ST7796_VER_PATCH=2 -DESP_MMAP_ASSETS_VER_MAJOR=1 -DESP_MMAP_ASSETS_VER_MINOR=3 -DESP_MMAP_ASSETS_VER_PATCH=1 -DKNOB_VER_MAJOR=1 -DKNOB_VER_MINOR=0 -DKNOB_VER_PATCH=0 -DESP_LCD_JD9365_10_1_VER_MAJOR=1 -DESP_LCD_JD9365_10_1_VER_MINOR=0 -DESP_LCD_JD9365_10_1_VER_PATCH=3 -DESP_LCD_SH8601_VER_MAJOR=1 -DESP_LCD_SH8601_VER_MINOR=0 -DESP_LCD_SH8601_VER_PATCH=2 -DESP_LCD_ST7703_VER_MAJOR=1 -DESP_LCD_ST7703_VER_MINOR=0 -DESP_LCD_ST7703_VER_PATCH=3 -DI2C_BUS_VER_MAJOR=1 -DI2C_BUS_VER_MINOR=5 -DI2C_BUS_VER_PATCH=2 -MD -MT esp-idf/main/CMakeFiles/__idf_main.dir/apps/image_display/ImageDisplay.cpp.obj -MF esp-idf\main\CMakeFiles\__idf_main.dir\apps\image_display\ImageDisplay.cpp.obj.d -o esp-idf/main/CMakeFiles/__idf_main.dir/apps/image_display/ImageDisplay.cpp.obj -c E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/main/apps/image_display/ImageDisplay.cpp     
-E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/main/apps/image_display/ImageDisplay.cpp: In function 'void video_playback_task(void*)':
-E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/main/apps/image_display/ImageDisplay.cpp:217:53: error: 'frame_start' was not declared in this scope
-  217 |         int64_t frame_time = esp_timer_get_time() - frame_start;
-      |                                                     ^~~~~~~~~~~
-E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/main/apps/image_display/ImageDisplay.cpp: At global scope:
-E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/main/apps/image_display/ImageDisplay.cpp:27:15: warning: 's_output_buf_size' defined but not used [-Wunused-variable]
-   27 | static size_t s_output_buf_size = 0;
-      |               ^~~~~~~~~~~~~~~~~
-E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/main/apps/image_display/ImageDisplay.cpp:26:17: warning: 's_output_buf' defined but not used [-Wunused-variable]
-   26 | static uint8_t *s_output_buf = NULL;
-      |                 ^~~~~~~~~~~~
-[2019/2063] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/boards/common/afsk_demod.cc.obj
-ninja: build stopped: subcommand failed.
+I (32107) AFE: AFE Pipeline: [input] -> |VAD(WebRTC)| -> [output]
+W (32108) AFE: Ringbuffer of AFE(FEED) is full, Please use fetch() to read data to avoid data loss or overwriting
+I (32109) AppImageDisplay: FPS:19 [expr]
+I (32113) AfeAudioProcessor: Audio communication task started, feed size: 512 fetch size: 512
+I (32175) Application: >> 你好凯尔希
+I (33156) AppImageDisplay: FPS:19 [expr]
+I (33989) Application: STATE: speaking
+I (33992) Application: 🎭 LLM → expression: thinking
+I (33998) Application: << 博士，你迟到了。
+I (34170) AppImageDisplay: FPS:19 [expr]
+I (35187) AppImageDisplay: FPS:19 [expr]
+I (36206) AppImageDisplay: FPS:19 [expr]
+I (36933) PPACompositor: /sdcard/main/operator/MEDIC/6STAR/Kaltsit/emoji/thinking.mjpeg: 120/120 frames, 3382 KB PSRAM (streaming, 0 seek)
+I (37234) AppImageDisplay: FPS:20 [expr]
+I (37323) Application: 🎭 LLM → expression: thinking
+I (37323) Application: << 今天的日程已经排满，请直接说明来意。
+I (38259) AppImageDisplay: FPS:21 [expr]
+I (39283) AppImageDisplay: FPS:21 [expr]
+I (40301) AppImageDisplay: FPS:21 [expr]
+I (40546) PPACompositor: Mask loaded: /sdcard/main/operator/MEDIC/6STAR/Kaltsit/emoji/thinking.mask (120/120 frames)
+I (40546) PPACompositor: Pending emotion ready: 120 frames (/sdcard/main/operator/MEDIC/6STAR/Kaltsit/emoji/thinking.mjpeg)
+I (40592) PPACompositor: Swapped emotion: 120 frames active, 120 pending
+I (40592) AppImageDisplay: 🎭 Preemptive swap: 120 frames
+I (41302) AppImageDisplay: FPS:21 [expr]
+I (42342) AppImageDisplay: FPS:22 [expr]
+I (42803) Application: STATE: listening
+I (43345) AppImageDisplay: FPS:21 [expr]
+I (44355) AppImageDisplay: FPS:21 [expr]
+I (45356) AppImageDisplay: FPS:21 [expr]
+I (46362) AppImageDisplay: FPS:21 [expr]
+I (47367) AppImageDisplay: FPS:21 [expr]
+I (48370) AppImageDisplay: FPS:21 [expr]
+I (49380) AppImageDisplay: FPS:21 [expr]
+I (50087) Application: >> 解释一下 LQR 控制算法。
+I (50390) AppImageDisplay: FPS:21 [expr]
+I (51397) AppImageDisplay: FPS:21 [expr]
+I (51691) Application: 🎭 LLM → expression: thinking
+I (51692) Application: << 一个典型的线性二次型调节器问题。
+I (51724) Application: STATE: speaking
+I (52436) AppImageDisplay: FPS:20 [expr]
+I (53447) AppImageDisplay: FPS:19 [expr]
+I (54451) AppImageDisplay: FPS:19 [expr]
+I (55467) AppImageDisplay: FPS:19 [expr]
+I (55772) Application: 🎭 LLM → expression: thinking
+I (55774) Application: << 它在控制理论中用于最小化一个二次型代价函数，找到最优状态反馈增益矩阵。
+I (56497) AppImageDisplay: FPS:19 [expr]
+I (57525) AppImageDisplay: FPS:19 [expr]
+I (57670) PPACompositor: /sdcard/main/operator/MEDIC/6STAR/Kaltsit/emoji/thinking.mjpeg: 120/120 frames, 3382 KB PSRAM (streaming, 0 seek)
+I (58548) AppImageDisplay: FPS:21 [expr]
+I (59569) AppImageDisplay: FPS:21 [expr]
+I (60589) AppImageDisplay: FPS:21 [expr]
+I (61025) SystemInfo: free sram: 290515 minimal sram: 222979
+I (61315) PPACompositor: Mask loaded: /sdcard/main/operator/MEDIC/6STAR/Kaltsit/emoji/thinking.mask (120/120 frames)
+I (61315) PPACompositor: Pending emotion ready: 120 frames (/sdcard/main/operator/MEDIC/6STAR/Kaltsit/emoji/thinking.mjpeg)
+I (61316) PPACompositor: Swapped emotion: 120 frames active, 120 pending
+I (61331) AppImageDisplay: 🎭 Preemptive swap: 120 frames
+I (61616) AppImageDisplay: FPS:21 [expr]
+I (62656) AppImageDisplay: FPS:22 [expr]
+I (63695) AppImageDisplay: FPS:22 [expr]
+I (64024) Application: 🎭 LLM → expression: thinking
+I (64025) Application: << 你突然问这个，是打算在罗德岛的战术无人机上应用，还是单纯想测试我的知识储备？
+I (64737) AppImageDisplay: FPS:20 [expr]
+I (65767) AppImageDisplay: FPS:19 [expr]
+I (66791) AppImageDisplay: FPS:19 [expr]
+I (67296) AudioCodec: Set input enable to false

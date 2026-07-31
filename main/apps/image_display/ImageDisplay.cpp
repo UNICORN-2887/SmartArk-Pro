@@ -29,11 +29,30 @@ static int s_current_index = 0;
 static int s_image_count = 0;
 static char s_image_paths[256][300];
 
+// 展示模式 vs 交互模式
+static bool s_cover_mode = false;
+static bool s_first_cover = true;
+static char s_agent_path[256] = {0};
+static volatile bool s_force_swap = false;  // LLM 抢占式切换标志
+
+// 前向声明（定义在后面）
+void video_playback_stop(void);
+bool video_playback_start(int fps);
+
 // PPA抠图合成+显示（frame_index，自动MJPEG或缓存模式）
 static bool decode_and_display_image(int frame_index)
 {
     uint8_t *comp_buf = ppa_composite_frame(frame_index);
     if (!comp_buf) return false;
+
+    // Cover 直通模式：图片可能高于屏幕（如 840px），底部对齐裁切顶部黑边
+    if (!ppa_has_background()) {
+        int img_h = ppa_get_last_decoded_height();
+        if (img_h > 800) {
+            int skip = (img_h - 800) * 480 * 2;  // RGB565
+            comp_buf += skip;
+        }
+    }
 
     lvgl_port_lock(0);
     if (s_image_canvas) {
@@ -84,41 +103,16 @@ static int search_image_files(void)
     return s_image_count;
 }
 
-// 初始化图片显示
+// 初始化图片显示（最小化：仅 PPA + 画布，不加载内容）
 bool image_display_init(void)
 {
     ESP_LOGI(TAG, "Initializing image display...");
 
-    // 初始化PPA硬件合成器
     if (!ppa_init()) {
         ESP_LOGE(TAG, "PPA init failed");
         return false;
     }
 
-    // 加载静态背景
-    if (!ppa_load_background("/sdcard/background.jpg")) {
-        ESP_LOGE(TAG, "Background load failed, continuing without bg");
-    }
-
-    // 帧数据已在 sd_mount_task 中预加载到 PSRAM（WiFi 前），直接用
-    s_image_count = ppa_get_cache_count();
-    if (s_image_count == 0) {
-        ESP_LOGW(TAG, "No preloaded frames — falling back to SD scan");
-        if (search_image_files() == 0) {
-            ESP_LOGW(TAG, "No images found");
-            return false;
-        }
-        const char* path_ptrs[256];
-        for (int i = 0; i < s_image_count; i++) path_ptrs[i] = s_image_paths[i];
-        ppa_preload_frames(path_ptrs, s_image_count);
-        s_image_count = ppa_get_cache_count();
-    }
-    ESP_LOGI(TAG, "Using %d preloaded frames", s_image_count);
-
-    // 启动异步预加载：默认 thinking 已在 active，预取 neutral
-    ppa_preload_mjpeg_async("/sdcard/neutral.mjpeg");
-
-    // 创建显示画布
     lvgl_port_lock(0);
     s_image_canvas = lv_canvas_create(lv_scr_act());
     lv_obj_set_pos(s_image_canvas, 0, 0);
@@ -128,8 +122,106 @@ bool image_display_init(void)
     lv_obj_add_style(s_image_canvas, &canvas_style, 0);
     lvgl_port_unlock();
 
+    ESP_LOGI(TAG, "Image display initialized (empty canvas)");
+    return true;
+}
+
+// ─── 展示模式（Cover）：PSRAM 预加载，30 FPS ──────────────
+
+bool cover_display_start(const char *agent_sd_path) {
+    video_playback_stop();
+    ppa_unload_background();
+
+    // 扫描 cover 目录找 .mjpeg 文件
+    char cover_dir[300], path[300] = {0};
+    snprintf(cover_dir, sizeof(cover_dir), "%s/cover", agent_sd_path);
+    DIR *d = opendir(cover_dir);
+    if (d) {
+        struct dirent *entry;
+        while ((entry = readdir(d)) != NULL) {
+            const char *ext = strrchr(entry->d_name, '.');
+            if (ext && strcasecmp(ext, ".mjpeg") == 0) {
+                snprintf(path, sizeof(path), "%s/cover/%s", agent_sd_path, entry->d_name);
+                break;
+            }
+        }
+        closedir(d);
+    }
+    if (path[0] == '\0') { ESP_LOGE(TAG, "No .mjpeg in cover dir"); return false; }
+
+    // 首次 cover 直接复用 sd_mount_task 在 WiFi 前预加载的帧
+    int frame_count;
+    if (s_first_cover) {
+        frame_count = ppa_get_cache_count();
+        s_first_cover = false;
+    } else {
+        frame_count = 0;
+    }
+    if (frame_count == 0) {
+        frame_count = ppa_preload_mjpeg(path);
+    }
+    if (frame_count == 0) { ESP_LOGE(TAG, "Failed to preload cover"); return false; }
+
+    strncpy(s_agent_path, agent_sd_path, sizeof(s_agent_path) - 1);
+    s_image_count = frame_count;
     s_current_index = 0;
-    return decode_and_display_image(0);
+    s_cover_mode = true;
+
+    ESP_LOGI(TAG, "Cover mode: %s (%d frames, PSRAM)", path, frame_count);
+    video_playback_start(30);
+    return true;
+}
+
+// ─── 交互模式（Expression）：预加载 + PPA 色键合成 ────────────
+
+bool expression_display_start(const char *agent_sd_path, const char *emotion) {
+    video_playback_stop();
+
+    // 关闭 cover fseek 模式 → 切到缓存模式
+    ppa_close_mjpeg();
+
+    // 加载背景 → PPA blend 模式
+    if (!ppa_has_background()) {
+        ppa_load_background("/sdcard/main/background/background.jpg");
+    }
+
+    strncpy(s_agent_path, agent_sd_path, sizeof(s_agent_path) - 1);
+
+    char path[300];
+    snprintf(path, sizeof(path), "%s/emoji/%s.mjpeg", agent_sd_path, emotion);
+
+    int count = ppa_preload_mjpeg(path);
+    if (count == 0) {
+        // 回退到 neutral
+        snprintf(path, sizeof(path), "%s/emoji/neutral.mjpeg", agent_sd_path);
+        count = ppa_preload_mjpeg(path);
+    }
+    if (count == 0) {
+        ESP_LOGE(TAG, "Failed to load expression: %s", path);
+        return false;
+    }
+
+    s_image_count = count;
+    s_current_index = 0;
+    s_cover_mode = false;
+
+    // 预加载 thinking 作为后备
+    snprintf(path, sizeof(path), "%s/emoji/thinking.mjpeg", agent_sd_path);
+    ppa_preload_mjpeg_async(path);
+
+    ESP_LOGI(TAG, "Expression mode: %s/%s.mjpeg (%d frames)", agent_sd_path, emotion, count);
+    video_playback_start(30);
+    return true;
+}
+
+// 切换表情（交互模式下，同智能体）
+void expression_switch_emotion(const char *emotion) {
+    if (s_cover_mode || s_agent_path[0] == '\0') return;
+
+    char path[300];
+    snprintf(path, sizeof(path), "%s/emoji/%s.mjpeg", s_agent_path, emotion);
+    ppa_preload_mjpeg_async(path);
+    s_force_swap = true;  // 通知视频任务：加载完后立即交换
 }
 
 // 显示下一张图片
@@ -184,40 +276,25 @@ static void video_playback_task(void *arg)
     s_frame_count = 0;
     s_last_fps_time = esp_timer_get_time();
 
-    // 双缓冲表情切换：thinking ↔ neutral（零阻塞）
-    const char *emotions[] = {"thinking", "neutral"};
-    const int emotion_count = 2;
-    int emotion_idx = 0;
-    int switch_counter = 0;
-    const int SWITCH_INTERVAL = 3;
-
+    // LLM 情绪抢占式驱动（无定时轮播）
     while (s_video_running) {
         int64_t frame_start = esp_timer_get_time();
 
-        // 显示下一帧（PSRAM，零SD访问）
         if (!image_display_next()) s_current_index = 0;
         s_frame_count++;
-        switch_counter++;
 
-        // 每3秒尝试交换缓冲区（<1ms），然后启动下一个异步预加载
-        if (switch_counter >= SWITCH_INTERVAL * s_video_fps) {
-            switch_counter = 0;
-
-            int count = ppa_swap_emotion();  // 瞬间交换，零阻塞！
-            if (count > 0) {
-                emotion_idx = (emotion_idx + 1) % emotion_count;  // 成功后递增
-                s_image_count = count;
-                s_current_index = 0;
-                ESP_LOGI(TAG, "Swapped to %s (%d frames)", emotions[emotion_idx], count);
-
-                // 预加载下一个表情（后台异步）
-                int next = (emotion_idx + 1) % emotion_count;
-                char path[64];
-                snprintf(path, sizeof(path), "/sdcard/%s.mjpeg", emotions[next]);
-                ppa_preload_mjpeg_async(path);
-            } else {
-                ESP_LOGW(TAG, "Pending not ready, will retry");
+        if (!s_cover_mode) {
+            // ── 抢占式表情切换：LLM 下发的表情加载完立即换 ──
+            if (s_force_swap) {
+                int count = ppa_swap_emotion();
+                if (count > 0) {
+                    s_image_count = count;
+                    s_current_index = 0;
+                    s_force_swap = false;
+                    ESP_LOGI(TAG, "🎭 Preemptive swap: %d frames", count);
+                }
             }
+
         }
 
         // 每秒统计FPS
@@ -226,7 +303,7 @@ static void video_playback_task(void *arg)
             s_fps_display = s_frame_count;
             s_frame_count = 0;
             s_last_fps_time = now;
-            ESP_LOGI(TAG, "FPS:%d [%s]", s_fps_display, emotions[emotion_idx]);
+            ESP_LOGI(TAG, "FPS:%d [%s]", s_fps_display, s_cover_mode ? "cover" : "expr");
         }
 
         // 帧率控制

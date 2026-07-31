@@ -1,6 +1,5 @@
 #include "esp_log.h"
 #include "esp_err.h"
-#include "dirent.h"
 #include "esp_vfs_fat.h"
 #include "driver/sdmmc_host.h"
 #include "driver/sdmmc_defs.h"
@@ -8,8 +7,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sd_pwr_ctrl_by_on_chip_ldo.h"
-#include "apps/image_display/PPACompositor.h"
 #include "freertos/event_groups.h"
+#include "apps/image_display/PPACompositor.h"
 
 static const char *TAG = "SD_TEST";
 
@@ -87,45 +86,13 @@ static void sd_mount_task(void *pvParameters)
     
     ESP_LOGI(TAG, "SD card mounted successfully!");
     sdmmc_card_print_info(stdout, card);
-    
-    // 预加载 MJPEG — thinking(默认) + neutral(备切)
-    ESP_LOGI(TAG, "Preloading MJPEG...");
-    int loaded = ppa_preload_mjpeg("/sdcard/thinking.mjpeg");
-    if (loaded < 10) {
-        loaded = ppa_preload_mjpeg("/sdcard/neutral.mjpeg");
-    }
-    if (loaded < 10) {
-        // MJPEG全失败 — 回退逐JPG
-        ESP_LOGI(TAG, "MJPEG failed, falling back to JPGs...");
-        DIR *d = opendir(SD_MOUNT_POINT);
-        if (d) {
-            char (*paths)[300] = (char(*)[300])malloc(256 * 300);
-            const char **ptrs = (const char**)malloc(256 * sizeof(const char*));
-            int img_count = 0;
-            struct dirent *dir;
-            while ((dir = readdir(d)) != NULL && img_count < 256) {
-                if (dir->d_type == DT_DIR) continue;
-                const char *name = dir->d_name;
-                if (strcasecmp(name, "background.jpg") == 0) continue;
-                const char *ext = strrchr(name, '.');
-                if (ext && (strcasecmp(ext, ".jpg") == 0 ||
-                           strcasecmp(ext, ".jpeg") == 0 ||
-                           strcasecmp(ext, ".png") == 0)) {
-                    snprintf(paths[img_count], 300, "%s/%s", SD_MOUNT_POINT, name);
-                    ptrs[img_count] = paths[img_count];
-                    img_count++;
-                }
-            }
-            closedir(d);
-            if (img_count > 0) ppa_preload_frames(ptrs, img_count);
-            free(ptrs);
-            free(paths);
-        }
-        loaded = ppa_get_cache_count();
-    }
-    ESP_LOGI(TAG, "Preload done: %d frames in PSRAM", loaded);
 
-    // 通知主任务：SD卡 + 预加载完成
+    // 提前预加载默认 cover（WiFi 前，SD 独占，速度快）
+    ESP_LOGI(TAG, "Early preload: Kaltsit cover...");
+    int loaded = ppa_preload_mjpeg("/sdcard/main/operator/MEDIC/6STAR/Kaltsit/cover/kaltsit_cover.mjpeg");
+    ESP_LOGI(TAG, "Early preload done: %d frames", loaded);
+
+    // 通知主任务：SD卡就绪
     if (s_sd_event_group) xEventGroupSetBits(s_sd_event_group, SD_READY_BIT);
 
     vTaskDelete(NULL);

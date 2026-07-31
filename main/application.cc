@@ -408,6 +408,19 @@ void Application::Start() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
             SetDeviceState(kDeviceStateIdle);
+            // 回到展示模式（当前智能体的 cover）
+            extern bool cover_display_start(const char *agent_sd_path);
+            if (protocol_ && !protocol_->agent_id().empty()) {
+                // 根据 agent_id 确定路径
+                if (protocol_->agent_id() == "0a20483553fe4ff784a016d0fafabfff")
+                    cover_display_start("/sdcard/main/operator/MEDIC/6STAR/Kaltsit");
+                else if (protocol_->agent_id() == "5838c85f30ab4b33a4341bf8b0736e26")
+                    cover_display_start("/sdcard/main/operator/CASTER/5STAR/Amiya");
+                else
+                    cover_display_start("/sdcard/main/operator/MEDIC/6STAR/Kaltsit");
+            } else {
+                cover_display_start("/sdcard/main/operator/MEDIC/6STAR/Kaltsit");
+            }
         });
     });
     protocol_->OnIncomingJson([this, display](const cJSON* root) {
@@ -452,8 +465,12 @@ void Application::Start() {
         } else if (strcmp(type->valuestring, "llm") == 0) {
             auto emotion = cJSON_GetObjectItem(root, "emotion");
             if (cJSON_IsString(emotion)) {
-                Schedule([this, display, emotion_str = std::string(emotion->valuestring)]() {
-                    display->SetEmotion(emotion_str.c_str());
+                std::string emo = emotion->valuestring;
+                ESP_LOGI(TAG, "🎭 LLM → expression: %s", emo.c_str());
+                Schedule([this, display, emo]() {
+                    display->SetEmotion(emo.c_str());
+                    extern void expression_switch_emotion(const char *emotion);
+                    expression_switch_emotion(emo.c_str());  // 后台预加载
                 });
             }
         } else if (strcmp(type->valuestring, "mcp") == 0) {
@@ -517,9 +534,10 @@ void Application::Start() {
 
     // Start image/video display now that conversation mode is active
     extern bool image_display_init(void);
-    extern bool video_playback_start(int fps);
+    extern bool cover_display_start(const char *agent_sd_path);
     if (image_display_init()) {
-        video_playback_start(30);
+        // 默认启动凯尔希 cover（展示模式）
+        cover_display_start("/sdcard/main/operator/MEDIC/6STAR/Kaltsit");
     }
 
     // Enter the main event loop
@@ -606,14 +624,16 @@ void Application::OnWakeWordDetected() {
         auto wake_word = audio_service_.GetLastWakeWord();
         ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
 
-        // 唤醒词 → 智能体 agent_id 映射
+        // 唤醒词 → 智能体 agent_id + SD路径 映射
         static const std::string agent_kaltsit = "0a20483553fe4ff784a016d0fafabfff";
         static const std::string agent_amiya = "5838c85f30ab4b33a4341bf8b0736e26";
-        std::string target_agent;
+        static const std::string path_kaltsit = "/sdcard/main/operator/MEDIC/6STAR/Kaltsit";
+        static const std::string path_amiya = "/sdcard/main/operator/CASTER/5STAR/Amiya";
+        std::string target_agent, target_path;
         if (wake_word.find("凯尔希") != std::string::npos) {
-            target_agent = agent_kaltsit;
+            target_agent = agent_kaltsit; target_path = path_kaltsit;
         } else if (wake_word.find("阿米娅") != std::string::npos) {
-            target_agent = agent_amiya;
+            target_agent = agent_amiya; target_path = path_amiya;
         }
         // "你好小智" → target_agent 为空，不发 X-Agent-ID（默认智能体）
 
@@ -624,6 +644,12 @@ void Application::OnWakeWordDetected() {
                 protocol_->CloseAudioChannel();
             }
             protocol_->SetAgentId(target_agent);
+        }
+
+        // 切换到交互模式（表情）
+        if (!target_path.empty()) {
+            extern bool expression_display_start(const char *agent_sd_path, const char *emotion);
+            expression_display_start(target_path.c_str(), "neutral");
         }
 
         audio_service_.EncodeWakeWord();

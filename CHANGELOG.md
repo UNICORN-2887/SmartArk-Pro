@@ -1,5 +1,65 @@
 # 表情动画播放 — 变更记录
 
+## 2026-07-31 #27 — LLM 情绪抢占式表情 + RLE 遮罩 Alpha 混合 + fullclean 恢复指南
+
+### RLE 遮罩 Alpha 混合
+- **问题**: JPEG Q<85 时色键抠图边缘锯齿严重
+- **方案**: 每帧附带 RLE 压缩 1bit 遮罩（~10KB/帧），JPEG 解码后转 ARGB8888，PPA Alpha 混合逐像素完美边缘
+- **效果**: Q=20 也无锯齿，单表情 2-3MB（+遮罩 ~1MB），PSRAM 仅存 2 个
+- **工具**: `build_mjpeg_mask.py` 一键生成 .mjpeg + .mask
+- **格式**: `.mask` 文件 [4B fc][N×4B offsets][RLE: 2B count, 1B value...]
+- **颜色空间**: ARGB8888（ARGB1555 在 ESP-IDF v5.5 PPA 中不可用）
+
+### JPEG 质量对比（凯尔希新表情 480×800, 120帧）
+
+| Q | MJPEG | Mask | 合计 |
+|---|-------|------|------|
+| 20 | 2.0 MB | 0.9 MB | **2.9 MB** |
+| 40 | 2.8 MB | 0.9 MB | **3.7 MB** |
+| 60 | 3.4 MB | 0.9 MB | **4.3 MB** |
+| 85 | 6.2 MB | 0.9 MB | **7.1 MB** |
+
+### Cover 早期预加载
+- SD 挂载后立即预加载 cover（WiFi 前，SD 独占 ~2.9MB/s）
+- `cover_display_start` 首次调用直接复用，零等待
+
+### LLM 情绪对接（抢占式）
+- LLM 消息 `{"type":"llm","emotion":"happy"}` → `expression_switch_emotion()` → 后台预加载 → `s_force_swap` → 视频任务每帧检查 → 就绪立即交换
+- 终端打印: `🎭 LLM → expression: happy` + `🎭 Preemptive swap: 120 frames`
+- 移除定时轮播，LLM 独占驱动
+
+### SD 卡加载优化
+- `load_mjpeg_into()` 改为流式顺序读取（512KB chunk，零 fseek）
+- MjpegPlayer 顺序帧检测，跳过不必要的 fseek
+
+### fullclean 后一键恢复（重要！）
+`idf.py fullclean` 会重置 3 个 managed_components 文件，运行修复脚本：
+```powershell
+python patch_managed_components.py
+```
+修复内容：
+1. `lvgl__lvgl/esp.cmake` → REQUIRES esp_timer **fatfs**
+2. `esp-wifi-connect/wifi_configuration_ap.h` → IsExitRequested() + exit_requested_
+3. `esp-wifi-connect/wifi_configuration_ap.cc` → /exit 端点 + /reboot 不重启 + SmartConfig P4 包裹
+
+### 环境恢复
+重启/断电后需重新激活 ESP-IDF：
+```powershell
+. E:\Passport\esp32\v5.5.1\esp-idf\export.ps1
+```
+如果报错 Python 环境丢失：
+```powershell
+python E:\Passport\esp32\v5.5.1\esp-idf\tools\idf_tools.py install-python-env
+python E:\Passport\esp32\v5.5.1\esp-idf\tools\idf_tools.py install
+```
+如果 fullclean 后 Python 路径变了：
+```powershell
+idf.py fullclean
+idf.py build
+```
+
+---
+
 ## 2026-07-30 #25 — 多唤醒词防误触发 + 智能体切换准备
 
 ### 多唤醒词注册（5条命令）
