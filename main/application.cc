@@ -408,6 +408,8 @@ void Application::Start() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
             SetDeviceState(kDeviceStateIdle);
+            // 如果新通道已打开（agent 切换中），跳过 cover 切换
+            if (protocol_ && protocol_->IsAudioChannelOpened()) return;
             // 回到展示模式（当前智能体的 cover）
             extern bool cover_display_start(const char *agent_sd_path);
             if (protocol_ && !protocol_->agent_id().empty()) {
@@ -647,10 +649,10 @@ void Application::OnWakeWordDetected() {
         // 智能体变化时断开重连（用新的 X-Agent-ID）
         if (target_agent != protocol_->agent_id()) {
             ESP_LOGI(TAG, "Switching agent: '%s' → '%s'", protocol_->agent_id().c_str(), target_agent.c_str());
+            protocol_->SetAgentId(target_agent);  // 先设 ID，避免旧通道关闭时 cover 切错角色
             if (protocol_->IsAudioChannelOpened()) {
                 protocol_->CloseAudioChannel();
             }
-            protocol_->SetAgentId(target_agent);
         }
 
         // 切换到交互模式（表情）

@@ -138,6 +138,15 @@ static int     s_pending_count = 0;
 static bool    s_pending_ready = false;
 static TaskHandle_t s_preload_task = NULL;
 
+// ─── 三槽缓存：Cover 槽（独立，不被 emotion 换出）───
+static uint8_t *s_cover_cache[MAX_CACHE];
+static uint8_t *s_cover_mask[MAX_CACHE];
+static size_t  s_cover_sizes[MAX_CACHE];
+static size_t  s_cover_mask_sizes[MAX_CACHE];
+static int     s_cover_count = 0;
+static int     s_cover_location = 0;  // 0=无, 1=在cover槽, 2=在active
+static char    s_cover_agent[256] = {0};  // cover 所属角色路径
+
 void ppa_preload_frames(const char *paths[], int count) {
     if (count > MAX_CACHE) count = MAX_CACHE;
     int loaded = 0;
@@ -183,6 +192,9 @@ static int load_mjpeg_into(const char *path, uint8_t *cache[], size_t sizes[], i
 static bool load_mask_file(const char *path, uint8_t *mask_cache[], size_t mask_sizes[], int expected_fc);
 
 int ppa_preload_mjpeg(const char *path) {
+    // 保护：如果 cover 在 active 中，标记丢失
+    if (s_cover_location == 2) s_cover_location = 0;
+
     // 先释放旧帧缓存，避免 PSRAM 碎片化
     for (int i = 0; i < s_cache_count; i++) {
         if (s_jpg_cache[i]) { free(s_jpg_cache[i]); s_jpg_cache[i] = NULL; }
@@ -349,6 +361,123 @@ int ppa_swap_emotion(void) {
     ESP_LOGI(TAG, "Swapped emotion: %d frames active, %d pending",
              s_cache_count, s_pending_count);
     return s_cache_count;
+}
+
+// ─── 三槽缓存：Cover 槽操作 ────────────────────────
+
+int ppa_preload_cover(const char *path) {
+    // 释放旧 cover
+    for (int i = 0; i < s_cover_count; i++) {
+        if (s_cover_cache[i]) { free(s_cover_cache[i]); s_cover_cache[i] = NULL; }
+        if (s_cover_mask[i]) { free(s_cover_mask[i]); s_cover_mask[i] = NULL; }
+    }
+    s_cover_count = 0;
+    s_cover_location = 0;
+
+    s_cover_count = load_mjpeg_into(path, s_cover_cache, s_cover_sizes, MAX_CACHE);
+    if (s_cover_count == 0) return 0;
+
+    char mask_path[320];
+    snprintf(mask_path, sizeof(mask_path), "%s", path);
+    char *dot = strrchr(mask_path, '.');
+    if (dot) strcpy(dot, ".mask");
+    load_mask_file(mask_path, s_cover_mask, s_cover_mask_sizes, s_cover_count);
+
+    s_cover_location = 1;  // cover 在槽里
+    // 记录 cover 所属角色（提取 agent 根路径）
+    strncpy(s_cover_agent, path, sizeof(s_cover_agent) - 1);
+    char *cover_dir = strstr(s_cover_agent, "/cover/");
+    if (cover_dir) *cover_dir = '\0';  // 截断到 /operator/.../Name
+    ESP_LOGI(TAG, "Cover cached: %d frames (%s)", s_cover_count, s_cover_agent);
+    return s_cover_count;
+}
+
+// ── 异步预加载 cover ──
+static TaskHandle_t s_cover_preload_task = NULL;
+
+static void cover_preload_task(void *arg) {
+    const char *path = (const char*)arg;
+    ppa_preload_cover(path);
+    s_cover_preload_task = NULL;
+    vTaskDelete(NULL);
+}
+
+void ppa_preload_cover_async(const char *path) {
+    // 等旧任务完成
+    if (s_cover_preload_task) {
+        while (s_cover_preload_task) vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    static char s_cover_path_buf[320];
+    strncpy(s_cover_path_buf, path, sizeof(s_cover_path_buf) - 1);
+    xTaskCreate(cover_preload_task, "cover_preload", 8192, (void*)s_cover_path_buf, 2, &s_cover_preload_task);
+}
+
+// 等待 cover 异步加载完成
+void ppa_wait_cover_preload(void) {
+    while (s_cover_preload_task) vTaskDelay(pdMS_TO_TICKS(20));
+}
+
+// 等待 pending 异步加载完成
+void ppa_wait_pending_preload(void) {
+    while (s_preload_task) vTaskDelay(pdMS_TO_TICKS(20));
+}
+
+int ppa_swap_to_cover(void) {
+    if (s_cover_location == 0) return 0;  // 没有 cover
+
+    // 双向交换 active ↔ cover slot
+    for (int i = 0; i < MAX_CACHE; i++) {
+        uint8_t *tmp = s_jpg_cache[i];
+        s_jpg_cache[i] = s_cover_cache[i];
+        s_cover_cache[i] = tmp;
+        size_t stmp = s_jpg_cache_size[i];
+        s_jpg_cache_size[i] = s_cover_sizes[i];
+        s_cover_sizes[i] = stmp;
+
+        tmp = s_mask_cache[i];
+        s_mask_cache[i] = s_cover_mask[i];
+        s_cover_mask[i] = tmp;
+        stmp = s_mask_cache_size[i];
+        s_mask_cache_size[i] = s_cover_mask_sizes[i];
+        s_cover_mask_sizes[i] = stmp;
+    }
+    int new_count = s_cover_count;
+    s_cover_count = s_cache_count;
+    s_cache_count = new_count;
+    // 翻转位置：slot(1)↔active(2)
+    s_cover_location = (s_cover_location == 1) ? 2 : 1;
+
+    ESP_LOGI(TAG, "Swapped cover (loc=%d): %d frames active, %d in slot",
+             s_cover_location, s_cache_count, s_cover_count);
+    return s_cache_count;
+}
+
+// 释放 cover 槽中的旧数据（swap 后 slot 被污染，清掉避免下次 save-cover 误复用）
+void ppa_free_cover_slot(void) {
+    for (int i = 0; i < s_cover_count; i++) {
+        if (s_cover_cache[i]) { free(s_cover_cache[i]); s_cover_cache[i] = NULL; }
+        if (s_cover_mask[i])  { free(s_cover_mask[i]);  s_cover_mask[i]  = NULL; }
+    }
+    s_cover_count = 0;
+}
+
+bool ppa_has_cover(void) { return s_cover_location != 0; }
+const char* ppa_get_cover_agent(void) { return s_cover_agent; }
+
+void ppa_unload_cover(void) {
+    int loc = s_cover_location;
+    uint8_t **cache = (loc == 1) ? s_cover_cache : s_jpg_cache;
+    uint8_t **mask  = (loc == 1) ? s_cover_mask  : s_mask_cache;
+    int count = (loc == 1) ? s_cover_count : s_cache_count;
+    for (int i = 0; i < count; i++) {
+        if (cache[i]) { free(cache[i]); cache[i] = NULL; }
+        if (mask[i])  { free(mask[i]);  mask[i]  = NULL; }
+    }
+    if (loc == 2) s_cache_count = 0;
+    s_cover_count = 0;
+    s_cover_location = 0;
+    s_cover_agent[0] = '\0';
+    ESP_LOGI(TAG, "Cover cache unloaded");
 }
 
 bool ppa_open_mjpeg(const char *path, int *out_frame_count) {

@@ -32,6 +32,7 @@ static char s_image_paths[256][300];
 // 展示模式 vs 交互模式
 static bool s_cover_mode = false;
 static bool s_first_cover = true;
+static volatile bool s_in_expression_start = false;  // 防 OnAudioChannelClosed 竞态
 static char s_agent_path[256] = {0};
 static volatile bool s_force_swap = false;  // LLM 抢占式切换标志
 static volatile bool s_req_expression = false;  // 按钮：切到表情模式
@@ -136,37 +137,49 @@ bool image_display_init(void)
 // ─── 展示模式（Cover）：PSRAM 预加载，30 FPS ──────────────
 
 bool cover_display_start(const char *agent_sd_path) {
+    // agent 切换中（expression_display_start 持有锁）→ 跳过
+    if (s_in_expression_start) return true;
+    // 如果 cover 已经在跑了（mode_switch_task 先切了），跳过
+    if (s_cover_mode && strcmp(s_agent_path, agent_sd_path) == 0) return true;
     video_playback_stop();
+    vTaskDelay(pdMS_TO_TICKS(100));  // 等旧 video task 退出+PPA 事务完成
     chat_overlay_show(false);  // 回到展示模式，隐藏聊天
     ppa_unload_background();
 
-    // 扫描 cover 目录找 .mjpeg 文件
-    char cover_dir[300], path[520] = {0};
-    snprintf(cover_dir, sizeof(cover_dir), "%s/cover", agent_sd_path);
-    DIR *d = opendir(cover_dir);
-    if (d) {
-        struct dirent *entry;
-        while ((entry = readdir(d)) != NULL) {
-            const char *ext = strrchr(entry->d_name, '.');
-            if (ext && strcasecmp(ext, ".mjpeg") == 0) {
-                snprintf(path, sizeof(path), "%s/cover/%.*s", agent_sd_path, 200, entry->d_name);
-                break;
-            }
-        }
-        closedir(d);
+    // 等异步 cover 加载完成（防竞态）
+    ppa_wait_cover_preload();
+    // 优先从 cover 专用槽恢复（三槽缓存，秒切）
+    int frame_count = 0;
+    if (ppa_has_cover() && strcmp(ppa_get_cover_agent(), agent_sd_path) == 0) {
+        frame_count = ppa_swap_to_cover();  // 同角色：cover→active
+        if (frame_count > 0)
+            ESP_LOGI(TAG, "Cover restored from cache (%d frames, instant)", frame_count);
     }
-    if (path[0] == '\0') { ESP_LOGE(TAG, "No .mjpeg in cover dir"); return false; }
 
-    // 首次 cover 直接复用 sd_mount_task 在 WiFi 前预加载的帧
-    int frame_count;
-    if (s_first_cover) {
-        frame_count = ppa_get_cache_count();
-        s_first_cover = false;
-    } else {
-        frame_count = 0;
-    }
+    // 缓存未命中 → 从 SD 加载到 cover 槽（旧 active 保留，避免鬼图）
+    char path[520] = {0};
     if (frame_count == 0) {
-        frame_count = ppa_preload_mjpeg(path);
+        // 异角色旧 cover：先不清，等新 cover 就位再 swap+free
+        char cover_dir[300];
+        snprintf(cover_dir, sizeof(cover_dir), "%s/cover", agent_sd_path);
+        DIR *d = opendir(cover_dir);
+        if (d) {
+            struct dirent *entry;
+            while ((entry = readdir(d)) != NULL) {
+                const char *ext = strrchr(entry->d_name, '.');
+                if (ext && strcasecmp(ext, ".mjpeg") == 0) {
+                    snprintf(path, sizeof(path), "%s/cover/%.*s", agent_sd_path, 200, entry->d_name);
+                    break;
+                }
+            }
+            closedir(d);
+        }
+        if (path[0] == '\0') { ESP_LOGE(TAG, "No .mjpeg in cover dir"); return false; }
+        frame_count = ppa_preload_cover(path);  // 新 cover→slot（旧 cover 仍在 active 显示）
+        if (frame_count > 0) {
+            frame_count = ppa_swap_to_cover();  // 新 cover⇄旧 active，旧→slot
+            ppa_free_cover_slot();  // 释放 swap 弹进 slot 的旧帧（新 cover 已在 active）
+        }
     }
     if (frame_count == 0) { ESP_LOGE(TAG, "Failed to preload cover"); return false; }
 
@@ -192,9 +205,22 @@ bool cover_display_start(const char *agent_sd_path) {
 // ─── 交互模式（Expression）：预加载 + PPA 色键合成 ────────────
 
 bool expression_display_start(const char *agent_sd_path, const char *emotion) {
+    s_in_expression_start = true;
     video_playback_stop();
+    vTaskDelay(pdMS_TO_TICKS(100));  // 等旧 video task 退出+PPA 事务完成
+    ppa_wait_pending_preload();
 
-    // 关闭 cover fseek 模式 → 切到缓存模式
+    // 换角色探测（在改 s_agent_path 之前）
+    bool same_agent = (strcmp(s_agent_path, agent_sd_path) == 0);
+
+    // 保存 cover 到专用槽（仅同角色，异角色直接清掉换新）
+    if (s_cover_mode && ppa_get_cache_count() > 0 && ppa_has_cover()) {
+        if (same_agent) {
+            ppa_swap_to_cover();  // active(cover)→slot
+        } else {
+            ppa_unload_cover();  // 异角色：直接丢弃旧 cover
+        }
+    }
     ppa_close_mjpeg();
 
     // 加载背景 → PPA blend 模式
@@ -202,19 +228,32 @@ bool expression_display_start(const char *agent_sd_path, const char *emotion) {
         ppa_load_background("/sdcard/main/background/background.jpg");
     }
 
+    // 换角色 → 清旧 cover 槽
+    // 异角色：清旧 cover 槽（同角色的 save-cover 上面已处理）
+    if (s_agent_path[0] && !same_agent) {
+        ESP_LOGI(TAG, "Agent changed: %s → %s", s_agent_path, agent_sd_path);
+        ppa_unload_cover();  // slot 可能还有旧数据，确保清掉
+    }
     strncpy(s_agent_path, agent_sd_path, sizeof(s_agent_path) - 1);
 
-    char path[300];
-    snprintf(path, sizeof(path), "%s/emoji/%s.mjpeg", agent_sd_path, emotion);
-
-    int count = ppa_preload_mjpeg(path);
-    if (count == 0) {
-        // 回退到 neutral
-        snprintf(path, sizeof(path), "%s/emoji/neutral.mjpeg", agent_sd_path);
-        count = ppa_preload_mjpeg(path);
+    // 同角色 save-cover swap 后 active 已有帧，直接复用
+    int count = 0;
+    if (same_agent) {
+        count = ppa_get_cache_count();
+        if (count > 0) ESP_LOGI(TAG, "Reusing %d frames from slot", count);
     }
     if (count == 0) {
-        ESP_LOGE(TAG, "Failed to load expression: %s", path);
+        char path[300];
+        snprintf(path, sizeof(path), "%s/emoji/%s.mjpeg", agent_sd_path, emotion);
+        count = ppa_preload_mjpeg(path);
+        if (count == 0) {
+            snprintf(path, sizeof(path), "%s/emoji/neutral.mjpeg", agent_sd_path);
+            count = ppa_preload_mjpeg(path);
+        }
+    }
+    if (count == 0) {
+        ESP_LOGE(TAG, "Failed to load expression: %s/%s", agent_sd_path, emotion);
+        s_in_expression_start = false;
         return false;
     }
 
@@ -227,14 +266,33 @@ bool expression_display_start(const char *agent_sd_path, const char *emotion) {
     if (s_mode_label) lv_label_set_text(s_mode_label, "通行证模式");
     lvgl_port_unlock();
     strncpy(s_current_emotion, emotion, sizeof(s_current_emotion) - 1);
-
-    // 预加载 thinking_test 作为后备（临时测试用，测完改回 thinking）
-    snprintf(path, sizeof(path), "%s/emoji/thinking_test.mjpeg", agent_sd_path);
-    strncpy(s_pending_emotion, "thinking_test", sizeof(s_pending_emotion) - 1);
-    ppa_preload_mjpeg_async(path);
+    s_pending_emotion[0] = '\0';  // pending 保留 cover 帧，等 LLM 真正用时才加载
+    s_force_swap = false;  // 清掉旧 agent 残留的 swap 标志
 
     ESP_LOGI(TAG, "Expression mode: %s/%s.mjpeg (%d frames)", agent_sd_path, emotion, count);
     video_playback_start(30);
+    s_in_expression_start = false;
+
+    // 换角色 → 后台异步加载新 cover 到槽，对话结束时秒切
+    if (!same_agent) {
+        char cover_dir[300];
+        snprintf(cover_dir, sizeof(cover_dir), "%s/cover", agent_sd_path);
+        DIR *d = opendir(cover_dir);
+        if (d) {
+            struct dirent *entry;
+            while ((entry = readdir(d))) {
+                const char *ext = strrchr(entry->d_name, '.');
+                if (ext && strcasecmp(ext, ".mjpeg") == 0) {
+                    char cover_path[520];
+                    snprintf(cover_path, sizeof(cover_path), "%s/cover/%s", agent_sd_path, entry->d_name);
+                    ppa_preload_cover_async(cover_path);
+                    ESP_LOGI(TAG, "Preloading new cover async: %s", cover_path);
+                    break;
+                }
+            }
+            closedir(d);
+        }
+    }
     return true;
 }
 
@@ -313,41 +371,59 @@ static void mode_switch_task(void *arg) {
     bool to_expression = (bool)arg;
 
     if (to_expression) {
+        // 等异步预加载完成（防半成品帧）
+        ppa_wait_pending_preload();
+        ppa_wait_cover_preload();
+        // 先把 active 中的 cover 移入 cover 槽（永久保留）
+        if (s_cover_mode && ppa_get_cache_count() > 0 && ppa_has_cover()) {
+            ppa_swap_to_cover();  // 保存 active(cover)→slot
+        }
         ppa_close_mjpeg();
         if (!ppa_has_background())
             ppa_load_background("/sdcard/main/background/background.jpg");
 
-        // 如果 cover 阶段已预加载 neutral，直接 swap（秒切，无需 SD I/O）
-        int count = 0;
-        if (strcmp(s_pending_emotion, "neutral") == 0)
-            count = ppa_swap_emotion();
+        // save-cover swap 后 active 可能已有所需帧（从 slot 恢复的），直接复用
+        int count = ppa_get_cache_count();
         if (count == 0) {
-            char path[300];
-            snprintf(path, sizeof(path), "%s/emoji/neutral.mjpeg", s_agent_path);
-            count = ppa_preload_mjpeg(path);
+            if (strcmp(s_pending_emotion, "neutral") == 0)
+                count = ppa_swap_emotion();
+            if (count == 0) {
+                char path[300];
+                snprintf(path, sizeof(path), "%s/emoji/neutral.mjpeg", s_agent_path);
+                count = ppa_preload_mjpeg(path);
+            }
+        } else {
+            ESP_LOGI(TAG, "Reusing %d frames from slot", count);
         }
         if (count > 0) {
             s_image_count = count; s_current_index = 0;
             s_cover_mode = false; s_loop_count = 0;
             chat_overlay_show(true);
             strncpy(s_current_emotion, "neutral", sizeof(s_current_emotion) - 1);
-            char path[300];
-            snprintf(path, sizeof(path), "%s/emoji/thinking_test.mjpeg", s_agent_path);
-            strncpy(s_pending_emotion, "thinking_test", sizeof(s_pending_emotion) - 1);
-            ppa_preload_mjpeg_async(path);
+            s_pending_emotion[0] = '\0';
+            s_force_swap = false;  // 清掉旧 agent 残留
             video_playback_start(30);
         }
     } else {
         extern void application_end_conversation(void);
-        extern int application_get_device_state(void);
-        int st = application_get_device_state();
-        bool was_in_conversation = (st == 4 || st == 6 || st == 7);  // connecting/listening/speaking
-        if (was_in_conversation) {
-            application_end_conversation();  // 关通道 → OnAudioChannelClosed → cover
+        application_end_conversation();  // 关音频通道
+        ppa_unload_background();
+        s_cover_mode = true;  // 提前设标志，防 cover_display_start 竞态
+        chat_overlay_show(false);
+
+        ppa_wait_cover_preload();
+        ppa_wait_pending_preload();
+        int count = 0;
+        if (ppa_has_cover()) {
+            count = ppa_swap_to_cover();
+            if (count > 0) {
+                s_image_count = count; s_current_index = 0;
+                s_loop_count = 0;
+                ESP_LOGI(TAG, "Cover restored from cache (%d frames, instant)", count);
+                video_playback_start(30);
+            }
         }
-        if (!was_in_conversation) {
-            // 不在对话中，手动切 cover
-            ppa_unload_background();
+        if (count == 0) {
             char path[520] = {0};
             char cover_dir[300];
             snprintf(cover_dir, sizeof(cover_dir), "%s/cover", s_agent_path);
@@ -364,10 +440,11 @@ static void mode_switch_task(void *arg) {
                 closedir(d);
             }
             if (path[0]) {
-                int count = ppa_preload_mjpeg(path);
+                count = ppa_preload_cover(path);
                 if (count > 0) {
+                    count = ppa_swap_to_cover();
+                    ppa_free_cover_slot();
                     s_image_count = count; s_current_index = 0;
-                    s_cover_mode = true; chat_overlay_show(false);
                     video_playback_start(30);
                 }
             }

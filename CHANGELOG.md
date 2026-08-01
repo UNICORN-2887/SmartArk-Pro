@@ -1,5 +1,53 @@
 # 表情动画播放 — 变更记录
 
+## 2026-08-01 #29 — 三槽缓存+模式切换秒开
+
+### 看门狗崩溃修复
+**问题**: 按钮切换 cover↔expression 模式时，AFE ringbuffer 溢满 → 看门狗重置
+**根因**: `video_play` 和 `audio_detection`（AFE fetch）同为 prio 3 挤在 core 0，
+        视频帧处理抢走全部时间片，AFE 拿不到 CPU → ringbuffer 溢满
+**修复**:
+1. `video_play` 钉 core 0 / prio 2，让 audio_detection(prio 3) 随时抢占
+2. `mode_switch_task` 独立 10KB 栈（SD I/O 不用挤 4096 栈）
+3. 按钮切换 cover↔expression 的显示逻辑跑在独立 task，不阻塞主循环/LVGL
+
+### 三槽 PPA 缓存（Active + Pending + Cover）
+**问题**: expression 模式时 cover 帧被 emotion 换出 pending，切回 cover 须重新 SD 加载 5.7MB
+**架构**:
+```
+Active:  s_jpg_cache[200]  ← 当前播放
+Pending: s_pending_cache[200] ← emotion 专用（LLM 驱动）
+Cover:   s_cover_cache[200] ← 永久保留（不被 emotion 换出）
+```
+**关键逻辑**:
+1. `s_cover_location`: 三态追踪 (0=无, 1=在slot, 2=在active)
+2. `ppa_swap_to_cover()`: 双向交换 active↔cover_slot，自动翻转 location
+3. Cover→Expression: save-cover swap → slot 旧帧（neutral）弹回 active → 直接复用，零 SD I/O
+4. Expression→Cover: swap cover 回 active → 秒切
+5. LLM emotion swap (active↔pending): cover slot 完全不受影响
+6. 换角色时 `ppa_unload_cover()` 释放旧 cover
+
+### 按钮文字随状态切换
+- cover_display_start → 按钮显示 "对话模式"
+- expression_display_start → 按钮显示 "通行证模式"
+- 模式切换和对话结束统一更新按钮文字
+
+### 字体修复
+- `chat_overlay_init()` 直接传入 `display->GetTextFont()` 中文字体
+- `s_btn_labels[]` 数组跟踪所有按钮 label，`chat_overlay_set_font()` 统一更新
+
+### Cover 预加载优化
+- cover_display_start 启动时异步预加载 neutral 到 pending
+- 首次 expression 切换可通过 swap 直接命中
+
+### 对话断连
+- `Application::CloseAudioChannel()`: 直接关闭协议通道+设 idle
+- 点击"通行证模式"即断对话，不走 Schedule 链等待
+
+### 杂项
+- snprintf 缓冲区扩大到 520 字节（agent_path+d_name 组合可能超 300）
+- `expression_display_start` 等待旧 video task 退出后再启动新 task（防 PPA 冲突）
+
 ## 2026-08-01 #28 — GT911 触摸修复 + 聊天覆盖层
 
 ### GT911 触摸驱动修复

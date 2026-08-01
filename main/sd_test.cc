@@ -87,9 +87,9 @@ static void sd_mount_task(void *pvParameters)
     ESP_LOGI(TAG, "SD card mounted successfully!");
     sdmmc_card_print_info(stdout, card);
 
-    // 提前预加载默认 cover（WiFi 前，SD 独占，速度快）
+    // 提前预加载默认 cover 到 cover 专用槽（WiFi 前，SD 独占，速度快）
     ESP_LOGI(TAG, "Early preload: Kaltsit cover...");
-    int loaded = ppa_preload_mjpeg("/sdcard/main/operator/MEDIC/6STAR/Kaltsit/cover/kaltsit_cover.mjpeg");
+    int loaded = ppa_preload_cover("/sdcard/main/operator/MEDIC/6STAR/Kaltsit/cover/kaltsit_cover.mjpeg");
     ESP_LOGI(TAG, "Early preload done: %d frames", loaded);
 
     // 通知主任务：SD卡就绪

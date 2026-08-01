@@ -27,6 +27,26 @@ void ppa_preload_mjpeg_async(const char *path);
 // 返回新帧数，若后备未就绪返回0
 int ppa_swap_emotion(void);
 
+// ─── 三槽缓存：Cover 槽（永久保留，不被 emotion 换出）───
+// 预加载 cover 到独立槽位
+int ppa_preload_cover(const char *path);
+// 异步预加载 cover（后台 task，不阻塞调用者）
+void ppa_preload_cover_async(const char *path);
+// 等待 cover 异步加载完成
+void ppa_wait_cover_preload(void);
+// 等待 pending 异步加载完成
+void ppa_wait_pending_preload(void);
+// 交换 active ↔ cover（秒切，<1ms）
+int ppa_swap_to_cover(void);
+// 清空 cover 槽旧数据（swap 后 slot 被旧 active 污染）
+void ppa_free_cover_slot(void);
+// cover 是否已缓存
+bool ppa_has_cover(void);
+// 返回 cover 所属角色路径（用于判断是否匹配当前 agent）
+const char* ppa_get_cover_agent(void);
+// 释放 cover 缓存（agent 切换时）
+void ppa_unload_cover(void);
+
 // 打开MJPEG文件（内存高效模式，fseek读取）
 bool ppa_open_mjpeg(const char *path, int *out_frame_count);
 // 关闭 MJPEG fseek 模式
