@@ -6,7 +6,7 @@ from PIL import Image
 
 W, H = 480, 800
 RED = (255, 0, 0)
-MARGIN_BOTTOM = 60
+MARGIN_BOTTOM = 20  # 底部20px，角色下移40px
 
 
 def rle_encode(mask_flat):

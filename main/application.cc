@@ -451,6 +451,8 @@ void Application::Start() {
                     ESP_LOGI(TAG, "<< %s", text->valuestring);
                     Schedule([this, display, message = std::string(text->valuestring)]() {
                         display->SetChatMessage("assistant", message.c_str());
+                        extern void chat_overlay_append_assistant(const char *text);
+                        chat_overlay_append_assistant(message.c_str());
                     });
                 }
             }
@@ -460,6 +462,8 @@ void Application::Start() {
                 ESP_LOGI(TAG, ">> %s", text->valuestring);
                 Schedule([this, display, message = std::string(text->valuestring)]() {
                     display->SetChatMessage("user", message.c_str());
+                    extern void chat_overlay_set_user(const char *text);
+                    chat_overlay_set_user(message.c_str());
                 });
             }
         } else if (strcmp(type->valuestring, "llm") == 0) {
@@ -535,7 +539,11 @@ void Application::Start() {
     // Start image/video display now that conversation mode is active
     extern bool image_display_init(void);
     extern bool cover_display_start(const char *agent_sd_path);
+    extern void chat_overlay_init(const lv_font_t *font);
+    extern void chat_overlay_set_font(const lv_font_t *font);
     if (image_display_init()) {
+        chat_overlay_init(NULL);
+        chat_overlay_set_font(display->GetTextFont());  // 中文字体
         // 默认启动凯尔希 cover（展示模式）
         cover_display_start("/sdcard/main/operator/MEDIC/6STAR/Kaltsit");
     }

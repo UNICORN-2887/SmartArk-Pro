@@ -1,5 +1,56 @@
 # 表情动画播放 — 变更记录
 
+## 2026-08-01 #28 — GT911 触摸修复 + 聊天覆盖层
+
+### GT911 触摸驱动修复
+**问题**: JC4880P443 触屏完全不工作，GT911 初始化报 "GT911 read error"
+**根因**:
+1. `InitializeGT911()` 从未被构造函数调用
+2. GT911 上电后需手动复位时序（拉低 20ms → 拉高 100ms）
+3. `int_gpio_num` 错误设为 GPIO 21，Waveshare 参考板用 `GPIO_NUM_NC`
+4. I2C 时钟 100kHz 偏低，参考板用 400kHz
+5. `lvgl_port_add_touch` 返回值是 `lv_indev_t*` 不是 `esp_err_t`
+
+**修复**:
+- 构造函数中调用 `InitializeGT911()`
+- 手动 `gpio_set_level(GPIO 22)` 复位 → `gpio_config` 拉低/拉高
+- `rst_gpio_num = GPIO_NUM_NC`（驱动不接管复位）
+- `int_gpio_num = GPIO_NUM_NC`（轮询模式，参考 Waveshare）
+- `scl_speed_hz = 400000`
+- 非致命初始化：失败时 return 不崩溃
+- `#include <driver/gpio.h>` + `#include "esp_lvgl_port.h"`
+
+### 聊天覆盖层（半透明置顶）
+- LVGL 两段式覆盖层，`lv_layer_top()` 置顶
+- 用户框 y=520 (440×100)，助理框 y=630 (440×140)
+- 半透明灰底（`LV_OPA_50`），白字中文，可滚动
+- LLM `sentence_start` → `chat_overlay_append_assistant()` 追加文本
+- STT → `chat_overlay_set_user()` + 清空助理框
+- 唤醒时 `chat_overlay_show(true)`，回 cover 时隐藏
+- 右上角 LVGL 按钮 "隐藏/显示"（触摸修复后可用）
+- `Display::GetTextFont()` 暴露中文字体
+
+### 自动回退 neutral
+- 非 neutral 表情播完 1 轮自动 `expression_switch_emotion("neutral")`
+- `ppa_swap_emotion` 后 `s_pending_ready = true`（旧活跃已变后备，直接可用）
+- Swap 后正确更新 `s_pending_emotion`
+
+### 文件结构
+- `build_mjpeg_mask.py` — 一站式生成 MJPEG + .mask（Q 可选，MARGIN_BOTTOM=20）
+- `build_mask.py` — 独立 .mask 生成
+- `compress_mjpeg.py` — JPEG 降质
+- `pack_jpg.py` — JPG 序列打包 MJPEG
+- `split_mjpeg.py` — MJPEG 拆分 part
+- `deploy_sd.py` — SD 卡一键部署
+- `patch_managed_components.py` — fullclean 后一键修复 3 补丁
+
+### Cover 流式预加载
+- `load_mjpeg_into()` 512KB chunk 顺序读取，零 fseek
+- MjpegPlayer 顺序帧检测跳过 fseek
+- `ppa_preload_mjpeg()` 复用 `load_mjpeg_into()`（去重）
+
+---
+
 ## 2026-07-31 #27 — LLM 情绪抢占式表情 + RLE 遮罩 Alpha 混合 + fullclean 恢复指南
 
 ### RLE 遮罩 Alpha 混合

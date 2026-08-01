@@ -49,6 +49,7 @@ protected:
 public:
     ~LcdDisplay();
     virtual void SetEmotion(const char* emotion) override;
+    virtual const lv_font_t* GetTextFont() override { return fonts_.text_font; }
     virtual void SetIcon(const char* icon) override;
     virtual void SetPreviewImage(const lv_img_dsc_t* img_dsc) override;
 #if CONFIG_USE_WECHAT_MESSAGE_STYLE

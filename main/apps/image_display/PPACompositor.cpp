@@ -344,7 +344,7 @@ int ppa_swap_emotion(void) {
     s_cache_count = new_count;
     s_use_alpha = s_pending_has_alpha;
     s_pending_has_alpha = false;
-    s_pending_ready = false;
+    s_pending_ready = true;  // 旧活跃已变后备，数据有效，可直接 swap
 
     ESP_LOGI(TAG, "Swapped emotion: %d frames active, %d pending",
              s_cache_count, s_pending_count);

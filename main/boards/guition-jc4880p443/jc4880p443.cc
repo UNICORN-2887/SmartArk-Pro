@@ -13,10 +13,12 @@
 #include "esp_lcd_mipi_dsi.h"
 #include "esp_lcd_st7701.h"
 #include "esp_lcd_touch_gt911.h"
+#include "esp_lvgl_port.h"
 
 #include <wifi_station.h>
 #include <esp_log.h>
 #include <driver/i2c_master.h>
+#include <driver/gpio.h>
 
 #define TAG "jc4880p443"
 
@@ -100,34 +102,44 @@ private:
 
     void InitializeGT911()
     {
-        ESP_LOGI(TAG,"Initialize Gsl3680");
-        static esp_lcd_touch_handle_t ret_touch;
-        const esp_lcd_touch_config_t tp_cfg = {
+        // 先手动复位 GT911（确保芯片上电就绪）
+        gpio_config_t rst_conf = {
+            .pin_bit_mask = 1ULL << LCD_TOUCH_RST,
+            .mode = GPIO_MODE_OUTPUT,
+        };
+        gpio_config(&rst_conf);
+        gpio_set_level(LCD_TOUCH_RST, 0);
+        vTaskDelay(pdMS_TO_TICKS(20));
+        gpio_set_level(LCD_TOUCH_RST, 1);
+        vTaskDelay(pdMS_TO_TICKS(100));
+
+        esp_lcd_touch_handle_t tp;
+        esp_lcd_touch_config_t tp_cfg = {
             .x_max = LCD_H_RES,
             .y_max = LCD_V_RES,
-            .rst_gpio_num = LCD_TOUCH_RST, // Shared with LCD reset
-            .int_gpio_num = LCD_TOUCH_INT,
-            .levels = {
-                .reset = 0,
-                .interrupt = 0,
-            },
-            .flags = {
-                .swap_xy = 0,
-    #if CONFIG_BSP_LCD_TYPE_1024_600
-                .mirror_x = 1,
-                .mirror_y = 1,
-    #else
-                .mirror_x = 0,
-                .mirror_y = 1,
-    #endif
-            },
+            .rst_gpio_num = GPIO_NUM_NC,      // 手动复位，不交给驱动
+            .int_gpio_num = GPIO_NUM_NC,       // 不用中断
+            .levels = { .reset = 0, .interrupt = 0 },
+            .flags = { .swap_xy = 0, .mirror_x = 0, .mirror_y = 0 },
         };
+
         esp_lcd_panel_io_handle_t tp_io_handle = NULL;
         esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
-        tp_io_config.scl_speed_hz = 100000;
-        esp_lcd_new_panel_io_i2c(codec_i2c_bus_, &tp_io_config, &tp_io_handle);
-        esp_lcd_touch_new_i2c_gt911(tp_io_handle, &tp_cfg, &ret_touch);
-        return;
+        tp_io_config.scl_speed_hz = 400 * 1000;  // 400kHz 匹配 Waveshare
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(codec_i2c_bus_, &tp_io_config, &tp_io_handle));
+
+        esp_err_t ret = esp_lcd_touch_new_i2c_gt911(tp_io_handle, &tp_cfg, &tp);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "GT911 init failed (0x%X), touch disabled", ret);
+            return;
+        }
+
+        const lvgl_port_touch_cfg_t touch_cfg = {
+            .disp = lv_display_get_default(),
+            .handle = tp,
+        };
+        lvgl_port_add_touch(&touch_cfg);
+        ESP_LOGI(TAG, "GT911 touch registered");
     }
 
 static esp_err_t bsp_enable_dsi_phy_power(void)
@@ -253,6 +265,7 @@ public:
         InitializeCodecI2c();
         // InitializeIot();
         InitializeLCD();
+        InitializeGT911();
         InitializeButtons();
         GetBacklight()->RestoreBrightness();
     }
