@@ -34,9 +34,12 @@ static bool s_cover_mode = false;
 static bool s_first_cover = true;
 static char s_agent_path[256] = {0};
 static volatile bool s_force_swap = false;  // LLM 抢占式切换标志
+static volatile bool s_req_expression = false;  // 按钮：切到表情模式
+static volatile bool s_req_cover = false;       // 按钮：切到展示模式
 static int s_loop_count = 0;               // 非 neutral 表情已循环次数
 static char s_current_emotion[32] = {0};   // 当前表情名
 static char s_pending_emotion[32] = {0};   // 后备表情名
+static lv_obj_t *s_mode_label = NULL;    // 模式切换按钮 label
 
 // 前向声明（定义在后面）
 void video_playback_stop(void);
@@ -138,7 +141,7 @@ bool cover_display_start(const char *agent_sd_path) {
     ppa_unload_background();
 
     // 扫描 cover 目录找 .mjpeg 文件
-    char cover_dir[300], path[300] = {0};
+    char cover_dir[300], path[520] = {0};
     snprintf(cover_dir, sizeof(cover_dir), "%s/cover", agent_sd_path);
     DIR *d = opendir(cover_dir);
     if (d) {
@@ -146,7 +149,7 @@ bool cover_display_start(const char *agent_sd_path) {
         while ((entry = readdir(d)) != NULL) {
             const char *ext = strrchr(entry->d_name, '.');
             if (ext && strcasecmp(ext, ".mjpeg") == 0) {
-                snprintf(path, sizeof(path), "%s/cover/%s", agent_sd_path, entry->d_name);
+                snprintf(path, sizeof(path), "%s/cover/%.*s", agent_sd_path, 200, entry->d_name);
                 break;
             }
         }
@@ -171,8 +174,17 @@ bool cover_display_start(const char *agent_sd_path) {
     s_image_count = frame_count;
     s_current_index = 0;
     s_cover_mode = true;
+    lvgl_port_lock(0);
+    if (s_mode_label) lv_label_set_text(s_mode_label, "对话模式");
+    lvgl_port_unlock();
 
-    ESP_LOGI(TAG, "Cover mode: %s (%d frames, PSRAM)", path, frame_count);
+    // 预加载 neutral 表情到后备缓存（唤醒/切换时秒切）
+    char neutral_path[300];
+    snprintf(neutral_path, sizeof(neutral_path), "%s/emoji/neutral.mjpeg", agent_sd_path);
+    ppa_preload_mjpeg_async(neutral_path);
+    strncpy(s_pending_emotion, "neutral", sizeof(s_pending_emotion) - 1);
+    ESP_LOGI(TAG, "Cover mode: %s (%d frames), neutral preloading", path, frame_count);
+
     video_playback_start(30);
     return true;
 }
@@ -211,6 +223,9 @@ bool expression_display_start(const char *agent_sd_path, const char *emotion) {
     s_cover_mode = false;
     s_loop_count = 0;
     chat_overlay_show(true);
+    lvgl_port_lock(0);
+    if (s_mode_label) lv_label_set_text(s_mode_label, "通行证模式");
+    lvgl_port_unlock();
     strncpy(s_current_emotion, emotion, sizeof(s_current_emotion) - 1);
 
     // 预加载 thinking_test 作为后备（临时测试用，测完改回 thinking）
@@ -293,25 +308,94 @@ static int s_frame_count = 0;
 static int s_fps_display = 0;
 static int64_t s_last_fps_time = 0;
 
+// ── 模式切换辅助任务（大栈、低优先级，不阻塞音视频核心线程）──
+static void mode_switch_task(void *arg) {
+    bool to_expression = (bool)arg;
+
+    if (to_expression) {
+        ppa_close_mjpeg();
+        if (!ppa_has_background())
+            ppa_load_background("/sdcard/main/background/background.jpg");
+
+        // 如果 cover 阶段已预加载 neutral，直接 swap（秒切，无需 SD I/O）
+        int count = 0;
+        if (strcmp(s_pending_emotion, "neutral") == 0)
+            count = ppa_swap_emotion();
+        if (count == 0) {
+            char path[300];
+            snprintf(path, sizeof(path), "%s/emoji/neutral.mjpeg", s_agent_path);
+            count = ppa_preload_mjpeg(path);
+        }
+        if (count > 0) {
+            s_image_count = count; s_current_index = 0;
+            s_cover_mode = false; s_loop_count = 0;
+            chat_overlay_show(true);
+            strncpy(s_current_emotion, "neutral", sizeof(s_current_emotion) - 1);
+            char path[300];
+            snprintf(path, sizeof(path), "%s/emoji/thinking_test.mjpeg", s_agent_path);
+            strncpy(s_pending_emotion, "thinking_test", sizeof(s_pending_emotion) - 1);
+            ppa_preload_mjpeg_async(path);
+            video_playback_start(30);
+        }
+    } else {
+        extern void application_end_conversation(void);
+        extern int application_get_device_state(void);
+        int st = application_get_device_state();
+        bool was_in_conversation = (st == 4 || st == 6 || st == 7);  // connecting/listening/speaking
+        if (was_in_conversation) {
+            application_end_conversation();  // 关通道 → OnAudioChannelClosed → cover
+        }
+        if (!was_in_conversation) {
+            // 不在对话中，手动切 cover
+            ppa_unload_background();
+            char path[520] = {0};
+            char cover_dir[300];
+            snprintf(cover_dir, sizeof(cover_dir), "%s/cover", s_agent_path);
+            DIR *d = opendir(cover_dir);
+            if (d) {
+                struct dirent *e;
+                while ((e = readdir(d))) {
+                    const char *ext = strrchr(e->d_name, '.');
+                    if (ext && strcasecmp(ext, ".mjpeg") == 0) {
+                        snprintf(path, sizeof(path), "%s/cover/%.*s", s_agent_path, 200, e->d_name);
+                        break;
+                    }
+                }
+                closedir(d);
+            }
+            if (path[0]) {
+                int count = ppa_preload_mjpeg(path);
+                if (count > 0) {
+                    s_image_count = count; s_current_index = 0;
+                    s_cover_mode = true; chat_overlay_show(false);
+                    video_playback_start(30);
+                }
+            }
+        }
+    }
+    vTaskDelete(NULL);
+}
+
 static void video_playback_task(void *arg)
 {
     s_video_running = true;
     s_frame_count = 0;
     s_last_fps_time = esp_timer_get_time();
 
-    // LLM 情绪抢占式驱动（无定时轮播）
     while (s_video_running) {
+        // 按钮请求模式切换？
+        if (s_req_expression || s_req_cover) {
+            break;  // 退出循环，末尾生成切换任务
+        }
         int64_t frame_start = esp_timer_get_time();
 
-        // 推进一帧，检测是否循环回 0（完整轮播一圈）
         int prev_index = s_current_index;
         if (!image_display_next()) s_current_index = 0;
         if (s_current_index == 0 && prev_index > 0) {
-            // 非 neutral 表情播完一轮 → 自动回 neutral
             if (!s_cover_mode && s_current_emotion[0] &&
                 strcmp(s_current_emotion, "neutral") != 0) {
                 s_loop_count++;
-                if (s_loop_count == 1) {  // 仅首次触发，避免重复
+                if (s_loop_count == 1) {
                     ESP_LOGI(TAG, "🔄 Auto-revert %s → neutral", s_current_emotion);
                     expression_switch_emotion("neutral");
                 }
@@ -320,7 +404,6 @@ static void video_playback_task(void *arg)
         s_frame_count++;
 
         if (!s_cover_mode) {
-            // ── 抢占式表情切换：LLM 下发的表情加载完立即换 ──
             if (s_force_swap) {
                 int count = ppa_swap_emotion();
                 if (count > 0) {
@@ -328,7 +411,6 @@ static void video_playback_task(void *arg)
                     s_current_index = 0;
                     s_force_swap = false;
                     s_loop_count = 0;
-                    // 旧活跃 → 落入后备缓存，记录表情名
                     char old_emotion[32];
                     strncpy(old_emotion, s_current_emotion, sizeof(old_emotion) - 1);
                     strncpy(s_current_emotion, s_pending_emotion, sizeof(s_current_emotion) - 1);
@@ -336,10 +418,8 @@ static void video_playback_task(void *arg)
                     ESP_LOGI(TAG, "🎭 Preemptive swap: %s (%d frames)", s_current_emotion, count);
                 }
             }
-
         }
 
-        // 每秒统计FPS
         int64_t now = esp_timer_get_time();
         if (now - s_last_fps_time >= 1000000) {
             s_fps_display = s_frame_count;
@@ -349,10 +429,19 @@ static void video_playback_task(void *arg)
                      s_cover_mode ? "cover" : (s_current_emotion[0] ? s_current_emotion : "?"));
         }
 
-        // 帧率控制
         int64_t frame_time = esp_timer_get_time() - frame_start;
         int32_t wait_ms = (1000 / s_video_fps) - (frame_time / 1000);
         if (wait_ms > 0) vTaskDelay(pdMS_TO_TICKS(wait_ms));
+    }
+
+    // ── 创建独立的大栈低优先级任务做 SD I/O，本任务立即退出 ──
+    s_video_running = false;
+    if (s_req_expression) {
+        s_req_expression = false;
+        xTaskCreate(mode_switch_task, "mode_sw_expr", 10240, (void*)true, 3, NULL);
+    } else if (s_req_cover) {
+        s_req_cover = false;
+        xTaskCreate(mode_switch_task, "mode_sw_cover", 10240, (void*)false, 3, NULL);
     }
     s_video_task = NULL;
     vTaskDelete(NULL);
@@ -372,7 +461,7 @@ bool video_playback_start(int fps)
     s_video_fps = (fps > 0 && fps <= 120) ? fps : 30;
     ESP_LOGI(TAG, "Starting video playback at %d FPS (total: %d images)", s_video_fps, s_image_count);
 
-    xTaskCreate(video_playback_task, "video_play", 4096, NULL, 5, &s_video_task);
+    xTaskCreatePinnedToCore(video_playback_task, "video_play", 4096, NULL, 2, &s_video_task, 0);
     return true;
 }
 
@@ -420,6 +509,7 @@ static lv_obj_t *s_chat_user_box = NULL;
 static lv_obj_t *s_chat_user_label = NULL;
 static lv_obj_t *s_chat_assistant_box = NULL;
 static lv_obj_t *s_chat_assistant_label = NULL;
+static lv_obj_t *s_btn_labels[4] = {NULL};  // 隐藏/罗德岛/对话模式 按钮 label
 static const lv_font_t *s_chat_font = NULL;
 
 void chat_overlay_set_font(const lv_font_t *font) {
@@ -427,11 +517,12 @@ void chat_overlay_set_font(const lv_font_t *font) {
     lvgl_port_lock(0);
     if (s_chat_user_label)    lv_obj_set_style_text_font(s_chat_user_label, font, 0);
     if (s_chat_assistant_label) lv_obj_set_style_text_font(s_chat_assistant_label, font, 0);
-    // Also update header labels
     if (s_chat_user_box && lv_obj_get_child_cnt(s_chat_user_box) > 0)
         lv_obj_set_style_text_font(lv_obj_get_child(s_chat_user_box, 0), font, 0);
     if (s_chat_assistant_box && lv_obj_get_child_cnt(s_chat_assistant_box) > 0)
         lv_obj_set_style_text_font(lv_obj_get_child(s_chat_assistant_box, 0), font, 0);
+    for (int i = 0; i < 4; i++)
+        if (s_btn_labels[i]) lv_obj_set_style_text_font(s_btn_labels[i], font, 0);
     lvgl_port_unlock();
 }
 
@@ -516,6 +607,7 @@ void chat_overlay_init(const lv_font_t *font) {
     lv_obj_set_style_text_color(btn_label, lv_color_white(), 0);
     lv_obj_set_style_text_font(btn_label, s_chat_font, 0);
     lv_obj_center(btn_label);
+    s_btn_labels[0] = btn_label;
 
     // 点击切换
     lv_obj_add_event_cb(btn, [](lv_event_t *e) {
@@ -526,9 +618,94 @@ void chat_overlay_init(const lv_font_t *font) {
                           hidden ? "显示" : "隐藏");
     }, LV_EVENT_CLICKED, NULL);
 
+    // ── ② 返回罗德岛 ──
+    btn = lv_btn_create(lv_screen_active());
+    lv_obj_set_size(btn, 80, 30);
+    lv_obj_set_pos(btn, 395, 40);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(0x555555), 0);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_80, 0);
+    lv_obj_set_style_radius(btn, 6, 0);
+    lv_obj_set_style_border_width(btn, 0, 0);
+    lv_obj_t *lbl = lv_label_create(btn);
+    lv_label_set_text(lbl, "罗德岛");
+    lv_obj_set_style_text_color(lbl, lv_color_white(), 0);
+    lv_obj_set_style_text_font(lbl, s_chat_font, 0);
+    lv_obj_center(lbl);
+    s_btn_labels[1] = lbl;
+    lv_obj_add_event_cb(btn, [](lv_event_t *e) {
+        extern lv_obj_t *g_agent_panel;
+        if (g_agent_panel) {
+            bool vis = lv_obj_has_flag(g_agent_panel, LV_OBJ_FLAG_HIDDEN);
+            if (vis) lv_obj_remove_flag(g_agent_panel, LV_OBJ_FLAG_HIDDEN);
+            else     lv_obj_add_flag(g_agent_panel, LV_OBJ_FLAG_HIDDEN);
+        }
+    }, LV_EVENT_CLICKED, NULL);
+
+    // ── ③ 对话模式/通行证模式 ──
+    btn = lv_btn_create(lv_screen_active());
+    lv_obj_set_size(btn, 80, 30);
+    lv_obj_set_pos(btn, 395, 75);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(0x555555), 0);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_80, 0);
+    lv_obj_set_style_radius(btn, 6, 0);
+    lv_obj_set_style_border_width(btn, 0, 0);
+    s_mode_label = lv_label_create(btn);
+    lv_label_set_text(s_mode_label, "对话模式");
+    lv_obj_set_style_text_color(s_mode_label, lv_color_white(), 0);
+    lv_obj_set_style_text_font(s_mode_label, s_chat_font, 0);
+    lv_obj_center(s_mode_label);
+    s_btn_labels[2] = s_mode_label;
+    lv_obj_add_event_cb(btn, [](lv_event_t *e) {
+        if (s_cover_mode) s_req_expression = true;
+        else             s_req_cover = true;
+    }, LV_EVENT_CLICKED, NULL);
+
+    // ── 角色选择面板 ──
+    static lv_obj_t *panel = lv_obj_create(lv_screen_active());
+    lv_obj_set_size(panel, 160, 120);
+    lv_obj_set_pos(panel, 300, 110);
+    lv_obj_set_style_bg_color(panel, lv_color_hex(0x222222), 0);
+    lv_obj_set_style_bg_opa(panel, LV_OPA_90, 0);
+    lv_obj_set_style_radius(panel, 8, 0);
+    lv_obj_set_style_border_width(panel, 0, 0);
+    lv_obj_set_style_pad_all(panel, 4, 0);
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
+    extern lv_obj_t *g_agent_panel;
+    g_agent_panel = panel;
+
+    struct { const char *name, *id, *path; } agents[] = {
+        {"Kal'tsit", "0a20483553fe4ff784a016d0fafabfff", "/sdcard/main/operator/MEDIC/6STAR/Kaltsit"},
+        {"Amiya",   "5838c85f30ab4b33a4341bf8b0736e26", "/sdcard/main/operator/CASTER/5STAR/Amiya"},
+    };
+    for (int i = 0; i < 2; i++) {
+        lv_obj_t *ab = lv_btn_create(panel);
+        lv_obj_set_size(ab, 150, 50);
+        lv_obj_set_style_bg_color(ab, lv_color_hex(0x444444), 0);
+        lv_obj_set_style_radius(ab, 4, 0);
+        lv_obj_set_style_border_width(ab, 0, 0);
+        lv_obj_t *al = lv_label_create(ab);
+        lv_label_set_text(al, agents[i].name);
+        lv_obj_set_style_text_color(al, lv_color_white(), 0);
+        lv_obj_set_style_text_font(al, s_chat_font, 0);
+        lv_obj_center(al);
+        lv_obj_add_event_cb(ab, [](lv_event_t *e) {
+            int idx = (int)(uintptr_t)lv_event_get_user_data(e);
+            struct { const char *name, *id, *path; } ag[] = {
+                {"Kal'tsit", "0a20483553fe4ff784a016d0fafabfff", "/sdcard/main/operator/MEDIC/6STAR/Kaltsit"},
+                {"Amiya",   "5838c85f30ab4b33a4341bf8b0736e26", "/sdcard/main/operator/CASTER/5STAR/Amiya"},
+            };
+            extern void application_switch_agent(const char *id);
+            application_switch_agent(ag[idx].id);
+            cover_display_start(ag[idx].path);
+            if (g_agent_panel) lv_obj_add_flag(g_agent_panel, LV_OBJ_FLAG_HIDDEN);
+        }, LV_EVENT_CLICKED, (void*)(uintptr_t)i);
+    }
+
     lvgl_port_unlock();
     ESP_LOGI(TAG, "Chat overlay initialized (hidden)");
 }
+
+lv_obj_t *g_agent_panel = NULL;
 
 void chat_overlay_toggle(void) {
     if (!s_chat_user_box) return;

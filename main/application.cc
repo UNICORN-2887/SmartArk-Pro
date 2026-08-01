@@ -542,8 +542,7 @@ void Application::Start() {
     extern void chat_overlay_init(const lv_font_t *font);
     extern void chat_overlay_set_font(const lv_font_t *font);
     if (image_display_init()) {
-        chat_overlay_init(NULL);
-        chat_overlay_set_font(display->GetTextFont());  // 中文字体
+        chat_overlay_init(display->GetTextFont());  // 直接传中文字体
         // 默认启动凯尔希 cover（展示模式）
         cover_display_start("/sdcard/main/operator/MEDIC/6STAR/Kaltsit");
     }
@@ -803,6 +802,30 @@ bool Application::CanEnterSleepMode() {
 
     // Now it is safe to enter sleep mode
     return true;
+}
+
+void Application::SwitchAgent(const std::string &agent_id) {
+    if (protocol_) protocol_->SetAgentId(agent_id);
+}
+void Application::CloseAudioChannel() {
+    Schedule([this]() {
+        if (protocol_ && protocol_->IsAudioChannelOpened()) {
+            protocol_->CloseAudioChannel();
+        }
+        SetDeviceState(kDeviceStateIdle);
+    });
+}
+int application_get_device_state(void) {
+    return (int)Application::GetInstance().GetDeviceState();
+}
+void application_switch_agent(const char *agent_id) {
+    Application::GetInstance().SwitchAgent(agent_id);
+}
+void application_set_wake_word_detection(bool enable) {
+    Application::GetInstance().GetAudioService().EnableWakeWordDetection(enable);
+}
+void application_end_conversation(void) {
+    Application::GetInstance().CloseAudioChannel();
 }
 
 void Application::SendMcpMessage(const std::string& payload) {
