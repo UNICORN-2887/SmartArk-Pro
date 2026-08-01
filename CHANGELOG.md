@@ -1,52 +1,84 @@
 # 表情动画播放 — 变更记录
 
-## 2026-08-01 #29 — 三槽缓存+模式切换秒开
+## 2026-08-02 #29 — 三槽PPA缓存+跨角色秒切+看门狗修复
 
-### 看门狗崩溃修复
-**问题**: 按钮切换 cover↔expression 模式时，AFE ringbuffer 溢满 → 看门狗重置
-**根因**: `video_play` 和 `audio_detection`（AFE fetch）同为 prio 3 挤在 core 0，
-        视频帧处理抢走全部时间片，AFE 拿不到 CPU → ringbuffer 溢满
-**修复**:
-1. `video_play` 钉 core 0 / prio 2，让 audio_detection(prio 3) 随时抢占
-2. `mode_switch_task` 独立 10KB 栈（SD I/O 不用挤 4096 栈）
-3. 按钮切换 cover↔expression 的显示逻辑跑在独立 task，不阻塞主循环/LVGL
+### 经验总结
+这次改动是 xiaozhi-esp32 项目迄今为止最复杂的子系统重构。核心难点在于：
+1. **多槽缓存的状态一致性**——三个缓存槽（Active/Pending/Cover）需要精确追踪帧归属
+2. **异步竞态**——vTaskDelay 会 yield 主循环，导致 OnAudioChannelClosed schedule 提前执行
+3. **Agent 切换时的缓存失效**——旧角色帧污染新角色槽位
 
-### 三槽 PPA 缓存（Active + Pending + Cover）
+关键教训：**永远在新帧就位后再释放旧帧**。先清后加载 = 鬼图（active 空窗期）。
+
+### 三槽缓存架构
 **问题**: expression 模式时 cover 帧被 emotion 换出 pending，切回 cover 须重新 SD 加载 5.7MB
-**架构**:
 ```
-Active:  s_jpg_cache[200]  ← 当前播放
-Pending: s_pending_cache[200] ← emotion 专用（LLM 驱动）
-Cover:   s_cover_cache[200] ← 永久保留（不被 emotion 换出）
+Active:  s_jpg_cache[200]  ← 当前播放帧
+Pending: s_pending_cache[200] ← emotion 专用（LLM 驱动 swap）
+Cover:   s_cover_cache[200]  ← 独立槽，不被 emotion 换出
 ```
-**关键逻辑**:
-1. `s_cover_location`: 三态追踪 (0=无, 1=在slot, 2=在active)
-2. `ppa_swap_to_cover()`: 双向交换 active↔cover_slot，自动翻转 location
-3. Cover→Expression: save-cover swap → slot 旧帧（neutral）弹回 active → 直接复用，零 SD I/O
-4. Expression→Cover: swap cover 回 active → 秒切
-5. LLM emotion swap (active↔pending): cover slot 完全不受影响
-6. 换角色时 `ppa_unload_cover()` 释放旧 cover
+**内存**: ~11MB（Cover 5.7M + Active 3.4M + Pending 2.2M），32MB PSRAM 完全可承受
 
-### 按钮文字随状态切换
-- cover_display_start → 按钮显示 "对话模式"
-- expression_display_start → 按钮显示 "通行证模式"
-- 模式切换和对话结束统一更新按钮文字
+### 关键技术点
 
-### 字体修复
+#### s_cover_location 三态追踪
+```cpp
+static int s_cover_location = 0;  // 0=无, 1=在cover槽, 2=在active
+```
+- `ppa_swap_to_cover()`: 双向交换 active↔slot，自动翻转 location
+- `ppa_preload_cover()`: 加载到 slot，设 location=1
+- `ppa_has_cover()`: `location != 0`
+- `ppa_get_cover_agent()`: 返回 cover 所属角色路径，判断是否匹配当前 agent
+
+#### 同角色秒切（乒乓球机制）
+```
+Cover→Expression: save-cover swap → active 已有 neutral（从 slot 弹回）→ 直接复用
+Expression→Cover: swap cover 回 active → 秒切
+```
+仅首次启动走一次 SD。后续 save-cover swap 把 neutral 弹回 active，无需加载。
+
+#### 跨角色切换
+```
+唤醒词语音切角色: expression_display_start → 加载 neutral → 后台 async 加载 cover
+罗德岛面板选角色: cover_display_start → 加载 cover → 后台 async 加载 neutral
+换角色逻辑: 不先 unload，而是在 swap 后释放旧帧（新帧在 active 后才清旧）
+```
+
+#### 竞态防护
+1. **`s_in_expression_start` 标志**: `expression_display_start` 的 `vTaskDelay(100ms)` 会 yield 主循环，此时 `OnAudioChannelClosed` 的 schedule 可能提前执行。`cover_display_start` 检查此标志直接返回
+2. **`s_cover_mode` 提前设**: `mode_switch_task` cover 分支在 swap 前先设 `s_cover_mode=true`，双重防护
+3. **`ppa_wait_cover_preload/ppa_wait_pending_preload`**: 等异步加载完成再操作缓存
+4. **`s_force_swap` 清零**: expression 启动前清掉旧 agent 残留的 swap 标志，防止 pending 旧帧被错误换入 active
+5. **`vTaskDelay(100ms)`**: `cover_display_start` 等旧 video task 退出 + PPA 硬件事务完成
+
+#### 看门狗修复
+**根因**: `video_play` 和 `audio_detection` 同为 prio 3 挤在 core 0
+**修复**: `video_play` 钉 core 0 / prio 2，`audio_detection` (prio 3) 随时抢占
+**教训**: ESP32-P4 双核架构下，音视频 task 必须在不同优先级，音频永远优先
+
+#### PPA 冲突（新旧 task 同时提交 PPA 事务）
+**修复**: `expression_display_start` 等旧 task 退出（vTaskDelay 100ms）再启动新 task
+
+#### 按钮文字随状态切换
+- `cover_display_start` → "对话模式"
+- `expression_display_start` → "通行证模式"
+
+#### 字体修复
 - `chat_overlay_init()` 直接传入 `display->GetTextFont()` 中文字体
-- `s_btn_labels[]` 数组跟踪所有按钮 label，`chat_overlay_set_font()` 统一更新
+- `s_btn_labels[]` 数组跟踪所有按钮 label
 
-### Cover 预加载优化
-- cover_display_start 启动时异步预加载 neutral 到 pending
-- 首次 expression 切换可通过 swap 直接命中
-
-### 对话断连
+#### 对话断连
 - `Application::CloseAudioChannel()`: 直接关闭协议通道+设 idle
-- 点击"通行证模式"即断对话，不走 Schedule 链等待
+- `OnAudioChannelClosed` 增加 `IsAudioChannelOpened()` 判断，阻止 agent 切换时误触发 cover
 
-### 杂项
-- snprintf 缓冲区扩大到 520 字节（agent_path+d_name 组合可能超 300）
-- `expression_display_start` 等待旧 video task 退出后再启动新 task（防 PPA 冲突）
+#### Cover 异步预加载
+- `cover_display_start` → async 预加载 neutral 到 pending
+- `expression_display_start` → async 预加载 cover 到 slot（`ppa_preload_cover_async`）
+
+#### 杂项
+- `mode_switch_task` 独立 10KB 栈，SD I/O 不溢出
+- snprintf 缓冲区扩大到 520 字节
+- `ppa_free_cover_slot()`: swap 后清污染槽
 
 ## 2026-08-01 #28 — GT911 触摸修复 + 聊天覆盖层
 
