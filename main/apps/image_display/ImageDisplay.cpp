@@ -648,6 +648,11 @@ static void profile_show(void) {
     if (s_profile_overlay) return;
     s_profile_was_cover = s_cover_mode;
 
+    // 清掉表情状态，防止自动切回表情鬼图
+    s_current_emotion[0] = '\0';
+    s_pending_emotion[0] = '\0';
+    s_force_swap = false;
+
     // 隐藏右上角按钮
     if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
         if (s_profile_btn) lv_obj_add_flag(s_profile_btn, LV_OBJ_FLAG_HIDDEN);
@@ -764,9 +769,11 @@ static void profile_hide(void) {
             s_image_count = count; s_current_index = 0;
             s_cover_mode = true;
             s_loop_count = 0;
+            s_force_swap = false;
+            s_current_emotion[0] = '\0';
             video_playback_start(30);
-            // 恢复对话模式下的聊天框
-            if (!s_profile_was_cover) chat_overlay_show(true);
+            // 如果来之前是对话模式，需要恢复（点对话模式按钮重进）
+            // 现在统一回到 cover 页
             ESP_LOGI(TAG, "Profile hidden, cover restored (%d frames, instant)", count);
             return;
         }
@@ -1397,7 +1404,7 @@ void chat_overlay_init(const lv_font_t *font) {
     // ── ④ 蟑螂派对！（cover+expression 都可见）──
     btn = lv_btn_create(lv_screen_active());
     lv_obj_set_size(btn, 100, 35);
-    lv_obj_set_pos(btn, 375, 110);
+    lv_obj_set_pos(btn, 375, 120);
     lv_obj_set_style_bg_color(btn, lv_color_hex(0x5588AA), 0);
     lv_obj_set_style_bg_opa(btn, LV_OPA_80, 0);
     lv_obj_set_style_radius(btn, 6, 0);
