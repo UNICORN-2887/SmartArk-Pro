@@ -658,9 +658,10 @@ static void profile_show(void) {
     video_playback_stop();
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    // ① 先秒显 JPG 占位（顶层 LVGL canvas，毫秒级）
+    // ① 立刻显示 JPG 占位（LVGL 顶层 canvas）
     const char *jpg_path = "/sdcard/User/Ur_Info/Profile.jpg";
     FILE *fp = fopen(jpg_path, "rb");
+    bool has_jpg = false;
     if (fp) {
         fclose(fp);
         char lv_path[300];
@@ -676,32 +677,47 @@ static void profile_show(void) {
             lv_obj_t *c = lv_canvas_create(s_profile_overlay);
             lv_obj_set_size(c, 480, 800);
             lv_canvas_set_buffer(c, (uint8_t*)dsc->data, dsc->header.w, dsc->header.h, LV_COLOR_FORMAT_RGB565);
+            has_jpg = true;
             ESP_LOGI(TAG, "Profile: JPG placeholder %dx%d", dsc->header.w, dsc->header.h);
         }
     }
 
-    // ② 动图走 cover 直通路径（PPA 底层 canvas，无合成鬼图）
+    // ② 动图后台加载（cover 直通路径，独立任务不阻塞 LVGL）
     const char *mjpeg_path = "/sdcard/User/Ur_Info/Profile.mjpeg";
     fp = fopen(mjpeg_path, "rb");
     if (fp) {
         fclose(fp);
-        ppa_wait_cover_preload();
-        int count = ppa_preload_cover(mjpeg_path);
-        if (count > 0) {
-            ppa_swap_to_cover();
-            s_image_count = count; s_current_index = 0;
-            s_cover_mode = false;
-            video_playback_start(25);
-            ESP_LOGI(TAG, "Profile: MJPEG %d frames", count);
-            // 动图已就位，移除 JPG 遮罩露出 PPA 画布
-            if (s_profile_overlay) {
-                lv_obj_del(s_profile_overlay);
-                s_profile_overlay = NULL;
-            }
+        char *path_copy = strdup(mjpeg_path);
+        if (path_copy) {
+            xTaskCreate([](void *arg) {
+                char *path = (char*)arg;
+                ppa_wait_cover_preload();
+                int count = ppa_preload_cover(path);  // SD→PSRAM (~2s)
+                free(path);
+                if (count > 0) {
+                    ppa_swap_to_cover();
+                    s_image_count = count; s_current_index = 0;
+                    s_cover_mode = false;
+                    video_playback_start(25);
+                    // 移除 JPG 遮罩 → 透明 overlay 露出 PPA 动图
+                    if (s_profile_overlay) {
+                        lvgl_port_lock(pdMS_TO_TICKS(200));
+                        lv_obj_clean(s_profile_overlay);
+                        lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_0, 0);
+                        lvgl_port_unlock();
+                    }
+                    ESP_LOGI(TAG, "Profile: MJPEG %d frames loaded", count);
+                }
+                vTaskDelete(NULL);
+            }, "profile_load", 8192, path_copy, 2, NULL);
         }
+    } else if (!has_jpg) {
+        if (ppa_has_cover()) ppa_swap_to_cover();
+        profile_hide();
+        return;
     }
 
-    // 全屏透明 overlay（触摸返回）
+    // 触摸 overlay（JPG 已创建则复用，否则新建透明层）
     s_profile_overlay = lv_obj_create(lv_layer_top());
     lv_obj_set_size(s_profile_overlay, 480, 800);
     lv_obj_set_pos(s_profile_overlay, 0, 0);
