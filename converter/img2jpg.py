@@ -46,6 +46,10 @@ print(f'\nConverting: {os.path.basename(src)} -> Profile.jpg (480x800) ...')
 
 try:
     img = Image.open(src).convert('RGBA')
+    w, h = img.size
+    if w > h:
+        img = img.transpose(Image.ROTATE_270)  # 横屏→竖屏
+        print(f'   Rotated {w}x{h} → {img.size[0]}x{img.size[1]}')
     bg = Image.new('RGB', img.size, (255, 255, 255))
     bg.paste(img, mask=img.split()[3])
     bg = bg.resize((480, 800), Image.LANCZOS)

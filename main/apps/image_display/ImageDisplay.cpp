@@ -691,19 +691,26 @@ static void profile_show(void) {
         }
     }
 
-    // ② 动图 MJPEG 后台加载（pending 槽，不碰 cover 槽）
+    // ② 动图 MJPEG 后台加载（独立任务，不阻塞 LVGL）
     fp = fopen(mjpeg_path, "rb");
     if (fp) {
         fclose(fp);
-        ppa_wait_pending_preload();
-        int count = ppa_preload_mjpeg(mjpeg_path);  // → pending 槽
-        if (count > 0) {
-            ppa_swap_emotion();  // pending → active（替换静态占位）
-            s_image_count = count; s_current_index = 0;
-            video_playback_start(25);  // 25fps 省电
-            shown = true;
-            ESP_LOGI(TAG, "Profile: MJPEG %d frames (PSRAM %.0fKB)",
-                     count, (float)count * 480 * 800 * 2 / 1024);
+        shown = true;  // 即使还在加载中也算"有内容"
+        char *path_copy = strdup(mjpeg_path);
+        if (path_copy) {
+            xTaskCreate([](void *arg) {
+                char *path = (char*)arg;
+                ppa_wait_pending_preload();
+                int count = ppa_preload_mjpeg(path);
+                free(path);
+                if (count > 0) {
+                    ppa_swap_emotion();
+                    s_image_count = count; s_current_index = 0;
+                    video_playback_start(25);
+                    ESP_LOGI(TAG, "Profile: MJPEG %d frames loaded", count);
+                }
+                vTaskDelete(NULL);
+            }, "profile_load", 8192, path_copy, 2, NULL);
         }
     }
 
