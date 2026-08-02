@@ -33,7 +33,7 @@ if not os.path.isfile(SRC):
 
 FPS = 25          # 目标帧率
 MAX_SEC = 10      # 最多取前 10 秒
-MAX_FRAMES = 200  # PPA 硬限制（MAX_CACHE=200）
+MAX_FRAMES = 260  # PPA 硬限制（MAX_CACHE=260）
 
 print(f'\n[1/3] Extracting frames (25fps, max {MAX_SEC}s, {MAX_FRAMES} frames cap) ...')
 if os.path.isdir(TMP):

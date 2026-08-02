@@ -117,7 +117,7 @@ bool ppa_init(void) {
 
 // ─── Frame Cache + MJPEG ──────────────────────────────────────
 
-#define MAX_CACHE 200
+#define MAX_CACHE 260
 static uint8_t *s_jpg_cache[MAX_CACHE];
 static size_t s_jpg_cache_size[MAX_CACHE];
 static int s_cache_count = 0;
