@@ -196,10 +196,11 @@ bool cover_display_start(const char *agent_sd_path) {
     s_image_count = frame_count;
     s_current_index = 0;
     s_cover_mode = true;
-    lvgl_port_lock(0);
-    if (s_mode_label) lv_label_set_text(s_mode_label, "对话模式");
-    if (s_rhodes_btn) lv_obj_remove_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
-    lvgl_port_unlock();
+    if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
+        if (s_mode_label) lv_label_set_text(s_mode_label, "对话模式");
+        if (s_rhodes_btn) lv_obj_remove_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
+        lvgl_port_unlock();
+    }
 
     // 预加载 neutral 表情到后备缓存（唤醒/切换时秒切）
     char neutral_path[300];
@@ -272,10 +273,11 @@ bool expression_display_start(const char *agent_sd_path, const char *emotion) {
     s_cover_mode = false;
     s_loop_count = 0;
     chat_overlay_show(true);
-    lvgl_port_lock(0);
-    if (s_mode_label) lv_label_set_text(s_mode_label, "通行证模式");
-    if (s_rhodes_btn) lv_obj_add_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
-    lvgl_port_unlock();
+    if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
+        if (s_mode_label) lv_label_set_text(s_mode_label, "通行证模式");
+        if (s_rhodes_btn) lv_obj_add_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
+        lvgl_port_unlock();
+    }
     strncpy(s_current_emotion, emotion, sizeof(s_current_emotion) - 1);
     s_pending_emotion[0] = '\0';  // pending 保留 cover 帧，等 LLM 真正用时才加载
     s_force_swap = false;  // 清掉旧 agent 残留的 swap 标志
@@ -410,27 +412,38 @@ static void mode_switch_task(void *arg) {
             s_image_count = count; s_current_index = 0;
             s_cover_mode = false; s_loop_count = 0;
             chat_overlay_show(true);
-            lvgl_port_lock(0);
-            if (s_rhodes_btn) lv_obj_add_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
-            lvgl_port_unlock();
+            if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
+                if (s_rhodes_btn) lv_obj_add_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
+                lvgl_port_unlock();
+            }
             strncpy(s_current_emotion, "neutral", sizeof(s_current_emotion) - 1);
             s_pending_emotion[0] = '\0';
             s_force_swap = false;  // 清掉旧 agent 残留
             video_playback_start(30);
         }
     } else {
+        ESP_LOGI(TAG, "→ Return-to-cover: start");
         extern void application_end_conversation(void);
         application_end_conversation();  // 关音频通道
+        ESP_LOGI(TAG, "→ Return-to-cover: audio closed");
         ppa_unload_background();
         s_cover_mode = true;  // 提前设标志，防 cover_display_start 竞态
         chat_overlay_show(false);
-        if (s_rhodes_btn) lv_obj_remove_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
+        if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
+            if (s_rhodes_btn) lv_obj_remove_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
+            lvgl_port_unlock();
+        }
 
+        ESP_LOGI(TAG, "→ Return-to-cover: waiting preloads (cover=%d pending=%d)",
+                 (int)ppa_has_cover(), 0);
         ppa_wait_cover_preload();
+        ESP_LOGI(TAG, "→ Return-to-cover: cover_preload done, has_cover=%d", (int)ppa_has_cover());
         ppa_wait_pending_preload();
         int count = 0;
         if (ppa_has_cover()) {
+            ESP_LOGI(TAG, "→ Return-to-cover: swapping cover from slot…");
             count = ppa_swap_to_cover();
+            ESP_LOGI(TAG, "→ Return-to-cover: swap returned %d", count);
             if (count > 0) {
                 s_image_count = count; s_current_index = 0;
                 s_loop_count = 0;
@@ -439,6 +452,7 @@ static void mode_switch_task(void *arg) {
             }
         }
         if (count == 0) {
+            ESP_LOGI(TAG, "→ Return-to-cover: cache miss, loading from SD (agent=%s)", s_agent_path);
             char path[520] = {0};
             char cover_dir[300];
             snprintf(cover_dir, sizeof(cover_dir), "%s/cover", s_agent_path);
@@ -573,10 +587,11 @@ void image_display_cleanup(void)
     ppa_deinit();
 
     if (s_image_canvas) {
-        lvgl_port_lock(0);
-        lv_obj_del(s_image_canvas);
-        s_image_canvas = NULL;
-        lvgl_port_unlock();
+        if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
+            lv_obj_del(s_image_canvas);
+            s_image_canvas = NULL;
+            lvgl_port_unlock();
+        }
     }
 
     s_image_count = 0;
@@ -606,7 +621,7 @@ static const lv_font_t *s_chat_font = NULL;
 
 void chat_overlay_set_font(const lv_font_t *font) {
     s_chat_font = font ? font : LV_FONT_DEFAULT;
-    lvgl_port_lock(0);
+    if (!lvgl_port_lock(pdMS_TO_TICKS(500))) return;
     if (s_chat_user_label)    lv_obj_set_style_text_font(s_chat_user_label, font, 0);
     if (s_chat_assistant_label) lv_obj_set_style_text_font(s_chat_assistant_label, font, 0);
     if (s_chat_user_box && lv_obj_get_child_cnt(s_chat_user_box) > 0)
@@ -1244,7 +1259,7 @@ void chat_overlay_toggle(void) {
 
 void chat_overlay_show(bool show) {
     if (!s_chat_user_box || !s_chat_assistant_box) return;
-    lvgl_port_lock(0);
+    if (!lvgl_port_lock(pdMS_TO_TICKS(500))) return;  // 非 LVGL 任务调用，必须等锁
     if (show) {
         lv_obj_remove_flag(s_chat_user_box, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(s_chat_assistant_box, LV_OBJ_FLAG_HIDDEN);
@@ -1257,7 +1272,7 @@ void chat_overlay_show(bool show) {
 
 void chat_overlay_set_user(const char *text) {
     if (!s_chat_user_label || !text) return;
-    lvgl_port_lock(0);
+    if (!lvgl_port_lock(pdMS_TO_TICKS(500))) return;
     lv_label_set_text(s_chat_user_label, text);
     lv_obj_scroll_to_y(s_chat_user_box, 0, LV_ANIM_OFF);
     // 用户发言时清空上一轮 LLM 回复
@@ -1267,7 +1282,7 @@ void chat_overlay_set_user(const char *text) {
 
 void chat_overlay_append_assistant(const char *text) {
     if (!s_chat_assistant_label || !text) return;
-    lvgl_port_lock(0);
+    if (!lvgl_port_lock(pdMS_TO_TICKS(500))) return;
     const char *old = lv_label_get_text(s_chat_assistant_label);
     char buf[1024];
     if (old && old[0]) {
