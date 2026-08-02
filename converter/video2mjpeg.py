@@ -16,7 +16,7 @@ def fail(msg):
     sys.exit(1)
 
 print('=' * 50)
-print('  MP4 -> MJPEG Converter (480x800, 30fps)')
+print('  MP4 -> MJPEG Converter (480x800, 25fps, max 10s/200 frames)')
 print('=' * 50)
 
 # Check ffmpeg
@@ -31,15 +31,20 @@ if not os.path.isfile(SRC):
         print(f'  {f}')
     fail(f'Profile.mp4 not found in {SCRIPT_DIR}')
 
-print(f'\n[1/3] Extracting frames from Profile.mp4 ...')
+FPS = 25          # 目标帧率
+MAX_SEC = 10      # 最多取前 10 秒
+MAX_FRAMES = 200  # PPA 硬限制（MAX_CACHE=200）
+
+print(f'\n[1/3] Extracting frames (25fps, max {MAX_SEC}s, {MAX_FRAMES} frames cap) ...')
 if os.path.isdir(TMP):
     shutil.rmtree(TMP)
 os.makedirs(TMP)
 
 cmd = [
     'ffmpeg', '-i', SRC,
+    '-t', str(MAX_SEC),  # 超长视频只取前 N 秒
     '-vf', 'scale=480:800:force_original_aspect_ratio=decrease,pad=480:800:(ow-iw)/2:(oh-ih)/2:color=black',
-    '-q:v', '3', '-r', '30',
+    '-q:v', '3', '-r', str(FPS),
     os.path.join(TMP, '%04d.jpg'),
     '-hide_banner', '-loglevel', 'error'
 ]
@@ -51,19 +56,17 @@ if result.returncode != 0:
 files = sorted([f for f in os.listdir(TMP) if f.lower().endswith('.jpg')])
 if not files:
     fail('No frames extracted (video might be empty)')
-print(f'   {len(files)} frames extracted')
+print(f'   {len(files)} frames extracted ({FPS}fps × {MAX_SEC}s limit)')
 
-# Cap at 200 frames (PPA hardware limit)
-MAX_FRAMES = 200
+# 二次兜底：超过上限则均匀采样降帧
 if len(files) > MAX_FRAMES:
     step = len(files) / MAX_FRAMES
     sampled = [files[int(i * step)] for i in range(MAX_FRAMES)]
-    # Remove unused frames to save disk space
     for f in files:
         if f not in sampled:
             os.remove(os.path.join(TMP, f))
     files = sampled
-    print(f'   Sampled down to {len(files)} frames ({MAX_FRAMES} max)')
+    print(f'   Trimmed to {len(files)} frames ({MAX_FRAMES} max)')
 
 print(f'\n[2/3] Building MJPEG ...')
 with open(OUT, 'wb') as f:
