@@ -762,23 +762,9 @@ static void profile_hide(void) {
         lvgl_port_unlock();
     }
 
-    // cover 槽无损 → 秒切恢复
-    if (ppa_has_cover()) {
-        int count = ppa_swap_to_cover();
-        if (count > 0) {
-            s_image_count = count; s_current_index = 0;
-            s_cover_mode = true;
-            s_loop_count = 0;
-            s_force_swap = false;
-            s_current_emotion[0] = '\0';
-            video_playback_start(30);
-            // 如果来之前是对话模式，需要恢复（点对话模式按钮重进）
-            // 现在统一回到 cover 页
-            ESP_LOGI(TAG, "Profile hidden, cover restored (%d frames, instant)", count);
-            return;
-        }
-    }
-    // 兜底
+    // 清理 profile 残留帧，避免污染后续 PPA 槽状态
+    ppa_free_cover_slot();
+    // 从 SD 干净重载 cover（1-3秒，避免 PPA 状态混乱崩溃）
     if (s_agent_path[0]) {
         cover_display_start(s_agent_path);
     }
