@@ -717,13 +717,15 @@ static void profile_show(void) {
         return;
     }
 
-    // 触摸 overlay（JPG 已创建则复用，否则新建透明层）
-    s_profile_overlay = lv_obj_create(lv_layer_top());
-    lv_obj_set_size(s_profile_overlay, 480, 800);
-    lv_obj_set_pos(s_profile_overlay, 0, 0);
-    lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_0, 0);
-    lv_obj_set_style_border_width(s_profile_overlay, 0, 0);
-    lv_obj_set_style_pad_all(s_profile_overlay, 0, 0);
+    // 触摸 overlay（JPG 已创建则复用并加触摸，否则新建透明层）
+    if (!s_profile_overlay) {
+        s_profile_overlay = lv_obj_create(lv_layer_top());
+        lv_obj_set_size(s_profile_overlay, 480, 800);
+        lv_obj_set_pos(s_profile_overlay, 0, 0);
+        lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(s_profile_overlay, 0, 0);
+        lv_obj_set_style_pad_all(s_profile_overlay, 0, 0);
+    }
     lv_obj_add_flag(s_profile_overlay, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(s_profile_overlay, [](lv_event_t *e) {
         profile_hide();
