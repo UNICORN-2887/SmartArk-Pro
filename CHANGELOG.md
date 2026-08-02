@@ -1,5 +1,45 @@
 # 表情动画播放 — 变更记录
 
+## 2026-08-02 #32 — 全局 LVGL 竞态修复（lvgl_port_lock 超时）
+
+### 问题
+
+`mode_switch_task`、视频任务、协议回调等非 LVGL 任务中，调用 `lvgl_port_lock(0)` 拿锁失败后继续执行 LVGL API，与 LVGL 主任务竞争 `lv_inv_area` 导致死锁 → 看门狗触发。
+
+**触发场景**：罗德岛选 Amiya → 对话模式 → 通行证模式。`mode_switch_task(false)` 返回 cover 时调用 `lv_obj_remove_flag()` 裸奔进 LVGL，CPU1/CPU0 同时操作显示链表。
+
+### 修复
+
+全局替换 8 处 `lvgl_port_lock(0)` → `lvgl_port_lock(pdMS_TO_TICKS(500))` + 返回值检查：
+
+| 位置 | 调用上下文 |
+|---|---|
+| `decode_and_display_image()` | 视频任务每帧（最高频） |
+| `chat_overlay_show/set_user/append_assistant()` | 协议回调 + 模式切换 |
+| `cover_display_start()` | 按钮显隐 |
+| `expression_display_start()` | 按钮显隐 |
+| `mode_switch_task` 两分支 | 按钮 + 交流框显隐 |
+| `image_display_cleanup()` | 资源清理 |
+| `chat_overlay_set_font()` | 初始化 |
+
+```cpp
+// 旧（崩溃）：拿不到锁照样硬上
+lvgl_port_lock(0);
+lv_obj_add_flag(obj, ...);
+lvgl_port_unlock();
+
+// 新（安全）：500ms 超时 → 丢一次 UI 更新，绝不裸奔
+if (!lvgl_port_lock(pdMS_TO_TICKS(500))) return;
+lv_obj_add_flag(obj, ...);
+lvgl_port_unlock();
+```
+
+### 卡片点击切换 Agent（同 PR）
+
+- 索引页点击干员卡片 → 关闭索引 → `cover_display_start()` 切换到该干员 cover
+- 路径拼接：`/sdcard/main/operator/{PROF}/{RARITY}/{Name}`
+- 仅阿米娅(CASTER/5STAR)和凯尔希(MEDIC/6STAR)有完整资源，其余静默失败
+
 ## 2026-08-02 #31 — SD 卡分层目录对接 + 双维度筛选 + PSRAM 动态分配
 
 ### 问题
