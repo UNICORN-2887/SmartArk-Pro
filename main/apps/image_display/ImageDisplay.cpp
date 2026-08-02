@@ -640,6 +640,7 @@ void chat_overlay_set_font(const lv_font_t *font) {
 
 // ─── 个性主页（蟑螂派对）────────────────────────────────
 
+static lv_img_dsc_t* load_jpg_thumbnail(const char *path, int idx);
 static void profile_hide(void);
 
 static void profile_show(void) {
