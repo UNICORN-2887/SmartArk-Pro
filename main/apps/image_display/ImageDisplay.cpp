@@ -659,6 +659,13 @@ static void profile_show(void) {
     vTaskDelay(pdMS_TO_TICKS(100));
 
     chat_overlay_show(false);  // 隐藏聊天框
+    // 保存 cover→slot（仅 cover 模式需要；expression 模式 cover 已在 slot）
+    if (s_cover_mode) {
+        s_profile_was_cover = true;
+        if (ppa_get_cache_count() > 0) ppa_swap_to_cover();
+    } else {
+        s_profile_was_cover = false;
+    }
 
     // ① 立刻显示 JPG 占位（LVGL 顶层 canvas）
     const char *jpg_path = "/sdcard/User/Ur_Info/Profile.jpg";
@@ -693,11 +700,11 @@ static void profile_show(void) {
         if (path_copy) {
             xTaskCreate([](void *arg) {
                 char *path = (char*)arg;
-                ppa_wait_cover_preload();
-                int count = ppa_preload_cover(path);  // SD→PSRAM (~2s)
+                ppa_wait_pending_preload();
+                int count = ppa_preload_mjpeg(path);  // SD→pending槽(~2s), cover槽无损
                 free(path);
                 if (count > 0) {
-                    ppa_swap_to_cover();
+                    ppa_swap_emotion();  // pending→active, 旧active→pending(暂存)
                     s_image_count = count; s_current_index = 0;
                     s_cover_mode = false;
                     video_playback_start(25);
@@ -745,6 +752,22 @@ static void profile_hide(void) {
         lvgl_port_unlock();
     }
 
+    // ① pending(旧active) ←→ active(profile) — 恢复旧状态
+    ppa_swap_emotion();
+
+    // ② 如果是 cover 模式进来的，把 cover 从 slot 换回 active
+    if (s_profile_was_cover && ppa_has_cover()) {
+        ppa_swap_to_cover();        // cover→active, profile→slot
+        ppa_free_cover_slot();      // 释放 slot 中的 profile 帧
+    }
+
+    s_image_count = ppa_get_cache_count();
+    s_current_index = 0;
+    s_cover_mode = s_profile_was_cover;
+    s_pending_emotion[0] = '\0';   // pending 已被 profile 污染，清标志
+    s_force_swap = false;
+    video_playback_start(30);
+
     // 恢复按钮
     if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
         if (s_profile_btn) lv_obj_remove_flag(s_profile_btn, LV_OBJ_FLAG_HIDDEN);
@@ -753,11 +776,7 @@ static void profile_hide(void) {
         lvgl_port_unlock();
     }
 
-    // 重新加载 agent cover（1-3秒 SD 读取）
-    if (s_agent_path[0]) {
-        cover_display_start(s_agent_path);
-    }
-    ESP_LOGI(TAG, "Profile hidden");
+    ESP_LOGI(TAG, "Profile hidden (was_cover=%d, %d frames restored)", s_profile_was_cover, s_image_count);
 }
 
 // ─── 角色索引页面（罗德岛）──────────────────────────────
