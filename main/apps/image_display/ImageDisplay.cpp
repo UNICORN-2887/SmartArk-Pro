@@ -44,6 +44,9 @@ static char s_current_emotion[32] = {0};   // 当前表情名
 static char s_pending_emotion[32] = {0};   // 后备表情名
 static lv_obj_t *s_mode_label = NULL;    // 模式切换按钮 label
 static lv_obj_t *s_rhodes_btn = NULL;    // 罗德岛按钮（仅 cover 模式显示）
+static lv_obj_t *s_profile_btn = NULL;   // 蟑螂派对！按钮（cover+expression 都显示）
+static lv_obj_t *s_profile_overlay = NULL; // Profile 全屏 overlay（点击返回）
+static bool s_profile_was_cover = false;  // 进入 profile 前的模式
 
 // 前向声明（定义在后面）
 void video_playback_stop(void);
@@ -148,6 +151,7 @@ bool cover_display_start(const char *agent_sd_path) {
     // 如果 cover 已经在跑了（mode_switch_task 先切了），跳过但确保按钮可见
     if (s_cover_mode && strcmp(s_agent_path, agent_sd_path) == 0) {
         if (s_rhodes_btn) lv_obj_remove_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
+        if (s_profile_btn) lv_obj_remove_flag(s_profile_btn, LV_OBJ_FLAG_HIDDEN);
         return true;
     }
     video_playback_stop();
@@ -431,6 +435,7 @@ static void mode_switch_task(void *arg) {
         chat_overlay_show(false);
         if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
             if (s_rhodes_btn) lv_obj_remove_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
+            if (s_profile_btn) lv_obj_remove_flag(s_profile_btn, LV_OBJ_FLAG_HIDDEN);
             lvgl_port_unlock();
         }
 
@@ -631,6 +636,100 @@ void chat_overlay_set_font(const lv_font_t *font) {
     for (int i = 0; i < 4; i++)
         if (s_btn_labels[i]) lv_obj_set_style_text_font(s_btn_labels[i], font, 0);
     lvgl_port_unlock();
+}
+
+// ─── 个性主页（蟑螂派对）────────────────────────────────
+
+static void profile_hide(void);
+
+static void profile_show(void) {
+    if (s_profile_overlay) return;
+
+    s_profile_was_cover = s_cover_mode;
+    if (s_profile_btn) lv_obj_add_flag(s_profile_btn, LV_OBJ_FLAG_HIDDEN);
+
+    video_playback_stop();
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    const char *mjpeg_path = "/sdcard/User/Ur_Info/Profile.mjpeg";
+    const char *jpg_path = "/sdcard/User/Ur_Info/Profile.jpg";
+    bool loaded = false;
+
+    // 优先 MJPEG
+    FILE *fp = fopen(mjpeg_path, "rb");
+    if (fp) {
+        fclose(fp);
+        ppa_wait_cover_preload();
+        int count = ppa_preload_cover(mjpeg_path);
+        if (count > 0) {
+            ppa_swap_to_cover();
+            s_image_count = count; s_current_index = 0;
+            video_playback_start(30);
+            loaded = true;
+            ESP_LOGI(TAG, "Profile: MJPEG %d frames", count);
+        }
+    }
+    // 降级 JPG
+    if (!loaded) {
+        fp = fopen(jpg_path, "rb");
+        if (fp) {
+            fclose(fp);
+            char lv_path[300];
+            snprintf(lv_path, sizeof(lv_path), "S:/User/Ur_Info/Profile.jpg");
+            lv_img_dsc_t *dsc = load_jpg_thumbnail(lv_path, 0);
+            if (dsc) {
+                s_profile_overlay = lv_obj_create(lv_layer_top());
+                lv_obj_set_size(s_profile_overlay, 480, 800);
+                lv_obj_set_pos(s_profile_overlay, 0, 0);
+                lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_COVER, 0);
+                lv_obj_set_style_border_width(s_profile_overlay, 0, 0);
+                lv_obj_set_style_pad_all(s_profile_overlay, 0, 0);
+                lv_obj_t *c = lv_canvas_create(s_profile_overlay);
+                lv_obj_set_size(c, 480, 800);
+                lv_canvas_set_buffer(c, (uint8_t*)dsc->data, dsc->header.w, dsc->header.h, LV_COLOR_FORMAT_RGB565);
+                loaded = true;
+                ESP_LOGI(TAG, "Profile: static JPG %dx%d", dsc->header.w, dsc->header.h);
+            }
+        }
+    }
+    if (!loaded) {
+        ESP_LOGW(TAG, "Profile: no Profile.mjpeg or Profile.jpg found");
+        if (s_profile_btn) lv_obj_remove_flag(s_profile_btn, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+
+    // 全屏触摸 overlay（点击任意处返回）
+    if (!s_profile_overlay) {
+        s_profile_overlay = lv_obj_create(lv_layer_top());
+        lv_obj_set_size(s_profile_overlay, 480, 800);
+        lv_obj_set_pos(s_profile_overlay, 0, 0);
+        lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(s_profile_overlay, 0, 0);
+        lv_obj_set_style_pad_all(s_profile_overlay, 0, 0);
+    }
+    lv_obj_add_flag(s_profile_overlay, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s_profile_overlay, [](lv_event_t *e) {
+        profile_hide();
+    }, LV_EVENT_CLICKED, NULL);
+}
+
+static void profile_hide(void) {
+    if (!s_profile_overlay) return;
+    video_playback_stop();
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
+        lv_obj_del(s_profile_overlay);
+        s_profile_overlay = NULL;
+        lvgl_port_unlock();
+    }
+    if (s_profile_btn) lv_obj_remove_flag(s_profile_btn, LV_OBJ_FLAG_HIDDEN);
+
+    // 恢复到之前的 agent cover（缓存命中秒切，缓存未命中 SD 加载）
+    if (s_agent_path[0]) {
+        cover_display_start(s_agent_path);
+    }
+    ESP_LOGI(TAG, "Profile hidden, restored cover");
 }
 
 // ─── 角色索引页面（罗德岛）──────────────────────────────
@@ -894,6 +993,7 @@ static void agent_index_show(void) {
 
     // 重置卡片追踪
     for (int i = 0; i < CARDS_PER_PAGE; i++) s_card_agent_idx[i] = -1;
+    if (s_profile_btn) lv_obj_add_flag(s_profile_btn, LV_OBJ_FLAG_HIDDEN);
 
     // 保存 cover active→slot，等 cover_display_start 秒换回来
     if (s_cover_mode && ppa_has_cover()) ppa_swap_to_cover();
@@ -1071,6 +1171,7 @@ static void agent_index_show(void) {
     }
     // 恢复 cover 动图
     cover_display_start(s_agent_path);
+    if (s_profile_btn) lv_obj_remove_flag(s_profile_btn, LV_OBJ_FLAG_HIDDEN);
 
     // 显示第一页
     agent_index_show_page(0);
@@ -1245,6 +1346,25 @@ void chat_overlay_init(const lv_font_t *font) {
     lv_obj_add_event_cb(btn, [](lv_event_t *e) {
         if (s_cover_mode) s_req_expression = true;
         else             s_req_cover = true;
+    }, LV_EVENT_CLICKED, NULL);
+
+    // ── ④ 蟑螂派对！（cover+expression 都可见）──
+    btn = lv_btn_create(lv_screen_active());
+    lv_obj_set_size(btn, 100, 35);
+    lv_obj_set_pos(btn, 375, 110);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(0x5588AA), 0);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_80, 0);
+    lv_obj_set_style_radius(btn, 6, 0);
+    lv_obj_set_style_border_width(btn, 0, 0);
+    lbl = lv_label_create(btn);
+    lv_label_set_text(lbl, "蟑螂派对！");
+    lv_obj_set_style_text_color(lbl, lv_color_white(), 0);
+    lv_obj_set_style_text_font(lbl, s_chat_font, 0);
+    lv_obj_center(lbl);
+    s_profile_btn = btn;
+    lv_obj_add_flag(btn, LV_OBJ_FLAG_HIDDEN);  // 初始隐藏
+    lv_obj_add_event_cb(btn, [](lv_event_t *e) {
+        profile_show();
     }, LV_EVENT_CLICKED, NULL);
 
     lvgl_port_unlock();
