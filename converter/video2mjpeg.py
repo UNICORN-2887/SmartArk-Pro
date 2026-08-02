@@ -43,7 +43,7 @@ os.makedirs(TMP)
 cmd = [
     'ffmpeg', '-i', SRC,
     '-t', str(MAX_SEC),  # 超长视频只取前 N 秒
-    '-vf', 'scale=480:800:force_original_aspect_ratio=decrease,pad=480:800:(ow-iw)/2:(oh-ih)/2:color=black',
+    '-vf', 'transpose=1,scale=480:800:force_original_aspect_ratio=decrease,pad=480:800:(ow-iw)/2:(oh-ih)/2:color=black',
     '-q:v', '3', '-r', str(FPS),
     os.path.join(TMP, '%04d.jpg'),
     '-hide_banner', '-loglevel', 'error'
