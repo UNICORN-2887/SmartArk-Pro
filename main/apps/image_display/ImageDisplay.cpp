@@ -704,11 +704,11 @@ static void profile_show(void) {
                 int count = ppa_preload_mjpeg(path);
                 free(path);
                 if (count > 0) {
-                    // 移除 JPG 占位画布，露出 PPA 动图
+                    // 移除 JPG 占位画布，overlay 透明化露出 PPA 动图
                     if (lvgl_port_lock(pdMS_TO_TICKS(200))) {
-                        if (s_profile_overlay && lv_obj_get_child_cnt(s_profile_overlay) > 0) {
-                            lv_obj_t *child = lv_obj_get_child(s_profile_overlay, 0);
-                            if (child) lv_obj_del(child);
+                        if (s_profile_overlay) {
+                            lv_obj_clean(s_profile_overlay);  // 删除所有子对象（JPG canvas）
+                            lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_0, 0);  // 透明
                         }
                         lvgl_port_unlock();
                     }
