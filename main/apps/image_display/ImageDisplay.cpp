@@ -65,7 +65,10 @@ static bool decode_and_display_image(int frame_index)
         }
     }
 
-    lvgl_port_lock(0);
+    if (!lvgl_port_lock(pdMS_TO_TICKS(100))) {
+        // LVGL 任务繁忙，丢弃本帧（避免竞态崩溃）
+        return false;
+    }
     if (s_image_canvas) {
         lv_canvas_set_buffer(s_image_canvas, comp_buf, 480, 800, LV_COLOR_FORMAT_RGB565);
         lv_obj_invalidate(s_image_canvas);
@@ -1017,6 +1020,21 @@ static void agent_index_show(void) {
         lv_obj_set_size(c, CARD_W, CARD_H);
         lv_obj_set_pos(c, 0, 0);
         lv_obj_set_style_pad_all(c, 0, 0);
+
+        // 点击卡片 → 切换角色 cover
+        lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(card, [](lv_event_t *e) {
+            int card_i = (int)(intptr_t)lv_event_get_user_data(e);
+            int fi = s_index_page_cur * CARDS_PER_PAGE + card_i;
+            if (fi >= s_filtered_count) return;
+            int ai = s_filtered[fi];
+            char agent_path[300];
+            snprintf(agent_path, sizeof(agent_path), "/sdcard/main/operator/%s/%s/%s",
+                     PROF_EN[s_agents[ai].prof], RARITY_DIR[s_agents[ai].rarity], s_agents[ai].name);
+            ESP_LOGI(TAG, "Card tap: %s → %s", s_agents[ai].name, agent_path);
+            agent_index_hide();
+            cover_display_start(agent_path);
+        }, LV_EVENT_CLICKED, (void*)(intptr_t)i);
 
         lv_obj_add_flag(card, LV_OBJ_FLAG_HIDDEN);
 
