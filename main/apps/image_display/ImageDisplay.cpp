@@ -47,7 +47,6 @@ static lv_obj_t *s_rhodes_btn = NULL;    // 罗德岛按钮（仅 cover 模式�
 static lv_obj_t *s_profile_btn = NULL;   // 蟑螂派对！按钮（cover+expression 都显示）
 static lv_obj_t *s_profile_overlay = NULL; // Profile 全屏 overlay（点击返回）
 static bool s_profile_was_cover = false;  // 进入 profile 前的模式
-static volatile bool s_profile_active = false; // profile 动图正在播放，需清遮罩
 
 // 前向声明（定义在后面）
 void video_playback_stop(void);
@@ -76,14 +75,6 @@ static bool decode_and_display_image(int frame_index)
     if (s_image_canvas) {
         lv_canvas_set_buffer(s_image_canvas, comp_buf, 480, 800, LV_COLOR_FORMAT_RGB565);
         lv_obj_invalidate(s_image_canvas);
-    }
-    // profile 首帧已写入 PPA 画布 → 现在安全清遮罩
-    if (s_profile_active) {
-        s_profile_active = false;
-        if (s_profile_overlay) {
-            lv_obj_clean(s_profile_overlay);
-            lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_0, 0);
-        }
     }
     lvgl_port_unlock();
     return true;
@@ -656,9 +647,7 @@ static void profile_hide(void);
 static void profile_show(void) {
     if (s_profile_overlay) return;
 
-    s_profile_was_cover = s_cover_mode;
-
-    // 隐藏所有右上角按钮
+    // 隐藏右上角按钮
     if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
         if (s_profile_btn) lv_obj_add_flag(s_profile_btn, LV_OBJ_FLAG_HIDDEN);
         if (s_rhodes_btn)  lv_obj_add_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
@@ -669,78 +658,29 @@ static void profile_show(void) {
     video_playback_stop();
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    // 保存 agent cover 到 cover 槽（不丢，返回时秒切）
-    if (s_cover_mode && ppa_get_cache_count() > 0) {
-        ppa_swap_to_cover();
-    }
-
-    const char *mjpeg_path = "/sdcard/User/Ur_Info/Profile.mjpeg";
-    const char *jpg_path   = "/sdcard/User/Ur_Info/Profile.jpg";
-    bool shown = false;
-
-    // ① 静态 JPG 先行占位（毫秒级）
-    FILE *fp = fopen(jpg_path, "rb");
+    // 用 cover 路径加载（PPA 直通模式，无合成鬼图）
+    const char *path = "/sdcard/User/Ur_Info/Profile.mjpeg";
+    FILE *fp = fopen(path, "rb");
     if (fp) {
         fclose(fp);
-        char lv_path[300];
-        snprintf(lv_path, sizeof(lv_path), "S:/User/Ur_Info/Profile.jpg");
-        lv_img_dsc_t *dsc = load_jpg_thumbnail(lv_path, 0);
-        if (dsc) {
-            s_profile_overlay = lv_obj_create(lv_layer_top());
-            lv_obj_set_size(s_profile_overlay, 480, 800);
-            lv_obj_set_pos(s_profile_overlay, 0, 0);
-            lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_COVER, 0);
-            lv_obj_set_style_border_width(s_profile_overlay, 0, 0);
-            lv_obj_set_style_pad_all(s_profile_overlay, 0, 0);
-            lv_obj_t *c = lv_canvas_create(s_profile_overlay);
-            lv_obj_set_size(c, 480, 800);
-            lv_canvas_set_buffer(c, (uint8_t*)dsc->data, dsc->header.w, dsc->header.h, LV_COLOR_FORMAT_RGB565);
-            shown = true;
-            ESP_LOGI(TAG, "Profile: static placeholder %dx%d", dsc->header.w, dsc->header.h);
+        ppa_wait_cover_preload();
+        int count = ppa_preload_cover(path);
+        if (count > 0) {
+            ppa_swap_to_cover();
+            s_image_count = count; s_current_index = 0;
+            s_cover_mode = false;               // 不是 agent cover
+            video_playback_start(25);
+            ESP_LOGI(TAG, "Profile: MJPEG %d frames", count);
         }
     }
 
-    // ② 动图 MJPEG 后台加载（独立任务，不阻塞 LVGL）
-    fp = fopen(mjpeg_path, "rb");
-    if (fp) {
-        fclose(fp);
-        shown = true;  // 即使还在加载中也算"有内容"
-        char *path_copy = strdup(mjpeg_path);
-        if (path_copy) {
-            xTaskCreate([](void *arg) {
-                char *path = (char*)arg;
-                ppa_wait_pending_preload();
-                int count = ppa_preload_mjpeg(path);
-                free(path);
-                if (count > 0) {
-                    // 通知 video task：profile 已就绪，下次帧渲染时清遮罩
-                    s_profile_active = true;
-                    ppa_swap_emotion();
-                    s_image_count = count; s_current_index = 0;
-                    video_playback_start(25);
-                    ESP_LOGI(TAG, "Profile: MJPEG %d frames loaded", count);
-                }
-                vTaskDelete(NULL);
-            }, "profile_load", 8192, path_copy, 2, NULL);
-        }
-    }
-
-    if (!shown) {
-        ESP_LOGW(TAG, "Profile: no Profile.mjpeg or Profile.jpg");
-        if (ppa_has_cover()) ppa_swap_to_cover();  // 恢复 cover
-        profile_hide();
-        return;
-    }
-
-    // 触摸 overlay
-    if (!s_profile_overlay) {
-        s_profile_overlay = lv_obj_create(lv_layer_top());
-        lv_obj_set_size(s_profile_overlay, 480, 800);
-        lv_obj_set_pos(s_profile_overlay, 0, 0);
-        lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_0, 0);
-        lv_obj_set_style_border_width(s_profile_overlay, 0, 0);
-        lv_obj_set_style_pad_all(s_profile_overlay, 0, 0);
-    }
+    // 全屏透明 overlay（触摸返回）
+    s_profile_overlay = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(s_profile_overlay, 480, 800);
+    lv_obj_set_pos(s_profile_overlay, 0, 0);
+    lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_0, 0);
+    lv_obj_set_style_border_width(s_profile_overlay, 0, 0);
+    lv_obj_set_style_pad_all(s_profile_overlay, 0, 0);
     lv_obj_add_flag(s_profile_overlay, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(s_profile_overlay, [](lv_event_t *e) {
         profile_hide();
@@ -758,28 +698,15 @@ static void profile_hide(void) {
         lvgl_port_unlock();
     }
 
-    // 恢复所有按钮
+    // 恢复按钮
     if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
         if (s_profile_btn) lv_obj_remove_flag(s_profile_btn, LV_OBJ_FLAG_HIDDEN);
-        if (s_cover_mode || s_profile_was_cover) {
-            if (s_rhodes_btn) lv_obj_remove_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
-        }
-        if (s_mode_label) lv_obj_remove_flag(lv_obj_get_parent(s_mode_label), LV_OBJ_FLAG_HIDDEN);
+        if (s_rhodes_btn)  lv_obj_remove_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
+        if (s_mode_label)  lv_obj_remove_flag(lv_obj_get_parent(s_mode_label), LV_OBJ_FLAG_HIDDEN);
         lvgl_port_unlock();
     }
 
-    // cover 槽无损 → 秒切恢复
-    if (s_agent_path[0] && ppa_has_cover()) {
-        int count = ppa_swap_to_cover();
-        if (count > 0) {
-            s_image_count = count; s_current_index = 0;
-            s_cover_mode = true;
-            video_playback_start(30);
-            ESP_LOGI(TAG, "Profile hidden, cover restored (%d frames, instant)", count);
-            return;
-        }
-    }
-    // 兜底：SD 重新加载
+    // 重新加载 agent cover（1-3秒 SD 读取）
     if (s_agent_path[0]) {
         cover_display_start(s_agent_path);
     }
