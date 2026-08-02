@@ -203,6 +203,7 @@ bool cover_display_start(const char *agent_sd_path) {
     if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
         if (s_mode_label) lv_label_set_text(s_mode_label, "对话模式");
         if (s_rhodes_btn) lv_obj_remove_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
+        if (s_profile_btn) lv_obj_remove_flag(s_profile_btn, LV_OBJ_FLAG_HIDDEN);
         lvgl_port_unlock();
     }
 

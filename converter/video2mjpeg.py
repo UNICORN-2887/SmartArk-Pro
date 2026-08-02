@@ -53,6 +53,18 @@ if not files:
     fail('No frames extracted (video might be empty)')
 print(f'   {len(files)} frames extracted')
 
+# Cap at 200 frames (PPA hardware limit)
+MAX_FRAMES = 200
+if len(files) > MAX_FRAMES:
+    step = len(files) / MAX_FRAMES
+    sampled = [files[int(i * step)] for i in range(MAX_FRAMES)]
+    # Remove unused frames to save disk space
+    for f in files:
+        if f not in sampled:
+            os.remove(os.path.join(TMP, f))
+    files = sampled
+    print(f'   Sampled down to {len(files)} frames ({MAX_FRAMES} max)')
+
 print(f'\n[2/3] Building MJPEG ...')
 with open(OUT, 'wb') as f:
     f.write(struct.pack('<I', len(files)))
