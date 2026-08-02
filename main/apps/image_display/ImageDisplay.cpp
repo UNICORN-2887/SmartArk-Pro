@@ -646,12 +646,6 @@ static void profile_hide(void);
 
 static void profile_show(void) {
     if (s_profile_overlay) return;
-    s_profile_was_cover = s_cover_mode;
-
-    // 清掉表情状态，防止自动切回表情鬼图
-    s_current_emotion[0] = '\0';
-    s_pending_emotion[0] = '\0';
-    s_force_swap = false;
 
     // 隐藏右上角按钮
     if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
@@ -664,11 +658,7 @@ static void profile_show(void) {
     video_playback_stop();
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    // 保存 cover → slot（返回秒切）+ 隐藏聊天框
-    chat_overlay_show(false);
-    if (s_cover_mode && ppa_get_cache_count() > 0) {
-        ppa_swap_to_cover();  // active(cover)→slot, 不丢
-    }
+    chat_overlay_show(false);  // 隐藏聊天框
 
     // ① 立刻显示 JPG 占位（LVGL 顶层 canvas）
     const char *jpg_path = "/sdcard/User/Ur_Info/Profile.jpg";
@@ -694,7 +684,7 @@ static void profile_show(void) {
         }
     }
 
-    // ② 动图后台加载（pending 槽 → 不覆盖 cover 槽 → 返回秒切）
+    // ② 动图后台加载（cover 直通路径，独立任务不阻塞 LVGL）
     const char *mjpeg_path = "/sdcard/User/Ur_Info/Profile.mjpeg";
     fp = fopen(mjpeg_path, "rb");
     if (fp) {
@@ -703,14 +693,15 @@ static void profile_show(void) {
         if (path_copy) {
             xTaskCreate([](void *arg) {
                 char *path = (char*)arg;
-                ppa_wait_pending_preload();
-                int count = ppa_preload_mjpeg(path);  // SD→pending 槽 (~2s)
+                ppa_wait_cover_preload();
+                int count = ppa_preload_cover(path);  // SD→PSRAM (~2s)
                 free(path);
                 if (count > 0) {
-                    ppa_swap_emotion();                // pending→active(直接解码,无合成)
+                    ppa_swap_to_cover();
                     s_image_count = count; s_current_index = 0;
                     s_cover_mode = false;
                     video_playback_start(25);
+                    // 移除 JPG 遮罩 → 透明 overlay 露出 PPA 动图
                     if (s_profile_overlay) {
                         lvgl_port_lock(pdMS_TO_TICKS(200));
                         lv_obj_clean(s_profile_overlay);
@@ -762,9 +753,7 @@ static void profile_hide(void) {
         lvgl_port_unlock();
     }
 
-    // 清理 profile 残留帧，避免污染后续 PPA 槽状态
-    ppa_free_cover_slot();
-    // 从 SD 干净重载 cover（1-3秒，避免 PPA 状态混乱崩溃）
+    // 重新加载 agent cover（1-3秒 SD 读取）
     if (s_agent_path[0]) {
         cover_display_start(s_agent_path);
     }
@@ -1390,7 +1379,7 @@ void chat_overlay_init(const lv_font_t *font) {
     // ── ④ 蟑螂派对！（cover+expression 都可见）──
     btn = lv_btn_create(lv_screen_active());
     lv_obj_set_size(btn, 100, 35);
-    lv_obj_set_pos(btn, 375, 120);
+    lv_obj_set_pos(btn, 375, 110);
     lv_obj_set_style_bg_color(btn, lv_color_hex(0x5588AA), 0);
     lv_obj_set_style_bg_opa(btn, LV_OPA_80, 0);
     lv_obj_set_style_radius(btn, 6, 0);
