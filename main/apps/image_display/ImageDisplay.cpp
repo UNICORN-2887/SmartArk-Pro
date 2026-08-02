@@ -658,19 +658,46 @@ static void profile_show(void) {
     video_playback_stop();
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    // 用 cover 路径加载（PPA 直通模式，无合成鬼图）
-    const char *path = "/sdcard/User/Ur_Info/Profile.mjpeg";
-    FILE *fp = fopen(path, "rb");
+    // ① 先秒显 JPG 占位（顶层 LVGL canvas，毫秒级）
+    const char *jpg_path = "/sdcard/User/Ur_Info/Profile.jpg";
+    FILE *fp = fopen(jpg_path, "rb");
+    if (fp) {
+        fclose(fp);
+        char lv_path[300];
+        snprintf(lv_path, sizeof(lv_path), "S:/User/Ur_Info/Profile.jpg");
+        lv_img_dsc_t *dsc = load_jpg_thumbnail(lv_path, 0);
+        if (dsc) {
+            s_profile_overlay = lv_obj_create(lv_layer_top());
+            lv_obj_set_size(s_profile_overlay, 480, 800);
+            lv_obj_set_pos(s_profile_overlay, 0, 0);
+            lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_COVER, 0);
+            lv_obj_set_style_border_width(s_profile_overlay, 0, 0);
+            lv_obj_set_style_pad_all(s_profile_overlay, 0, 0);
+            lv_obj_t *c = lv_canvas_create(s_profile_overlay);
+            lv_obj_set_size(c, 480, 800);
+            lv_canvas_set_buffer(c, (uint8_t*)dsc->data, dsc->header.w, dsc->header.h, LV_COLOR_FORMAT_RGB565);
+            ESP_LOGI(TAG, "Profile: JPG placeholder %dx%d", dsc->header.w, dsc->header.h);
+        }
+    }
+
+    // ② 动图走 cover 直通路径（PPA 底层 canvas，无合成鬼图）
+    const char *mjpeg_path = "/sdcard/User/Ur_Info/Profile.mjpeg";
+    fp = fopen(mjpeg_path, "rb");
     if (fp) {
         fclose(fp);
         ppa_wait_cover_preload();
-        int count = ppa_preload_cover(path);
+        int count = ppa_preload_cover(mjpeg_path);
         if (count > 0) {
             ppa_swap_to_cover();
             s_image_count = count; s_current_index = 0;
-            s_cover_mode = false;               // 不是 agent cover
+            s_cover_mode = false;
             video_playback_start(25);
             ESP_LOGI(TAG, "Profile: MJPEG %d frames", count);
+            // 动图已就位，移除 JPG 遮罩露出 PPA 画布
+            if (s_profile_overlay) {
+                lv_obj_del(s_profile_overlay);
+                s_profile_overlay = NULL;
+            }
         }
     }
 
