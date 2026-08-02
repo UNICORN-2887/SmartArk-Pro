@@ -646,6 +646,7 @@ static void profile_hide(void);
 
 static void profile_show(void) {
     if (s_profile_overlay) return;
+    s_profile_was_cover = s_cover_mode;
 
     // 隐藏右上角按钮
     if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
@@ -657,6 +658,12 @@ static void profile_show(void) {
 
     video_playback_stop();
     vTaskDelay(pdMS_TO_TICKS(100));
+
+    // 保存 cover → slot（返回秒切）+ 隐藏聊天框
+    chat_overlay_show(false);
+    if (s_cover_mode && ppa_get_cache_count() > 0) {
+        ppa_swap_to_cover();  // active(cover)→slot, 不丢
+    }
 
     // ① 立刻显示 JPG 占位（LVGL 顶层 canvas）
     const char *jpg_path = "/sdcard/User/Ur_Info/Profile.jpg";
@@ -682,7 +689,7 @@ static void profile_show(void) {
         }
     }
 
-    // ② 动图后台加载（cover 直通路径，独立任务不阻塞 LVGL）
+    // ② 动图后台加载（pending 槽 → 不覆盖 cover 槽 → 返回秒切）
     const char *mjpeg_path = "/sdcard/User/Ur_Info/Profile.mjpeg";
     fp = fopen(mjpeg_path, "rb");
     if (fp) {
@@ -691,15 +698,14 @@ static void profile_show(void) {
         if (path_copy) {
             xTaskCreate([](void *arg) {
                 char *path = (char*)arg;
-                ppa_wait_cover_preload();
-                int count = ppa_preload_cover(path);  // SD→PSRAM (~2s)
+                ppa_wait_pending_preload();
+                int count = ppa_preload_mjpeg(path);  // SD→pending 槽 (~2s)
                 free(path);
                 if (count > 0) {
-                    ppa_swap_to_cover();
+                    ppa_swap_emotion();                // pending→active(直接解码,无合成)
                     s_image_count = count; s_current_index = 0;
                     s_cover_mode = false;
                     video_playback_start(25);
-                    // 移除 JPG 遮罩 → 透明 overlay 露出 PPA 动图
                     if (s_profile_overlay) {
                         lvgl_port_lock(pdMS_TO_TICKS(200));
                         lv_obj_clean(s_profile_overlay);
@@ -751,7 +757,21 @@ static void profile_hide(void) {
         lvgl_port_unlock();
     }
 
-    // 重新加载 agent cover（1-3秒 SD 读取）
+    // cover 槽无损 → 秒切恢复
+    if (ppa_has_cover()) {
+        int count = ppa_swap_to_cover();
+        if (count > 0) {
+            s_image_count = count; s_current_index = 0;
+            s_cover_mode = true;
+            s_loop_count = 0;
+            video_playback_start(30);
+            // 恢复对话模式下的聊天框
+            if (!s_profile_was_cover) chat_overlay_show(true);
+            ESP_LOGI(TAG, "Profile hidden, cover restored (%d frames, instant)", count);
+            return;
+        }
+    }
+    // 兜底
     if (s_agent_path[0]) {
         cover_display_start(s_agent_path);
     }
