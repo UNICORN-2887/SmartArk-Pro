@@ -1,5 +1,70 @@
 # 表情动画播放 — 变更记录
 
+## 2026-08-02 #31 — SD 卡分层目录对接 + 双维度筛选 + PSRAM 动态分配
+
+### 问题
+
+#30 的索引页只扫描了 `/sdcard/main/test_108x228/` 扁平测试目录（15 张图），下拉框是空壳——回调不读取选中值，`agent_index_refresh()` 不做任何筛选。需要对接 SD 卡真实分层结构：
+```
+/sdcard/main/operator/INDEX/
+  {PROF}_108x228/     ← 8 职业目录
+    {N}STAR/          ← 1-6 稀有度子目录
+      {Name}.jpg
+```
+
+### 改动
+
+**1. 数据模型重构**（`ImageDisplay.cpp`）
+
+```cpp
+// 旧：固定大小静态数组（DRAM，23KB）
+static char s_agent_portraits[64][300];
+static char s_agent_names[64][64];
+
+// 新：PSRAM 动态分配结构体数组（支持任意数量，零 DRAM 开销）
+struct AgentInfo { char path[300]; char name[64]; uint8_t prof; uint8_t rarity; };
+static AgentInfo *s_agents = NULL;   // heap_caps_malloc(…, MALLOC_CAP_SPIRAM)
+static int *s_filtered = NULL;       // 筛选结果（PSRAM）
+```
+
+- 双遍扫描：第一遍计数 → 精确 `heap_caps_malloc` → 第二遍填充
+- 实际扫描 ~426 个干员，`MAX_AGENT_DSC=768` 仅限缩略图指针数组（3KB DRAM）
+- 退出索引页释放 PSRAM，零残留
+
+**2. 筛选逻辑**
+
+```cpp
+// 下拉框 index 直接映射目录名（设计匹配）
+PROF_EN[] = {"", "VANGUARD", "GUARD", "REINSTALL", "SNIPER", "CASTER", "MEDIC", "SUPPORTER", "SPECIALIST"}
+RARITY_DIR[] = {"", "6STAR", "5STAR", "4STAR", "3STAR", "2STAR", "1STAR"}
+// 下拉框 "狙击" → index=4 → PROF_EN[4]="SNIPER" → 扫描 SNIPER_108x228/
+// 下拉框 "5星" → index=2 → RARITY_DIR[2]="5STAR" → 匹配 rarity==2
+```
+
+- 联动：切换职业自动重置稀有度为"全部"（`lv_dropdown_set_selected` + 防重复触发守卫）
+- 筛选后重新预加载首页缩略图，翻页延迟加载
+
+**3. 路径修复**
+
+```cpp
+// 旧（bug）：S:/sdcard/main/… → load_jpg_thumbnail 再加 /sdcard → 双重前缀
+// 新（正确）：S:/main/operator/INDEX/… → /sdcard/main/operator/INDEX/…
+```
+
+**4. 翻页 bug 修复**
+
+LVGL 手势回调中 `lv_indev_get_gesture_dir()` 和手动 `PRESS→RELEASE dx` 双重触发导致一次滑动翻两页。修复：添加 `s_gesture_handled` 标志位，同一轮手势只处理一次。
+
+### 数据流
+
+```
+SD 卡 → 双遍扫描（先计数后填充）→ PSRAM s_agents[]
+  → 下拉框选择 → agent_index_refresh()
+    → 释放旧缩略图 → 筛选 → PSRAM s_filtered[]
+      → 预加载首页 12 张 → agent_index_show_page(0)
+        → lv_canvas_set_buffer → 显示
+```
+
 ## 2026-08-02 #30 — 角色索引页面（罗德岛）+ 滑动翻页 + 缩略图
 
 ### 功能

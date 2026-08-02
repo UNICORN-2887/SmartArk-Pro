@@ -621,13 +621,31 @@ enum { CARD_W = 108, CARD_H = 228, COLS = 4, ROWS = 3, CARDS_PER_PAGE = 12 };
 static lv_obj_t *s_index_page = NULL;
 static lv_obj_t *s_index_grid = NULL;
 static lv_obj_t *s_index_pg_label = NULL;
-#define MAX_AGENTS 64
+#define MAX_AGENT_DSC 768  // 缩略图缓存指针数组（DRAM，3KB）
 static lv_obj_t *s_card_objs[CARDS_PER_PAGE] = {NULL};
 static int s_card_agent_idx[CARDS_PER_PAGE] = {-1};
-static lv_img_dsc_t *s_agent_dsc[MAX_AGENTS] = {NULL};  // 预加载缓存
+static lv_img_dsc_t *s_agent_dsc[MAX_AGENT_DSC] = {NULL};  // 按需加载缓存（下标=主列表下标）
 static int s_index_page_cur = 0;
 static int s_index_page_total = 1;
+
+// ── 主列表（PSRAM 动态分配，支持任意数量）──
+struct AgentInfo {
+    char path[300];      // "S:/main/operator/INDEX/CASTER_108x228/5STAR/Amiya.jpg"
+    char name[64];       // "Amiya"
+    uint8_t prof;        // 1..8 → PROF_EN 下标
+    uint8_t rarity;      // 1..6
+};
+static AgentInfo *s_agents = NULL;   // PSRAM 分配
 static int s_total_agents = 0;
+static int s_agent_cap = 0;
+
+// ── 筛选状态 ──
+static int *s_filtered = NULL;       // PSRAM 分配（s_agents 下标）
+static int s_filtered_count = 0;
+static int s_filter_prof = 0;        // 0=全部, 1..8
+static int s_filter_rarity = 0;      // 0=全部, 1..6
+static lv_obj_t *s_prof_dd = NULL;   // 下拉框句柄（用于联动重置）
+static lv_obj_t *s_rarity_dd = NULL;
 
 static const char* const PROFESSIONS[] = {
     "全部", "先锋", "近卫", "重装", "狙击", "术师", "医疗", "辅助", "特种", NULL
@@ -642,35 +660,64 @@ static const char* const RARITY_DIR[] = {
     "", "6STAR", "5STAR", "4STAR", "3STAR", "2STAR", "1STAR", NULL
 };
 
-// ── SD 卡角色数据 ──
-static char s_agent_portraits[MAX_AGENTS][300];
-static char s_agent_names[MAX_AGENTS][64];
+static bool is_jpg(const char *name) {
+    const char *ext = strrchr(name, '.');
+    return ext && strcasecmp(ext, ".jpg") == 0;
+}
 
 static int scan_sd_agents(void) {
-    int count = 0;
-    const char *dir_path = "/sdcard/main/test_108x228";
-    DIR *d = opendir(dir_path);
-    if (!d) {
-        ESP_LOGW(TAG, "Cannot open %s", dir_path);
-        return 0;
-    }
-    struct dirent *entry;
-    while ((entry = readdir(d)) != NULL && count < MAX_AGENTS) {
-        const char *ext = strrchr(entry->d_name, '.');
-        if (ext && strcasecmp(ext, ".jpg") == 0) {
-            // 用 LVGL FS 驱动路径（S: → /sdcard）
-            snprintf(s_agent_portraits[count], sizeof(s_agent_portraits[0]),
-                     "S:/main/test_108x228/%s", entry->d_name);
-            // 去掉扩展名作为显示名
-            size_t name_len = ext - entry->d_name;
-            if (name_len > 63) name_len = 63;
-            memcpy(s_agent_names[count], entry->d_name, name_len);
-            s_agent_names[count][name_len] = '\0';
-            ESP_LOGI(TAG, "Agent #%d: %s", count, s_agent_portraits[count]);
-            count++;
+    const char *base = "/sdcard/main/operator/INDEX";
+    // ── 第一遍：计数 ──
+    int total = 0;
+    for (int p = 1; p <= 8; p++) {
+        for (int r = 1; r <= 6; r++) {
+            char dir[160];
+            snprintf(dir, sizeof(dir), "%s/%s_108x228/%s", base, PROF_EN[p], RARITY_DIR[r]);
+            DIR *d = opendir(dir);
+            if (!d) continue;
+            struct dirent *entry;
+            while ((entry = readdir(d)) != NULL) {
+                if (is_jpg(entry->d_name)) total++;
+            }
+            closedir(d);
         }
     }
-    closedir(d);
+    if (total == 0) { ESP_LOGW(TAG, "No agents found in %s", base); return 0; }
+
+    // ── 分配 PSRAM ──
+    if (s_agents) { heap_caps_free(s_agents); s_agents = NULL; }
+    s_agent_cap = total;
+    s_agents = (AgentInfo*)heap_caps_malloc(total * sizeof(AgentInfo), MALLOC_CAP_SPIRAM);
+    if (!s_agents) { ESP_LOGE(TAG, "Failed to alloc %d AgentInfo in PSRAM", total); return 0; }
+
+    // ── 第二遍：填充 ──
+    int count = 0;
+    for (int p = 1; p <= 8 && count < total; p++) {
+        for (int r = 1; r <= 6 && count < total; r++) {
+            char dir[160];
+            snprintf(dir, sizeof(dir), "%s/%s_108x228/%s", base, PROF_EN[p], RARITY_DIR[r]);
+            DIR *d = opendir(dir);
+            if (!d) continue;
+            struct dirent *entry;
+            while ((entry = readdir(d)) != NULL && count < total) {
+                if (!is_jpg(entry->d_name)) continue;
+                AgentInfo *a = &s_agents[count];
+                snprintf(a->path, sizeof(a->path), "S:/main/operator/INDEX/%s_108x228/%s/%s",
+                         PROF_EN[p], RARITY_DIR[r], entry->d_name);
+                size_t nl = strlen(entry->d_name);
+                const char *ext = strrchr(entry->d_name, '.');
+                if (ext) nl = ext - entry->d_name;
+                if (nl > sizeof(a->name) - 1) nl = sizeof(a->name) - 1;
+                memcpy(a->name, entry->d_name, nl);
+                a->name[nl] = '\0';
+                a->prof = (uint8_t)p;
+                a->rarity = (uint8_t)r;
+                count++;
+            }
+            closedir(d);
+        }
+    }
+    ESP_LOGI(TAG, "Index: %d agents scanned (%d PSRAM bytes)", count, (int)(total * sizeof(AgentInfo)));
     return count;
 }
 
@@ -683,14 +730,20 @@ static void agent_index_hide(void) {
         s_index_grid = NULL;
         s_index_pg_label = NULL;
         for (int i = 0; i < CARDS_PER_PAGE; i++) s_card_objs[i] = NULL;
-        // 释放预加载的缩略图缓存
-        for (int i = 0; i < MAX_AGENTS; i++) {
-            if (s_agent_dsc[i]) {
-                if (s_agent_dsc[i]->data) heap_caps_free((void*)s_agent_dsc[i]->data);
-                heap_caps_free(s_agent_dsc[i]);
-                s_agent_dsc[i] = NULL;
+        // 释放缩略图缓存
+        if (s_agents) {
+            for (int i = 0; i < s_total_agents; i++) {
+                if (s_agent_dsc[i]) {
+                    if (s_agent_dsc[i]->data) heap_caps_free((void*)s_agent_dsc[i]->data);
+                    heap_caps_free(s_agent_dsc[i]);
+                    s_agent_dsc[i] = NULL;
+                }
             }
+            heap_caps_free(s_agents); s_agents = NULL;
+            s_total_agents = 0; s_agent_cap = 0;
         }
+        if (s_filtered) { heap_caps_free(s_filtered); s_filtered = NULL; }
+        s_filtered_count = 0;
         // 恢复 AFE
         extern void application_set_wake_word_detection(bool enable);
         application_set_wake_word_detection(true);
@@ -750,13 +803,7 @@ static lv_img_dsc_t* load_jpg_thumbnail(const char *path, int idx) {
     return dsc;
 }
 
-// 颜色表
-static const uint32_t CARD_COLORS[12] = {
-    0x4A90D9, 0xD97A4A, 0x5ABF6B, 0xD9C84A,
-    0x8B5ABF, 0xBF5A8B, 0x5ABFBF, 0xBF8B5A,
-    0x4A7AD9, 0x7AD94A, 0xD94A7A, 0x7A4AD9,
-};
-
+// ── 分页显示（使用筛选结果 + 延迟加载）──
 static void agent_index_show_page(int page) {
     if (!s_index_grid) return;
     int start = page * CARDS_PER_PAGE;
@@ -764,13 +811,18 @@ static void agent_index_show_page(int page) {
     for (int i = 0; i < CARDS_PER_PAGE; i++) {
         lv_obj_t *card = s_card_objs[i];
         if (!card) continue;
-        int idx = start + i;
-        if (idx < s_total_agents) {
+        int fi = start + i;  // 筛选结果下标
+        if (fi < s_filtered_count) {
+            int ai = s_filtered[fi];  // 主列表下标
             lv_obj_remove_flag(card, LV_OBJ_FLAG_HIDDEN);
+            // 延迟加载：该 agent 缩略图未解码
+            if (!s_agent_dsc[ai]) {
+                s_agent_dsc[ai] = load_jpg_thumbnail(s_agents[ai].path, ai);
+            }
             lv_obj_t *c = lv_obj_get_child(card, 0);
-            if (s_agent_dsc[idx] && c) {
-                lv_canvas_set_buffer(c, (uint8_t*)s_agent_dsc[idx]->data,
-                                     s_agent_dsc[idx]->header.w, s_agent_dsc[idx]->header.h,
+            if (s_agent_dsc[ai] && c) {
+                lv_canvas_set_buffer(c, (uint8_t*)s_agent_dsc[ai]->data,
+                                     s_agent_dsc[ai]->header.w, s_agent_dsc[ai]->header.h,
                                      LV_COLOR_FORMAT_RGB565);
                 shown++;
             }
@@ -794,28 +846,28 @@ static void agent_index_next_page(void) {
 
 // 滑动事件处理：监听 ALL 事件，检测手势或滑动
 static lv_point_t s_press_point;
+static bool s_gesture_handled = false;
 static void on_index_gesture(lv_event_t *e) {
     lv_event_code_t code = lv_event_get_code(e);
     lv_indev_t *indev = lv_indev_active();
     if (!indev) return;
-    // 先尝试 LVGL 内置手势
-    lv_dir_t dir = lv_indev_get_gesture_dir(indev);
-    if (dir != LV_DIR_NONE) {
-        ESP_LOGI(TAG, "GESTURE dir=%d", (int)dir);
-        if (dir == LV_DIR_LEFT) { agent_index_next_page(); return; }
-        else if (dir == LV_DIR_RIGHT) { agent_index_prev_page(); return; }
-    }
-    // fallback: 手动计算 PRESS→RELEASE 位移
     lv_point_t pt;
     lv_indev_get_point(indev, &pt);
     if (code == LV_EVENT_PRESSED) {
         s_press_point = pt;
-    } else if (code == LV_EVENT_RELEASED) {
+        s_gesture_handled = false;
+        return;
+    }
+    if (s_gesture_handled) return;
+    // 先尝试 LVGL 内置手势
+    lv_dir_t dir = lv_indev_get_gesture_dir(indev);
+    if (dir == LV_DIR_LEFT)  { s_gesture_handled = true; agent_index_next_page(); return; }
+    if (dir == LV_DIR_RIGHT) { s_gesture_handled = true; agent_index_prev_page(); return; }
+    // fallback: 手动计算 PRESS→RELEASE 位移
+    if (code == LV_EVENT_RELEASED) {
         lv_coord_t dx = pt.x - s_press_point.x;
-        ESP_LOGI(TAG, "SWIPE dx=%d (%d,%d)→(%d,%d)", (int)dx,
-                 (int)s_press_point.x, (int)s_press_point.y, (int)pt.x, (int)pt.y);
-        if (dx < -40) agent_index_next_page();
-        else if (dx > 40) agent_index_prev_page();
+        if (dx < -40) { s_gesture_handled = true; agent_index_next_page(); }
+        else if (dx > 40) { s_gesture_handled = true; agent_index_prev_page(); }
     }
 }
 
@@ -835,7 +887,20 @@ static void agent_index_show(void) {
     extern void application_set_wake_word_detection(bool enable);
     application_set_wake_word_detection(false);
     s_total_agents = scan_sd_agents();
-    s_index_page_total = (s_total_agents + CARDS_PER_PAGE - 1) / CARDS_PER_PAGE;
+    // 初始筛选 = 全部（PSRAM 分配）
+    s_filter_prof = 0;
+    s_filter_rarity = 0;
+    s_filtered_count = 0;
+    if (s_filtered) { heap_caps_free(s_filtered); s_filtered = NULL; }
+    if (s_total_agents > 0) {
+        s_filtered = (int*)heap_caps_malloc(s_total_agents * sizeof(int), MALLOC_CAP_SPIRAM);
+        if (s_filtered) {
+            for (int i = 0; i < s_total_agents; i++) {
+                s_filtered[s_filtered_count++] = i;
+            }
+        }
+    }
+    s_index_page_total = (s_filtered_count + CARDS_PER_PAGE - 1) / CARDS_PER_PAGE;
     if (s_index_page_total < 1) s_index_page_total = 1;
     s_index_page_cur = 0;
     ESP_LOGI(TAG, "Index: %d agents, %d pages", s_total_agents, s_index_page_total);
@@ -884,9 +949,18 @@ static void agent_index_show(void) {
     lv_obj_set_style_text_font(dd_prof, s_chat_font, 0);
     lv_obj_set_style_text_font(lv_dropdown_get_list(dd_prof), s_chat_font, 0);
     lv_obj_add_event_cb(dd_prof, [](lv_event_t *e) {
+        int sel = lv_dropdown_get_selected((lv_obj_t*)lv_event_get_target(e));
+        if (sel == s_filter_prof) return;  // 防重复触发
+        ESP_LOGI(TAG, "Prof filter: %d", sel);
+        s_filter_prof = sel;
+        if (s_filter_rarity != 0) {
+            s_filter_rarity = 0;
+            if (s_rarity_dd) lv_dropdown_set_selected(s_rarity_dd, 0);
+        }
         s_index_page_cur = 0;
         agent_index_refresh();
     }, LV_EVENT_VALUE_CHANGED, NULL);
+    s_prof_dd = dd_prof;
 
     // 稀有度下拉框
     lv_obj_t *dd_rarity = lv_dropdown_create(bar);
@@ -897,9 +971,14 @@ static void agent_index_show(void) {
     lv_obj_set_style_text_font(dd_rarity, s_chat_font, 0);
     lv_obj_set_style_text_font(lv_dropdown_get_list(dd_rarity), s_chat_font, 0);
     lv_obj_add_event_cb(dd_rarity, [](lv_event_t *e) {
+        int sel = lv_dropdown_get_selected((lv_obj_t*)lv_event_get_target(e));
+        if (sel == s_filter_rarity) return;  // 防重复触发（含职业切换时的联动重置）
+        ESP_LOGI(TAG, "Rarity filter: %d", sel);
+        s_filter_rarity = sel;
         s_index_page_cur = 0;
         agent_index_refresh();
     }, LV_EVENT_VALUE_CHANGED, NULL);
+    s_rarity_dd = dd_rarity;
 
     // ── 卡片网格容器（支持滑动）──
     s_index_grid = lv_obj_create(page);
@@ -950,9 +1029,12 @@ static void agent_index_show(void) {
     lv_obj_set_style_text_font(s_index_pg_label, s_chat_font, 0);
     lv_obj_align(s_index_pg_label, LV_ALIGN_BOTTOM_MID, 0, -6);
 
-    for (int i = 0; i < s_total_agents; i++) {
-        s_agent_dsc[i] = load_jpg_thumbnail(s_agent_portraits[i], i);
-        vTaskDelay(pdMS_TO_TICKS(100));  // 等硬件完全释放
+    // 只预加载第一页（最多 12 张），翻页时延迟加载
+    int preload = s_filtered_count < CARDS_PER_PAGE ? s_filtered_count : CARDS_PER_PAGE;
+    for (int i = 0; i < preload; i++) {
+        int ai = s_filtered[i];
+        s_agent_dsc[ai] = load_jpg_thumbnail(s_agents[ai].path, ai);
+        if (i < preload - 1) vTaskDelay(pdMS_TO_TICKS(100));
     }
     // 恢复 cover 动图
     cover_display_start(s_agent_path);
@@ -964,11 +1046,41 @@ static void agent_index_show(void) {
 }
 
 static void agent_index_refresh(void) {
-    // Phase 3: SD 扫描 + 筛选后将结果写入，刷新页面
-    s_index_page_total = (s_total_agents + CARDS_PER_PAGE - 1) / CARDS_PER_PAGE;
-    if (s_index_page_cur >= s_index_page_total) s_index_page_cur = s_index_page_total - 1;
-    if (s_index_page_cur < 0) s_index_page_cur = 0;
-    agent_index_show_page(s_index_page_cur);
+    // 1. 释放旧缩略图
+    for (int i = 0; i < s_total_agents; i++) {
+        if (s_agent_dsc[i]) {
+            if (s_agent_dsc[i]->data) heap_caps_free((void*)s_agent_dsc[i]->data);
+            heap_caps_free(s_agent_dsc[i]);
+            s_agent_dsc[i] = NULL;
+        }
+    }
+    // 2. 分配筛选数组（PSRAM）
+    if (s_filtered) { heap_caps_free(s_filtered); s_filtered = NULL; }
+    s_filtered_count = 0;
+    if (s_total_agents > 0) {
+        s_filtered = (int*)heap_caps_malloc(s_total_agents * sizeof(int), MALLOC_CAP_SPIRAM);
+        if (!s_filtered) { ESP_LOGE(TAG, "Failed to alloc filtered array"); return; }
+        for (int i = 0; i < s_total_agents; i++) {
+            if (s_filter_prof > 0 && s_agents[i].prof != s_filter_prof) continue;
+            if (s_filter_rarity > 0 && s_agents[i].rarity != s_filter_rarity) continue;
+            s_filtered[s_filtered_count++] = i;
+        }
+    }
+    // 3. 页码
+    s_index_page_total = (s_filtered_count + CARDS_PER_PAGE - 1) / CARDS_PER_PAGE;
+    if (s_index_page_total < 1) s_index_page_total = 1;
+    s_index_page_cur = 0;
+    ESP_LOGI(TAG, "Filter: prof=%d rarity=%d → %d agents, %d pages",
+             s_filter_prof, s_filter_rarity, s_filtered_count, s_index_page_total);
+    // 4. 预加载第 0 页
+    int preload = s_filtered_count < CARDS_PER_PAGE ? s_filtered_count : CARDS_PER_PAGE;
+    for (int i = 0; i < preload; i++) {
+        int ai = s_filtered[i];
+        s_agent_dsc[ai] = load_jpg_thumbnail(s_agents[ai].path, ai);
+        if (i < preload - 1) vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    // 5. 显示
+    agent_index_show_page(0);
 }
 
 void chat_overlay_init(const lv_font_t *font) {
