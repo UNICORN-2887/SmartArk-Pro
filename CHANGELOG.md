@@ -1,5 +1,53 @@
 # 表情动画播放 — 变更记录
 
+## 2026-08-02 #30 — 角色索引页面（罗德岛）+ 滑动翻页 + 缩略图
+
+### 功能
+- 点击罗德岛按钮进入全屏角色索引页
+- 顶部双下拉框：职业（8类）+ 稀有度（1-6星）
+- 3行×4列卡片网格，每张卡片 108×228 像素
+- 滑动翻页（左滑下一页/右滑上一页），LVGL 手势检测
+- 页码指示器（1/2）
+- 返回按钮统一回到 cover 展示模式
+- 罗德岛按钮仅在 cover 模式显示（对话/expression 模式隐藏防误触）
+
+### 缩略图渲染方案
+**背景**：卡片缩略图是 108×228 JPG 立绘文件，需要从 SD 卡读取并实时解码显示。
+
+**尝试过的方案及失败原因**：
+1. `lv_image_set_src` + 文件路径 → LVGL JPEG 解码器未编译（libjpeg_turbo 需要 jpeglib.h）
+2. `lv_image_set_src` + `lv_img_dsc_t` → 部分图片不显示，LVGL 内部解析描述符条件苛刻
+3. 独立 JPEG 引擎 `jpeg_new_decoder_engine` 循环创建/销毁 → 交替失败（硬件释放不彻底）
+4. 共享 JPEG 引擎复用 → 仍然偶发失败（不同图片参数导致引擎状态残留）
+5. `jpeg_alloc_decoder_mem` 直持 DMA buffer → SRAM 压力导致偶发分配失败
+
+**最终方案**：`lv_canvas_set_buffer` + 独立 JPEG 引擎逐张解码
+```
+每张图: fill_buffer(从SD读JPG) → jpeg_new_decoder_engine → 
+         jpeg_decoder_process(hw) → jpeg_del_decoder_engine →
+         jpeg_alloc_decoder_mem(rx_buf, 54KB) → lv_canvas_set_buffer(canvas, rx_buf)
+```
+- 每张图独立创建/销毁引擎（+重试 3 次 × 5s 超时）
+- rx buffer 直接持有不释放（15 张 × 54KB = 810KB，远小于 22MB+ PSRAM）
+- Canvas 渲染跟 PPA 动图用同一管线，不经过 LVGL 图像解码器
+
+**核心经验**：
+- LVGL `lv_image_set_src` 接受自定义 `lv_img_dsc_t` 有限制条件，不推荐用于裸 RGB565 数据
+- LVGL `lv_canvas_set_buffer` 只认像素指针，零转换零对齐要求，比 `lv_image` 可靠
+- ESP32-P4 JPEG 硬件引擎对连续创建/销毁有竞态，加重试机制缓解
+- `jpeg_alloc_decoder_mem` 分配的是 DMA 内存（非 SRAM 独占），不存在"SRAM 池爆满"问题
+
+### 索引页与 cover 动图共存
+- 进入索引页：保存 cover 到 3 槽缓存 → 暂停视频 → 释放 PPA JPEG 引擎 → 独占加载缩略图 → 恢复 cover（秒切回）
+- 退索引页：仅删除索引页面 → cover 始终在播 → 无鬼图
+- 索引页期间关 AFE 防看门狗，退出重开
+
+### 其他
+- 移除旧 `g_agent_panel` 面板（被索引页取代）
+- 下拉框符号修复：`lv_dropdown_set_symbol(">")` 替代 Unicode `▼`（中文字体缺该字符）
+- 卡片 + grid 滚动条关闭
+- `s_card_agent_idx[]` 追踪卡片当前显示角色，翻页跳过已加载
+
 ## 2026-08-02 #29 — 三槽PPA缓存+跨角色秒切+看门狗修复
 
 ### 经验总结

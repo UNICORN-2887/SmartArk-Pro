@@ -17,6 +17,8 @@
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
 #include "PPACompositor.h"
+#include "driver/jpeg_decode.h"
+#include "driver/jpeg_decode.h"
 
 #define TAG "AppImageDisplay"
 
@@ -41,6 +43,7 @@ static int s_loop_count = 0;               // 非 neutral 表情已循环次数
 static char s_current_emotion[32] = {0};   // 当前表情名
 static char s_pending_emotion[32] = {0};   // 后备表情名
 static lv_obj_t *s_mode_label = NULL;    // 模式切换按钮 label
+static lv_obj_t *s_rhodes_btn = NULL;    // 罗德岛按钮（仅 cover 模式显示）
 
 // 前向声明（定义在后面）
 void video_playback_stop(void);
@@ -139,8 +142,11 @@ bool image_display_init(void)
 bool cover_display_start(const char *agent_sd_path) {
     // agent 切换中（expression_display_start 持有锁）→ 跳过
     if (s_in_expression_start) return true;
-    // 如果 cover 已经在跑了（mode_switch_task 先切了），跳过
-    if (s_cover_mode && strcmp(s_agent_path, agent_sd_path) == 0) return true;
+    // 如果 cover 已经在跑了（mode_switch_task 先切了），跳过但确保按钮可见
+    if (s_cover_mode && strcmp(s_agent_path, agent_sd_path) == 0) {
+        if (s_rhodes_btn) lv_obj_remove_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
+        return true;
+    }
     video_playback_stop();
     vTaskDelay(pdMS_TO_TICKS(100));  // 等旧 video task 退出+PPA 事务完成
     chat_overlay_show(false);  // 回到展示模式，隐藏聊天
@@ -189,6 +195,7 @@ bool cover_display_start(const char *agent_sd_path) {
     s_cover_mode = true;
     lvgl_port_lock(0);
     if (s_mode_label) lv_label_set_text(s_mode_label, "对话模式");
+    if (s_rhodes_btn) lv_obj_remove_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
     lvgl_port_unlock();
 
     // 预加载 neutral 表情到后备缓存（唤醒/切换时秒切）
@@ -264,6 +271,7 @@ bool expression_display_start(const char *agent_sd_path, const char *emotion) {
     chat_overlay_show(true);
     lvgl_port_lock(0);
     if (s_mode_label) lv_label_set_text(s_mode_label, "通行证模式");
+    if (s_rhodes_btn) lv_obj_add_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
     lvgl_port_unlock();
     strncpy(s_current_emotion, emotion, sizeof(s_current_emotion) - 1);
     s_pending_emotion[0] = '\0';  // pending 保留 cover 帧，等 LLM 真正用时才加载
@@ -399,6 +407,9 @@ static void mode_switch_task(void *arg) {
             s_image_count = count; s_current_index = 0;
             s_cover_mode = false; s_loop_count = 0;
             chat_overlay_show(true);
+            lvgl_port_lock(0);
+            if (s_rhodes_btn) lv_obj_add_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
+            lvgl_port_unlock();
             strncpy(s_current_emotion, "neutral", sizeof(s_current_emotion) - 1);
             s_pending_emotion[0] = '\0';
             s_force_swap = false;  // 清掉旧 agent 残留
@@ -410,6 +421,7 @@ static void mode_switch_task(void *arg) {
         ppa_unload_background();
         s_cover_mode = true;  // 提前设标志，防 cover_display_start 竞态
         chat_overlay_show(false);
+        if (s_rhodes_btn) lv_obj_remove_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
 
         ppa_wait_cover_preload();
         ppa_wait_pending_preload();
@@ -603,6 +615,362 @@ void chat_overlay_set_font(const lv_font_t *font) {
     lvgl_port_unlock();
 }
 
+// ─── 角色索引页面（罗德岛）──────────────────────────────
+
+enum { CARD_W = 108, CARD_H = 228, COLS = 4, ROWS = 3, CARDS_PER_PAGE = 12 };
+static lv_obj_t *s_index_page = NULL;
+static lv_obj_t *s_index_grid = NULL;
+static lv_obj_t *s_index_pg_label = NULL;
+#define MAX_AGENTS 64
+static lv_obj_t *s_card_objs[CARDS_PER_PAGE] = {NULL};
+static int s_card_agent_idx[CARDS_PER_PAGE] = {-1};
+static lv_img_dsc_t *s_agent_dsc[MAX_AGENTS] = {NULL};  // 预加载缓存
+static int s_index_page_cur = 0;
+static int s_index_page_total = 1;
+static int s_total_agents = 0;
+
+static const char* const PROFESSIONS[] = {
+    "全部", "先锋", "近卫", "重装", "狙击", "术师", "医疗", "辅助", "特种", NULL
+};
+static const char* const PROF_EN[] = {
+    "", "VANGUARD", "GUARD", "REINSTALL", "SNIPER", "CASTER", "MEDIC", "SUPPORTER", "SPECIALIST", NULL
+};
+static const char* const RARITIES[] = {
+    "全部", "6星", "5星", "4星", "3星", "2星", "1星", NULL
+};
+static const char* const RARITY_DIR[] = {
+    "", "6STAR", "5STAR", "4STAR", "3STAR", "2STAR", "1STAR", NULL
+};
+
+// ── SD 卡角色数据 ──
+static char s_agent_portraits[MAX_AGENTS][300];
+static char s_agent_names[MAX_AGENTS][64];
+
+static int scan_sd_agents(void) {
+    int count = 0;
+    const char *dir_path = "/sdcard/main/test_108x228";
+    DIR *d = opendir(dir_path);
+    if (!d) {
+        ESP_LOGW(TAG, "Cannot open %s", dir_path);
+        return 0;
+    }
+    struct dirent *entry;
+    while ((entry = readdir(d)) != NULL && count < MAX_AGENTS) {
+        const char *ext = strrchr(entry->d_name, '.');
+        if (ext && strcasecmp(ext, ".jpg") == 0) {
+            // 用 LVGL FS 驱动路径（S: → /sdcard）
+            snprintf(s_agent_portraits[count], sizeof(s_agent_portraits[0]),
+                     "S:/main/test_108x228/%s", entry->d_name);
+            // 去掉扩展名作为显示名
+            size_t name_len = ext - entry->d_name;
+            if (name_len > 63) name_len = 63;
+            memcpy(s_agent_names[count], entry->d_name, name_len);
+            s_agent_names[count][name_len] = '\0';
+            ESP_LOGI(TAG, "Agent #%d: %s", count, s_agent_portraits[count]);
+            count++;
+        }
+    }
+    closedir(d);
+    return count;
+}
+
+static void agent_index_refresh(void);
+
+static void agent_index_hide(void) {
+    if (s_index_page) {
+        lv_obj_del(s_index_page);
+        s_index_page = NULL;
+        s_index_grid = NULL;
+        s_index_pg_label = NULL;
+        for (int i = 0; i < CARDS_PER_PAGE; i++) s_card_objs[i] = NULL;
+        // 释放预加载的缩略图缓存
+        for (int i = 0; i < MAX_AGENTS; i++) {
+            if (s_agent_dsc[i]) {
+                if (s_agent_dsc[i]->data) heap_caps_free((void*)s_agent_dsc[i]->data);
+                heap_caps_free(s_agent_dsc[i]);
+                s_agent_dsc[i] = NULL;
+            }
+        }
+        // 恢复 AFE
+        extern void application_set_wake_word_detection(bool enable);
+        application_set_wake_word_detection(true);
+    }
+}
+
+// ── JPEG 缩略图加载（借 PPA JPEG 引擎，需先停视频）──
+static lv_img_dsc_t* load_jpg_thumbnail(const char *path, int idx) {
+    char fs_path[300];
+    snprintf(fs_path, sizeof(fs_path), "/sdcard%s", path + 2);
+    FILE *fp = fopen(fs_path, "rb");
+    if (!fp) return NULL;
+    fseek(fp, 0, SEEK_END);
+    size_t jpg_size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    if (jpg_size == 0 || jpg_size > 512 * 1024) { fclose(fp); return NULL; }
+    uint8_t *jpg_data = (uint8_t*)heap_caps_malloc(jpg_size, MALLOC_CAP_SPIRAM);
+    if (!jpg_data) { fclose(fp); return NULL; }
+    size_t rd = fread(jpg_data, 1, jpg_size, fp);
+    fclose(fp);
+    if (rd != jpg_size) { ESP_LOGW(TAG, "[%d] short read %u/%u", idx, (unsigned)rd, (unsigned)jpg_size); free(jpg_data); return NULL; }
+
+    jpeg_decode_picture_info_t info;
+    if (jpeg_decoder_get_info(jpg_data, jpg_size, &info) != ESP_OK) { free(jpg_data); return NULL; }
+    uint32_t aw = (info.width + 15) & ~15, ah = (info.height + 15) & ~15;
+
+    jpeg_decode_memory_alloc_cfg_t rx_cfg = { .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER };
+    jpeg_decode_memory_alloc_cfg_t tx_cfg = { .buffer_direction = JPEG_DEC_ALLOC_INPUT_BUFFER };
+    size_t tx_sz, rx_sz;
+    uint8_t *tx_buf = (uint8_t*)jpeg_alloc_decoder_mem(jpg_size, &tx_cfg, &tx_sz);
+    uint8_t *rx_buf = (uint8_t*)jpeg_alloc_decoder_mem(aw * ah * 2, &rx_cfg, &rx_sz);
+    if (!tx_buf || !rx_buf) { free(jpg_data); free(tx_buf); free(rx_buf); return NULL; }
+    memcpy(tx_buf, jpg_data, jpg_size);
+    free(jpg_data);
+
+    jpeg_decode_engine_cfg_t eng_cfg = { .timeout_ms = 5000 };
+    jpeg_decode_cfg_t jpg_cfg = { .output_format = JPEG_DECODE_OUT_FORMAT_RGB565, .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR };
+    jpeg_decoder_handle_t h = NULL;
+    esp_err_t e;
+    for (int retry = 0; retry < 3; retry++) {
+        e = jpeg_new_decoder_engine(&eng_cfg, &h);
+        if (e == ESP_OK) break;
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    if (e != ESP_OK) { ESP_LOGW(TAG, "[%d] eng fail %d", idx, (int)e); free(tx_buf); free(rx_buf); return NULL; }
+    uint32_t dec;
+    e = jpeg_decoder_process(h, &jpg_cfg, tx_buf, tx_sz, rx_buf, rx_sz, &dec);
+    jpeg_del_decoder_engine(h);
+    free(tx_buf);
+    if (e != ESP_OK) { ESP_LOGW(TAG, "[%d] dec fail %d", idx, (int)e); free(rx_buf); return NULL; }
+
+    lv_img_dsc_t *dsc = (lv_img_dsc_t*)heap_caps_malloc(sizeof(lv_img_dsc_t), MALLOC_CAP_SPIRAM);
+    if (!dsc) { free(rx_buf); return NULL; }
+    dsc->header.cf = LV_COLOR_FORMAT_RGB565;
+    dsc->header.w = (lv_coord_t)aw; dsc->header.h = (lv_coord_t)ah;
+    dsc->data_size = aw * ah * 2; dsc->data = rx_buf; dsc->header.stride = aw * 2;
+    return dsc;
+}
+
+// 颜色表
+static const uint32_t CARD_COLORS[12] = {
+    0x4A90D9, 0xD97A4A, 0x5ABF6B, 0xD9C84A,
+    0x8B5ABF, 0xBF5A8B, 0x5ABFBF, 0xBF8B5A,
+    0x4A7AD9, 0x7AD94A, 0xD94A7A, 0x7A4AD9,
+};
+
+static void agent_index_show_page(int page) {
+    if (!s_index_grid) return;
+    int start = page * CARDS_PER_PAGE;
+    int shown = 0;
+    for (int i = 0; i < CARDS_PER_PAGE; i++) {
+        lv_obj_t *card = s_card_objs[i];
+        if (!card) continue;
+        int idx = start + i;
+        if (idx < s_total_agents) {
+            lv_obj_remove_flag(card, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_t *c = lv_obj_get_child(card, 0);
+            if (s_agent_dsc[idx] && c) {
+                lv_canvas_set_buffer(c, (uint8_t*)s_agent_dsc[idx]->data,
+                                     s_agent_dsc[idx]->header.w, s_agent_dsc[idx]->header.h,
+                                     LV_COLOR_FORMAT_RGB565);
+                shown++;
+            }
+        } else {
+            lv_obj_add_flag(card, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    ESP_LOGI(TAG, "Page %d: %d cards shown", page, shown);
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%d/%d", page + 1, s_index_page_total);
+    lv_label_set_text(s_index_pg_label, buf);
+    s_index_page_cur = page;
+}
+
+static void agent_index_prev_page(void) {
+    if (s_index_page_cur > 0) agent_index_show_page(s_index_page_cur - 1);
+}
+static void agent_index_next_page(void) {
+    if (s_index_page_cur < s_index_page_total - 1) agent_index_show_page(s_index_page_cur + 1);
+}
+
+// 滑动事件处理：监听 ALL 事件，检测手势或滑动
+static lv_point_t s_press_point;
+static void on_index_gesture(lv_event_t *e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    lv_indev_t *indev = lv_indev_active();
+    if (!indev) return;
+    // 先尝试 LVGL 内置手势
+    lv_dir_t dir = lv_indev_get_gesture_dir(indev);
+    if (dir != LV_DIR_NONE) {
+        ESP_LOGI(TAG, "GESTURE dir=%d", (int)dir);
+        if (dir == LV_DIR_LEFT) { agent_index_next_page(); return; }
+        else if (dir == LV_DIR_RIGHT) { agent_index_prev_page(); return; }
+    }
+    // fallback: 手动计算 PRESS→RELEASE 位移
+    lv_point_t pt;
+    lv_indev_get_point(indev, &pt);
+    if (code == LV_EVENT_PRESSED) {
+        s_press_point = pt;
+    } else if (code == LV_EVENT_RELEASED) {
+        lv_coord_t dx = pt.x - s_press_point.x;
+        ESP_LOGI(TAG, "SWIPE dx=%d (%d,%d)→(%d,%d)", (int)dx,
+                 (int)s_press_point.x, (int)s_press_point.y, (int)pt.x, (int)pt.y);
+        if (dx < -40) agent_index_next_page();
+        else if (dx > 40) agent_index_prev_page();
+    }
+}
+
+static void agent_index_show(void) {
+    if (s_index_page) { agent_index_hide(); return; }
+
+    // 重置卡片追踪
+    for (int i = 0; i < CARDS_PER_PAGE; i++) s_card_agent_idx[i] = -1;
+
+    // 保存 cover active→slot，等 cover_display_start 秒换回来
+    if (s_cover_mode && ppa_has_cover()) ppa_swap_to_cover();
+    video_playback_stop();
+    vTaskDelay(pdMS_TO_TICKS(100));
+    s_cover_mode = false;
+    ppa_close_mjpeg();
+    ppa_release_jpeg_engine();
+    extern void application_set_wake_word_detection(bool enable);
+    application_set_wake_word_detection(false);
+    s_total_agents = scan_sd_agents();
+    s_index_page_total = (s_total_agents + CARDS_PER_PAGE - 1) / CARDS_PER_PAGE;
+    if (s_index_page_total < 1) s_index_page_total = 1;
+    s_index_page_cur = 0;
+    ESP_LOGI(TAG, "Index: %d agents, %d pages", s_total_agents, s_index_page_total);
+
+    lvgl_port_lock(0);
+    lv_obj_t *page = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(page, 480, 800);
+    lv_obj_set_pos(page, 0, 0);
+    lv_obj_set_style_bg_color(page, lv_color_hex(0x111111), 0);
+    lv_obj_set_style_bg_opa(page, LV_OPA_90, 0);
+    lv_obj_set_style_border_width(page, 0, 0);
+    lv_obj_set_style_pad_all(page, 0, 0);
+    s_index_page = page;
+
+    // ── 顶部 Bar ──
+    lv_obj_t *bar = lv_obj_create(page);
+    lv_obj_set_size(bar, 480, 44);
+    lv_obj_set_pos(bar, 0, 0);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(0x222222), 0);
+    lv_obj_set_style_border_width(bar, 0, 0);
+    lv_obj_set_style_pad_all(bar, 0, 0);
+    lv_obj_remove_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+
+    // 返回按钮
+    lv_obj_t *back_btn = lv_btn_create(bar);
+    lv_obj_set_size(back_btn, 50, 30);
+    lv_obj_set_pos(back_btn, 4, 7);
+    lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x555555), 0);
+    lv_obj_set_style_radius(back_btn, 4, 0);
+    lv_obj_set_style_border_width(back_btn, 0, 0);
+    lv_obj_t *back_lbl = lv_label_create(back_btn);
+    lv_label_set_text(back_lbl, "返回");
+    lv_obj_set_style_text_color(back_lbl, lv_color_white(), 0);
+    lv_obj_set_style_text_font(back_lbl, s_chat_font, 0);
+    lv_obj_center(back_lbl);
+    lv_obj_add_event_cb(back_btn, [](lv_event_t *e) {
+        agent_index_hide();
+    }, LV_EVENT_CLICKED, NULL);
+
+    // 职业下拉框
+    lv_obj_t *dd_prof = lv_dropdown_create(bar);
+    lv_obj_set_pos(dd_prof, 60, 7);
+    lv_obj_set_size(dd_prof, 110, 30);
+    lv_dropdown_set_options(dd_prof, "全部\n先锋\n近卫\n重装\n狙击\n术师\n医疗\n辅助\n特种");
+    lv_dropdown_set_symbol(dd_prof, ">");
+    lv_obj_set_style_text_font(dd_prof, s_chat_font, 0);
+    lv_obj_set_style_text_font(lv_dropdown_get_list(dd_prof), s_chat_font, 0);
+    lv_obj_add_event_cb(dd_prof, [](lv_event_t *e) {
+        s_index_page_cur = 0;
+        agent_index_refresh();
+    }, LV_EVENT_VALUE_CHANGED, NULL);
+
+    // 稀有度下拉框
+    lv_obj_t *dd_rarity = lv_dropdown_create(bar);
+    lv_obj_set_pos(dd_rarity, 176, 7);
+    lv_obj_set_size(dd_rarity, 100, 30);
+    lv_dropdown_set_options(dd_rarity, "全部\n6星\n5星\n4星\n3星\n2星\n1星");
+    lv_dropdown_set_symbol(dd_rarity, ">");
+    lv_obj_set_style_text_font(dd_rarity, s_chat_font, 0);
+    lv_obj_set_style_text_font(lv_dropdown_get_list(dd_rarity), s_chat_font, 0);
+    lv_obj_add_event_cb(dd_rarity, [](lv_event_t *e) {
+        s_index_page_cur = 0;
+        agent_index_refresh();
+    }, LV_EVENT_VALUE_CHANGED, NULL);
+
+    // ── 卡片网格容器（支持滑动）──
+    s_index_grid = lv_obj_create(page);
+    lv_obj_set_size(s_index_grid, 480, 720);
+    lv_obj_set_pos(s_index_grid, 0, 48);
+    lv_obj_set_style_bg_opa(s_index_grid, LV_OPA_0, 0);
+    lv_obj_set_style_border_width(s_index_grid, 0, 0);
+    lv_obj_set_style_pad_all(s_index_grid, 0, 0);
+    lv_obj_set_scrollbar_mode(s_index_grid, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_add_flag(s_index_grid, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s_index_grid, on_index_gesture, LV_EVENT_ALL, NULL);
+    ESP_LOGI(TAG, "Grid ALL-events listener added");
+
+    int gap_x = (480 - COLS * CARD_W) / (COLS + 1);
+    int gap_y = (720 - ROWS * CARD_H) / (ROWS + 1);
+    if (gap_y < 8) gap_y = 8;
+
+    for (int i = 0; i < CARDS_PER_PAGE; i++) {
+        int row = i / COLS;
+        int col = i % COLS;
+        lv_obj_t *card = lv_obj_create(s_index_grid);
+        int x = gap_x + col * (CARD_W + gap_x);
+        int y = gap_y + row * (CARD_H + gap_y);
+        lv_obj_set_size(card, CARD_W, CARD_H);
+        lv_obj_set_pos(card, x, y);
+        lv_obj_set_style_bg_color(card, lv_color_hex(0x333333), 0);
+        lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(card, 1, 0);
+        lv_obj_set_style_border_color(card, lv_color_hex(0x555555), 0);
+        lv_obj_set_style_radius(card, 4, 0);
+        lv_obj_set_style_pad_all(card, 0, 0);
+        lv_obj_set_scrollbar_mode(card, LV_SCROLLBAR_MODE_OFF);  // 关滚动条
+
+        // 缩略图画布
+        lv_obj_t *c = lv_canvas_create(card);
+        lv_obj_set_size(c, CARD_W, CARD_H);
+        lv_obj_set_pos(c, 0, 0);
+        lv_obj_set_style_pad_all(c, 0, 0);
+
+        lv_obj_add_flag(card, LV_OBJ_FLAG_HIDDEN);
+
+        s_card_objs[i] = card;
+    }
+
+    // ── 页码指示器 ──
+    s_index_pg_label = lv_label_create(page);
+    lv_obj_set_style_text_color(s_index_pg_label, lv_color_hex(0x888888), 0);
+    lv_obj_set_style_text_font(s_index_pg_label, s_chat_font, 0);
+    lv_obj_align(s_index_pg_label, LV_ALIGN_BOTTOM_MID, 0, -6);
+
+    for (int i = 0; i < s_total_agents; i++) {
+        s_agent_dsc[i] = load_jpg_thumbnail(s_agent_portraits[i], i);
+        vTaskDelay(pdMS_TO_TICKS(100));  // 等硬件完全释放
+    }
+    // 恢复 cover 动图
+    cover_display_start(s_agent_path);
+
+    // 显示第一页
+    agent_index_show_page(0);
+
+    lvgl_port_unlock();
+}
+
+static void agent_index_refresh(void) {
+    // Phase 3: SD 扫描 + 筛选后将结果写入，刷新页面
+    s_index_page_total = (s_total_agents + CARDS_PER_PAGE - 1) / CARDS_PER_PAGE;
+    if (s_index_page_cur >= s_index_page_total) s_index_page_cur = s_index_page_total - 1;
+    if (s_index_page_cur < 0) s_index_page_cur = 0;
+    agent_index_show_page(s_index_page_cur);
+}
+
 void chat_overlay_init(const lv_font_t *font) {
     chat_overlay_set_font(font);
 
@@ -709,13 +1077,10 @@ void chat_overlay_init(const lv_font_t *font) {
     lv_obj_set_style_text_font(lbl, s_chat_font, 0);
     lv_obj_center(lbl);
     s_btn_labels[1] = lbl;
+    s_rhodes_btn = btn;
+    lv_obj_add_flag(btn, LV_OBJ_FLAG_HIDDEN);  // 初始隐藏，cover 模式才显示
     lv_obj_add_event_cb(btn, [](lv_event_t *e) {
-        extern lv_obj_t *g_agent_panel;
-        if (g_agent_panel) {
-            bool vis = lv_obj_has_flag(g_agent_panel, LV_OBJ_FLAG_HIDDEN);
-            if (vis) lv_obj_remove_flag(g_agent_panel, LV_OBJ_FLAG_HIDDEN);
-            else     lv_obj_add_flag(g_agent_panel, LV_OBJ_FLAG_HIDDEN);
-        }
+        agent_index_show();
     }, LV_EVENT_CLICKED, NULL);
 
     // ── ③ 对话模式/通行证模式 ──
@@ -737,52 +1102,9 @@ void chat_overlay_init(const lv_font_t *font) {
         else             s_req_cover = true;
     }, LV_EVENT_CLICKED, NULL);
 
-    // ── 角色选择面板 ──
-    static lv_obj_t *panel = lv_obj_create(lv_screen_active());
-    lv_obj_set_size(panel, 160, 120);
-    lv_obj_set_pos(panel, 300, 110);
-    lv_obj_set_style_bg_color(panel, lv_color_hex(0x222222), 0);
-    lv_obj_set_style_bg_opa(panel, LV_OPA_90, 0);
-    lv_obj_set_style_radius(panel, 8, 0);
-    lv_obj_set_style_border_width(panel, 0, 0);
-    lv_obj_set_style_pad_all(panel, 4, 0);
-    lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
-    extern lv_obj_t *g_agent_panel;
-    g_agent_panel = panel;
-
-    struct { const char *name, *id, *path; } agents[] = {
-        {"Kal'tsit", "0a20483553fe4ff784a016d0fafabfff", "/sdcard/main/operator/MEDIC/6STAR/Kaltsit"},
-        {"Amiya",   "5838c85f30ab4b33a4341bf8b0736e26", "/sdcard/main/operator/CASTER/5STAR/Amiya"},
-    };
-    for (int i = 0; i < 2; i++) {
-        lv_obj_t *ab = lv_btn_create(panel);
-        lv_obj_set_size(ab, 150, 50);
-        lv_obj_set_style_bg_color(ab, lv_color_hex(0x444444), 0);
-        lv_obj_set_style_radius(ab, 4, 0);
-        lv_obj_set_style_border_width(ab, 0, 0);
-        lv_obj_t *al = lv_label_create(ab);
-        lv_label_set_text(al, agents[i].name);
-        lv_obj_set_style_text_color(al, lv_color_white(), 0);
-        lv_obj_set_style_text_font(al, s_chat_font, 0);
-        lv_obj_center(al);
-        lv_obj_add_event_cb(ab, [](lv_event_t *e) {
-            int idx = (int)(uintptr_t)lv_event_get_user_data(e);
-            struct { const char *name, *id, *path; } ag[] = {
-                {"Kal'tsit", "0a20483553fe4ff784a016d0fafabfff", "/sdcard/main/operator/MEDIC/6STAR/Kaltsit"},
-                {"Amiya",   "5838c85f30ab4b33a4341bf8b0736e26", "/sdcard/main/operator/CASTER/5STAR/Amiya"},
-            };
-            extern void application_switch_agent(const char *id);
-            application_switch_agent(ag[idx].id);
-            cover_display_start(ag[idx].path);
-            if (g_agent_panel) lv_obj_add_flag(g_agent_panel, LV_OBJ_FLAG_HIDDEN);
-        }, LV_EVENT_CLICKED, (void*)(uintptr_t)i);
-    }
-
     lvgl_port_unlock();
     ESP_LOGI(TAG, "Chat overlay initialized (hidden)");
 }
-
-lv_obj_t *g_agent_panel = NULL;
 
 void chat_overlay_toggle(void) {
     if (!s_chat_user_box) return;

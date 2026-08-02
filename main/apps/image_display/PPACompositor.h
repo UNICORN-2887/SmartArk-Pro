@@ -36,6 +36,13 @@ void ppa_preload_cover_async(const char *path);
 void ppa_wait_cover_preload(void);
 // 等待 pending 异步加载完成
 void ppa_wait_pending_preload(void);
+// 解码单个 JPEG 到 RGB565 buffer（外部管理内存，返回 NULL 失败）
+// 调用者负责 free(rgb_buf)
+uint8_t* ppa_decode_jpeg_to_rgb565(const char *path, int *out_w, int *out_h);
+// 释放 PPA JPEG 引擎（供外部独占使用）
+void ppa_release_jpeg_engine(void);
+// 恢复 PPA JPEG 引擎（外部用完归还）
+void ppa_restore_jpeg_engine(void);
 // 交换 active ↔ cover（秒切，<1ms）
 int ppa_swap_to_cover(void);
 // 清空 cover 槽旧数据（swap 后 slot 被旧 active 污染）

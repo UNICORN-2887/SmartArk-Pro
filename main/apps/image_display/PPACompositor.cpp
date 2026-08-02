@@ -422,6 +422,67 @@ void ppa_wait_pending_preload(void) {
     while (s_preload_task) vTaskDelay(pdMS_TO_TICKS(20));
 }
 
+void ppa_release_jpeg_engine(void) {
+    if (s_jpg_handle) {
+        jpeg_del_decoder_engine(s_jpg_handle);
+        s_jpg_handle = NULL;
+    }
+}
+
+void ppa_restore_jpeg_engine(void) {
+    // PPA 会在下次 composite_frame 时 lazy 重建
+}
+
+// 用 PPA 的 JPEG 引擎解码单个文件到 RGB565
+uint8_t* ppa_decode_jpeg_to_rgb565(const char *path, int *out_w, int *out_h) {
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return NULL;
+    fseek(fp, 0, SEEK_END);
+    size_t size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    if (size == 0 || size > 512 * 1024) { fclose(fp); return NULL; }
+
+    uint8_t *jpg_data = (uint8_t*)heap_caps_malloc(size, MALLOC_CAP_SPIRAM);
+    if (!jpg_data) { fclose(fp); return NULL; }
+    fread(jpg_data, 1, size, fp);
+    fclose(fp);
+
+    jpeg_decode_picture_info_t pic_info;
+    if (jpeg_decoder_get_info(jpg_data, size, &pic_info) != ESP_OK) { free(jpg_data); return NULL; }
+
+    size_t tx_size = (size + 63) & ~63;
+    uint8_t *tx_buf = (uint8_t*)heap_caps_malloc(tx_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
+    if (!tx_buf) { free(jpg_data); return NULL; }
+    memcpy(tx_buf, jpg_data, size);
+    free(jpg_data);
+
+    uint32_t aw = (pic_info.width + 15) & ~15;
+    uint32_t ah = (pic_info.height + 15) & ~15;
+    size_t out_size = (aw * ah * 2 + 63) & ~63;
+    uint8_t *rgb_buf = (uint8_t*)heap_caps_malloc(out_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
+    if (!rgb_buf) { free(tx_buf); return NULL; }
+
+    // 复用 PPA JPEG 引擎（需空闲，调用者保证视频已停）
+    jpeg_decoder_handle_t handle = NULL;
+    jpeg_decode_engine_cfg_t eng_cfg = { .timeout_ms = 1000 };
+    if (jpeg_new_decoder_engine(&eng_cfg, &handle) != ESP_OK) {
+        free(tx_buf); free(rgb_buf); return NULL;
+    }
+    jpeg_decode_cfg_t cfg = {
+        .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
+        .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
+    };
+    uint32_t decoded;
+    esp_err_t ret = jpeg_decoder_process(handle, &cfg, tx_buf, tx_size, rgb_buf, out_size, &decoded);
+    jpeg_del_decoder_engine(handle);
+    free(tx_buf);
+
+    if (ret != ESP_OK) { free(rgb_buf); return NULL; }
+    *out_w = (int)aw;
+    *out_h = (int)ah;
+    return rgb_buf;
+}
+
 int ppa_swap_to_cover(void) {
     if (s_cover_location == 0) return 0;  // 没有 cover
 
