@@ -1,4 +1,3 @@
 @echo off
-cd /d "%~dp0"
-python "%~dp0静图处理器.py"
+python "%~dp0img2jpg.py"
 pause
