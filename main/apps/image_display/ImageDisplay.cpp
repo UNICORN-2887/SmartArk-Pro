@@ -47,6 +47,7 @@ static lv_obj_t *s_rhodes_btn = NULL;    // 罗德岛按钮（仅 cover 模式�
 static lv_obj_t *s_profile_btn = NULL;   // 蟑螂派对！按钮（cover+expression 都显示）
 static lv_obj_t *s_profile_overlay = NULL; // Profile 全屏 overlay（点击返回）
 static bool s_profile_was_cover = false;  // 进入 profile 前的模式
+static volatile bool s_profile_clear = false; // 等第一帧渲染后清遮罩
 
 // 前向声明（定义在后面）
 void video_playback_stop(void);
@@ -71,6 +72,14 @@ static bool decode_and_display_image(int frame_index)
     if (!lvgl_port_lock(pdMS_TO_TICKS(100))) {
         // LVGL 任务繁忙，丢弃本帧（避免竞态崩溃）
         return false;
+    }
+    // 新 profile 第一帧就绪 → 清除 JPG 占位遮罩
+    if (s_profile_clear) {
+        s_profile_clear = false;
+        if (s_profile_overlay) {
+            lv_obj_clean(s_profile_overlay);
+            lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_0, 0);
+        }
     }
     if (s_image_canvas) {
         lv_canvas_set_buffer(s_image_canvas, comp_buf, 480, 800, LV_COLOR_FORMAT_RGB565);
@@ -704,14 +713,8 @@ static void profile_show(void) {
                 int count = ppa_preload_mjpeg(path);
                 free(path);
                 if (count > 0) {
-                    // 移除 JPG 占位画布，overlay 透明化露出 PPA 动图
-                    if (lvgl_port_lock(pdMS_TO_TICKS(200))) {
-                        if (s_profile_overlay) {
-                            lv_obj_clean(s_profile_overlay);  // 删除所有子对象（JPG canvas）
-                            lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_0, 0);  // 透明
-                        }
-                        lvgl_port_unlock();
-                    }
+                    // 等第一帧渲染后再清遮罩，避免鬼图
+                    s_profile_clear = true;
                     ppa_swap_emotion();
                     s_image_count = count; s_current_index = 0;
                     video_playback_start(25);
