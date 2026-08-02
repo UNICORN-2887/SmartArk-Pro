@@ -647,6 +647,8 @@ static void profile_hide(void);
 static void profile_show(void) {
     if (s_profile_overlay) return;
 
+    s_profile_was_cover = s_cover_mode;
+
     // 隐藏右上角按钮
     if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
         if (s_profile_btn) lv_obj_add_flag(s_profile_btn, LV_OBJ_FLAG_HIDDEN);
@@ -657,17 +659,17 @@ static void profile_show(void) {
 
     video_playback_stop();
     vTaskDelay(pdMS_TO_TICKS(100));
+    chat_overlay_show(false);
 
-    chat_overlay_show(false);  // 隐藏聊天框
-    // 保存 cover→slot（仅 cover 模式需要；expression 模式 cover 已在 slot）
-    if (s_cover_mode) {
-        s_profile_was_cover = true;
-        if (ppa_get_cache_count() > 0) ppa_swap_to_cover();
-    } else {
-        s_profile_was_cover = false;
-    }
+    // ── 槽位布局（两阶段保存）──
+    // ① pending ← active(旧内容暂存)
+    ppa_swap_emotion();
+    // ② 如果还有 cover 在槽里(expr模式默认就有) → 搬到 active
+    if (ppa_has_cover()) ppa_swap_to_cover();
+    // 此刻: active=旧cover或0, pending=旧active(cover或emotion), slot=空
+    // ③ slot ← profile(cover直通无合成)
 
-    // ① 立刻显示 JPG 占位（LVGL 顶层 canvas）
+    // ④ JPG 占位（立刻显示）
     const char *jpg_path = "/sdcard/User/Ur_Info/Profile.jpg";
     FILE *fp = fopen(jpg_path, "rb");
     bool has_jpg = false;
@@ -691,7 +693,7 @@ static void profile_show(void) {
         }
     }
 
-    // ② 动图后台加载（cover 直通路径，独立任务不阻塞 LVGL）
+    // ⑤ 动图后台加载 → slot（cover 直通路径，无鬼图）
     const char *mjpeg_path = "/sdcard/User/Ur_Info/Profile.mjpeg";
     fp = fopen(mjpeg_path, "rb");
     if (fp) {
@@ -700,15 +702,14 @@ static void profile_show(void) {
         if (path_copy) {
             xTaskCreate([](void *arg) {
                 char *path = (char*)arg;
-                ppa_wait_pending_preload();
-                int count = ppa_preload_mjpeg(path);  // SD→pending槽(~2s), cover槽无损
+                ppa_wait_cover_preload();
+                int count = ppa_preload_cover(path);  // → slot (直通)
                 free(path);
                 if (count > 0) {
-                    ppa_swap_emotion();  // pending→active, 旧active→pending(暂存)
+                    ppa_swap_to_cover();               // slot→active
                     s_image_count = count; s_current_index = 0;
                     s_cover_mode = false;
                     video_playback_start(25);
-                    // 移除 JPG 遮罩 → 透明 overlay 露出 PPA 动图
                     if (s_profile_overlay) {
                         lvgl_port_lock(pdMS_TO_TICKS(200));
                         lv_obj_clean(s_profile_overlay);
@@ -721,12 +722,11 @@ static void profile_show(void) {
             }, "profile_load", 8192, path_copy, 2, NULL);
         }
     } else if (!has_jpg) {
-        if (ppa_has_cover()) ppa_swap_to_cover();
+        ppa_swap_emotion();  // 恢复旧 active（cover 模式：cover→active; expr 模式：emotion→active）
         profile_hide();
         return;
     }
 
-    // 触摸 overlay（JPG 已创建则复用并加触摸，否则新建透明层）
     if (!s_profile_overlay) {
         s_profile_overlay = lv_obj_create(lv_layer_top());
         lv_obj_set_size(s_profile_overlay, 480, 800);
@@ -752,23 +752,22 @@ static void profile_hide(void) {
         lvgl_port_unlock();
     }
 
-    // ① pending(旧active) ←→ active(profile) — 恢复旧状态
-    ppa_swap_emotion();
-
-    // ② 如果是 cover 模式进来的，把 cover 从 slot 换回 active
-    if (s_profile_was_cover && ppa_has_cover()) {
-        ppa_swap_to_cover();        // cover→active, profile→slot
-        ppa_free_cover_slot();      // 释放 slot 中的 profile 帧
+    // ① active(profile)↔slot(cover or 0) — profile→slot, 旧active→...
+    //    注意: 如果是 expression 模式, slot 可能还有前一次 swap 的 cover
+    if (ppa_has_cover()) {
+        ppa_swap_to_cover();       // active(profile)↔slot, active=旧slot内容
+        ppa_free_cover_slot();     // 释放 slot(profile 帧)
     }
+    // ② pending(旧active)↔active — 恢复原来的 active!
+    ppa_swap_emotion();
 
     s_image_count = ppa_get_cache_count();
     s_current_index = 0;
     s_cover_mode = s_profile_was_cover;
-    s_pending_emotion[0] = '\0';   // pending 已被 profile 污染，清标志
+    s_pending_emotion[0] = '\0';
     s_force_swap = false;
     video_playback_start(30);
 
-    // 恢复按钮
     if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
         if (s_profile_btn) lv_obj_remove_flag(s_profile_btn, LV_OBJ_FLAG_HIDDEN);
         if (s_rhodes_btn)  lv_obj_remove_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
