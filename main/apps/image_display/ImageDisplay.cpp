@@ -47,7 +47,7 @@ static lv_obj_t *s_rhodes_btn = NULL;    // 罗德岛按钮（仅 cover 模式�
 static lv_obj_t *s_profile_btn = NULL;   // 蟑螂派对！按钮（cover+expression 都显示）
 static lv_obj_t *s_profile_overlay = NULL; // Profile 全屏 overlay（点击返回）
 static bool s_profile_was_cover = false;  // 进入 profile 前的模式
-static TaskHandle_t s_profile_task = NULL;       // 后台加载任务（可 kill）
+static volatile int s_profile_gen = 0;            // 生成代(旧任务检测过期用)
 
 // 前向声明（定义在后面）
 void video_playback_stop(void);
@@ -689,30 +689,32 @@ static void profile_show(void) {
     fp = fopen(mjpeg_path, "rb");
     if (fp) {
         fclose(fp);
-        if (!s_profile_task) {
-            char *path_copy = strdup(mjpeg_path);
-            if (path_copy) {
-                xTaskCreate([](void *arg) {
-                    char *path = (char*)arg;
-                    int count = ppa_preload_profile(path);
-                    free(path);
-                    if (count > 0 && s_profile_overlay) {
-                        ppa_swap_profile_to_active();
-                        s_image_count = count; s_current_index = 0;
-                        s_cover_mode = false;
-                        video_playback_start(25);
-                        if (s_profile_overlay) {
-                            lvgl_port_lock(pdMS_TO_TICKS(200));
-                            lv_obj_clean(s_profile_overlay);
-                            lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_0, 0);
-                            lvgl_port_unlock();
-                        }
-                        ESP_LOGI(TAG, "Profile: MJPEG %d frames loaded", count);
+        int my_gen = ++s_profile_gen;
+        char *path_copy = strdup(mjpeg_path);
+        if (path_copy) {
+            xTaskCreate([](void *arg) {
+                auto ctx = (std::pair<char*,int>*)arg;
+                char *path = ctx->first;
+                int gen = ctx->second;
+                delete ctx;
+                int count = ppa_preload_profile(path);
+                free(path);
+                if (gen != s_profile_gen) { vTaskDelete(NULL); return; } // 过期
+                if (count > 0 && s_profile_overlay) {
+                    ppa_swap_profile_to_active();
+                    s_image_count = count; s_current_index = 0;
+                    s_cover_mode = false;
+                    video_playback_start(25);
+                    if (s_profile_overlay) {
+                        lvgl_port_lock(pdMS_TO_TICKS(200));
+                        lv_obj_clean(s_profile_overlay);
+                        lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_0, 0);
+                        lvgl_port_unlock();
                     }
-                    s_profile_task = NULL;
-                    vTaskDelete(NULL);
-                }, "profile_load", 8192, path_copy, 2, &s_profile_task);
-            }
+                    ESP_LOGI(TAG, "Profile: MJPEG %d frames loaded", count);
+                }
+                vTaskDelete(NULL);
+            }, "profile_load", 8192, new std::pair<char*,int>(path_copy, my_gen), 2, NULL);
         }
     } else if (!has_jpg) {
         profile_hide();
@@ -737,14 +739,7 @@ static void profile_show(void) {
 
 static void profile_hide(void) {
     if (!s_profile_overlay) return;
-
-    if (s_profile_task) {
-        // 后台还在加载 → kill + 清第4槽残余
-        vTaskDelete(s_profile_task);
-        s_profile_task = NULL;
-        ppa_free_profile_slot();
-    }
-
+    s_profile_gen++;  // 淘汰正在跑的后台任务
     video_playback_stop();
     vTaskDelay(pdMS_TO_TICKS(100));
 
