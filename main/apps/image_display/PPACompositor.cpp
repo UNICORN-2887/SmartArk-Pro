@@ -123,6 +123,12 @@ static size_t s_jpg_cache_size[MAX_CACHE];
 static int s_cache_count = 0;
 static bool s_use_mjpeg = false;
 
+// ─── 第四槽：Profile 缓存（独立，不争抢 cover/pending 槽）───
+static uint8_t *s_profile_cache[MAX_CACHE];
+static size_t s_profile_sizes[MAX_CACHE];
+static int s_profile_count = 0;
+static bool s_profile_loaded = false;
+
 // Alpha 遮罩缓存（RLE 压缩, ~10KB/帧）
 static uint8_t *s_mask_cache[MAX_CACHE];
 static size_t  s_mask_cache_size[MAX_CACHE];
@@ -539,6 +545,52 @@ void ppa_unload_cover(void) {
     s_cover_location = 0;
     s_cover_agent[0] = '\0';
     ESP_LOGI(TAG, "Cover cache unloaded");
+}
+
+// ─── 第四槽：Profile 缓存操作 ───────────────────────────
+
+int ppa_preload_profile(const char *path) {
+    // 释放旧数据
+    for (int i = 0; i < s_profile_count; i++) {
+        if (s_profile_cache[i]) { free(s_profile_cache[i]); s_profile_cache[i] = NULL; }
+    }
+    s_profile_count = load_mjpeg_into(path, s_profile_cache, s_profile_sizes, MAX_CACHE);
+    s_profile_loaded = (s_profile_count > 0);
+    if (s_profile_loaded)
+        ESP_LOGI(TAG, "Profile cached: %d frames (%s)", s_profile_count, path);
+    return s_profile_count;
+}
+
+int ppa_swap_profile_to_active(void) {
+    if (!s_profile_loaded) return 0;
+    // 只交换 JPEG 帧数据（profile 无遮罩，清 active 遮罩）
+    for (int i = 0; i < MAX_CACHE; i++) {
+        uint8_t *tmp = s_jpg_cache[i];
+        s_jpg_cache[i] = s_profile_cache[i];
+        s_profile_cache[i] = tmp;
+        size_t stmp = s_jpg_cache_size[i];
+        s_jpg_cache_size[i] = s_profile_sizes[i];
+        s_profile_sizes[i] = stmp;
+        // 清遮罩（profile 直通不需要）
+        if (s_mask_cache[i]) { free(s_mask_cache[i]); s_mask_cache[i] = NULL; }
+        s_mask_cache_size[i] = 0;
+    }
+    int new_count = s_profile_count;
+    s_profile_count = s_cache_count;
+    s_cache_count = new_count;
+    s_profile_loaded = false;
+    s_use_alpha = false;
+    ESP_LOGI(TAG, "Swapped profile: %d frames active, %d in profile",
+             s_cache_count, s_profile_count);
+    return s_cache_count;
+}
+
+void ppa_free_profile_slot(void) {
+    for (int i = 0; i < s_profile_count; i++) {
+        if (s_profile_cache[i]) { free(s_profile_cache[i]); s_profile_cache[i] = NULL; }
+    }
+    s_profile_count = 0;
+    s_profile_loaded = false;
 }
 
 bool ppa_open_mjpeg(const char *path, int *out_frame_count) {

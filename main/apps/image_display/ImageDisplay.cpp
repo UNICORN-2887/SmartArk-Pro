@@ -687,7 +687,7 @@ static void profile_show(void) {
         }
     }
 
-    // ② 动图后台加载（cover 槽直通，无合成鬼图；退出时 SD 重载 cover）
+    // ② 动图后台加载 → 第4槽（不争抢 cover/pending，退出秒切）
     const char *mjpeg_path = "/sdcard/User/Ur_Info/Profile.mjpeg";
     fp = fopen(mjpeg_path, "rb");
     if (fp) {
@@ -696,11 +696,10 @@ static void profile_show(void) {
         if (path_copy) {
             xTaskCreate([](void *arg) {
                 char *path = (char*)arg;
-                ppa_wait_cover_preload();
-                int count = ppa_preload_cover(path);  // → cover 槽 (直通路径)
+                int count = ppa_preload_profile(path);  // → 第4槽(独立,直通)
                 free(path);
                 if (count > 0) {
-                    ppa_swap_to_cover();               // slot→active
+                    ppa_swap_profile_to_active();        // profile↔active
                     s_image_count = count; s_current_index = 0;
                     s_cover_mode = false;
                     video_playback_start(25);
@@ -745,37 +744,17 @@ static void profile_hide(void) {
         lvgl_port_unlock();
     }
 
-    if (s_profile_was_cover) {
-        // cover 模式进 → cover 在 slot, neutral 在 pending 无损 → 秒切
-        if (ppa_has_cover()) {
-            ppa_swap_to_cover();        // profile→slot, cover→active
-            ppa_free_cover_slot();      // 释放 slot(profile 帧)
-            s_cover_mode = true;
-            s_image_count = ppa_get_cache_count();
-            s_current_index = 0;
-            s_loop_count = 0;
-            // 重新预加载 neutral→pending (上次对话模式消耗了)
-            char neutral_path[300];
-            snprintf(neutral_path, sizeof(neutral_path), "%s/emoji/neutral.mjpeg", s_agent_path);
-            ppa_preload_mjpeg_async(neutral_path);
-            strncpy(s_pending_emotion, "neutral", sizeof(s_pending_emotion) - 1);
-            video_playback_start(30);
-            ESP_LOGI(TAG, "Profile hidden, cover restored (%d frames, instant)", s_image_count);
-        } else {
-            ppa_free_cover_slot();
-            cover_display_start(s_agent_path);
-            ESP_LOGI(TAG, "Profile hidden, cover reloading");
-        }
-    } else {
-        // expr 模式进 → cover 已被 preload_cover 覆盖 → 重载 cover 并切到 expression
-        ppa_free_cover_slot();
-        if (s_agent_path[0]) {
-            cover_display_start(s_agent_path);
-        }
-        // 自动切回对话模式（与用户原始状态一致）
-        s_req_expression = true;
-        ESP_LOGI(TAG, "Profile hidden, restoring to cover→expression");
-    }
+    // 第4槽: profile↔active 换回旧状态(cover/emotion无损!)
+    ppa_swap_profile_to_active();      // active ↔ profile
+    ppa_free_profile_slot();
+
+    s_image_count = ppa_get_cache_count();
+    s_current_index = 0;
+    s_cover_mode = s_profile_was_cover;
+    s_loop_count = 0;
+    s_force_swap = false;
+    video_playback_start(30);
+    ESP_LOGI(TAG, "Profile hidden (%d frames, instant)", s_image_count);
 
     if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
         if (s_profile_btn) lv_obj_remove_flag(s_profile_btn, LV_OBJ_FLAG_HIDDEN);
