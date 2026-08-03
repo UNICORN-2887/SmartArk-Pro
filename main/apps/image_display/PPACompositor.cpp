@@ -578,7 +578,7 @@ int ppa_swap_profile_to_active(void) {
     int new_count = s_profile_count;
     s_profile_count = s_cache_count;
     s_cache_count = new_count;
-    s_profile_loaded = false;
+    // loaded 保持 true——旧 active 已存入 profile 槽，退出可换回
     s_use_alpha = false;
     ESP_LOGI(TAG, "Swapped profile: %d frames active, %d in profile",
              s_cache_count, s_profile_count);
@@ -586,11 +586,13 @@ int ppa_swap_profile_to_active(void) {
 }
 
 void ppa_free_profile_slot(void) {
+    // swap 回去后再调用——此时 active 已恢复，profile 槽里是 profile 帧
     for (int i = 0; i < s_profile_count; i++) {
         if (s_profile_cache[i]) { free(s_profile_cache[i]); s_profile_cache[i] = NULL; }
     }
     s_profile_count = 0;
     s_profile_loaded = false;
+    ESP_LOGI(TAG, "Profile slot freed");
 }
 
 bool ppa_open_mjpeg(const char *path, int *out_frame_count) {
