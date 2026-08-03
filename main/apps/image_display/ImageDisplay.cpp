@@ -754,7 +754,10 @@ static void profile_hide(void) {
             s_image_count = ppa_get_cache_count();
             s_current_index = 0;
             s_loop_count = 0;
-            // pending 槽里 neutral 还在, 恢复标志让对话模式秒切
+            // 重新预加载 neutral→pending (上次对话模式消耗了)
+            char neutral_path[300];
+            snprintf(neutral_path, sizeof(neutral_path), "%s/emoji/neutral.mjpeg", s_agent_path);
+            ppa_preload_mjpeg_async(neutral_path);
             strncpy(s_pending_emotion, "neutral", sizeof(s_pending_emotion) - 1);
             video_playback_start(30);
             ESP_LOGI(TAG, "Profile hidden, cover restored (%d frames, instant)", s_image_count);
