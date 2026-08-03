@@ -47,7 +47,7 @@ static lv_obj_t *s_rhodes_btn = NULL;    // 罗德岛按钮（仅 cover 模式�
 static lv_obj_t *s_profile_btn = NULL;   // 蟑螂派对！按钮（cover+expression 都显示）
 static lv_obj_t *s_profile_overlay = NULL; // Profile 全屏 overlay（点击返回）
 static bool s_profile_was_cover = false;  // 进入 profile 前的模式
-static volatile bool s_profile_loading = false; // 后台任务运行中(防重复)
+static TaskHandle_t s_profile_task = NULL;       // 后台加载任务（可 kill）
 
 // 前向声明（定义在后面）
 void video_playback_stop(void);
@@ -689,8 +689,7 @@ static void profile_show(void) {
     fp = fopen(mjpeg_path, "rb");
     if (fp) {
         fclose(fp);
-        if (!s_profile_loading) {
-            s_profile_loading = true;
+        if (!s_profile_task) {
             char *path_copy = strdup(mjpeg_path);
             if (path_copy) {
                 xTaskCreate([](void *arg) {
@@ -710,11 +709,9 @@ static void profile_show(void) {
                         }
                         ESP_LOGI(TAG, "Profile: MJPEG %d frames loaded", count);
                     }
-                    s_profile_loading = false;
+                    s_profile_task = NULL;
                     vTaskDelete(NULL);
-                }, "profile_load", 8192, path_copy, 2, NULL);
-            } else {
-                s_profile_loading = false;
+                }, "profile_load", 8192, path_copy, 2, &s_profile_task);
             }
         }
     } else if (!has_jpg) {
@@ -740,7 +737,14 @@ static void profile_show(void) {
 
 static void profile_hide(void) {
     if (!s_profile_overlay) return;
-    s_profile_loading = false;  // 允许下次重新加载
+
+    if (s_profile_task) {
+        // 后台还在加载 → kill + 清第4槽残余
+        vTaskDelete(s_profile_task);
+        s_profile_task = NULL;
+        ppa_free_profile_slot();
+    }
+
     video_playback_stop();
     vTaskDelay(pdMS_TO_TICKS(100));
 
@@ -758,22 +762,15 @@ static void profile_hide(void) {
         lvgl_port_unlock();
     }
 
-    // 第4槽换回旧 active（动图已加载）→ 秒切
-    // 否则旧 active 无损 → 直接恢复（后台继续填第4槽）
+    // 动图已加载完 → swap back 恢复旧 active
     if (ppa_swap_profile_to_active() > 0) {
         ppa_free_profile_slot();
-        s_image_count = ppa_get_cache_count();
-        s_cover_mode = s_profile_was_cover;
-        video_playback_start(30);
-        ESP_LOGI(TAG, "Profile hidden (%d frames, instant)", s_image_count);
-    } else {
-        // MJPEG还没加载完，旧active里cover/emotion完好无损
-        s_cover_mode = s_profile_was_cover;
-        s_image_count = ppa_get_cache_count();
-        s_current_index = 0;
-        video_playback_start(30);
-        ESP_LOGI(TAG, "Profile hidden, resume old state (bg load continues)");
     }
+    s_image_count = ppa_get_cache_count();
+    s_cover_mode = s_profile_was_cover;
+    s_current_index = 0;
+    video_playback_start(30);
+    ESP_LOGI(TAG, "Profile hidden (%d frames)", s_image_count);
 }
 
 // ─── 角色索引页面（罗德岛）──────────────────────────────
