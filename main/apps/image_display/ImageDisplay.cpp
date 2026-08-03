@@ -47,6 +47,7 @@ static lv_obj_t *s_rhodes_btn = NULL;    // 罗德岛按钮（仅 cover 模式�
 static lv_obj_t *s_profile_btn = NULL;   // 蟑螂派对！按钮（cover+expression 都显示）
 static lv_obj_t *s_profile_overlay = NULL; // Profile 全屏 overlay（点击返回）
 static bool s_profile_was_cover = false;  // 进入 profile 前的模式
+static bool s_profile_chat_was_visible = false; // 进入前对话框可见?
 static bool s_profile_loading = false;     // 后台任务互斥
 static int s_profile_gen = 0;             // 后台任务版本号
 
@@ -649,12 +650,16 @@ static void profile_hide(void);
 static void profile_show(void) {
     if (s_profile_overlay) return;
     s_profile_was_cover = s_cover_mode;
+    s_profile_chat_was_visible = !s_cover_mode;  // 表达式模式对话框可见
 
-    // 隐藏右上角按钮
+    // 隐藏右上角按钮 + 对话框
     if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
+        chat_overlay_show(false);
         if (s_profile_btn) lv_obj_add_flag(s_profile_btn, LV_OBJ_FLAG_HIDDEN);
         if (s_rhodes_btn)  lv_obj_add_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
         if (s_mode_label)  lv_obj_add_flag(lv_obj_get_parent(s_mode_label), LV_OBJ_FLAG_HIDDEN);
+        // 隐藏按钮也在 btn_labels[0]
+        if (s_btn_labels[0]) lv_obj_add_flag(lv_obj_get_parent(s_btn_labels[0]), LV_OBJ_FLAG_HIDDEN);
         lvgl_port_unlock();
     }
 
@@ -677,6 +682,7 @@ static void profile_show(void) {
             lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_COVER, 0);
             lv_obj_set_style_border_width(s_profile_overlay, 0, 0);
             lv_obj_set_style_pad_all(s_profile_overlay, 0, 0);
+            lv_obj_clear_flag(s_profile_overlay, LV_OBJ_FLAG_SCROLLABLE);
             lv_obj_t *c = lv_canvas_create(s_profile_overlay);
             lv_obj_set_size(c, 480, 800);
             lv_canvas_set_buffer(c, (uint8_t*)dsc->data, dsc->header.w, dsc->header.h, LV_COLOR_FORMAT_RGB565);
@@ -691,14 +697,16 @@ static void profile_show(void) {
     FILE *mjpeg = fopen("/sdcard/User/Ur_Info/Profile.mjpeg", "rb");
     if (mjpeg) { fclose(mjpeg);
         lv_obj_t *btn = lv_btn_create(s_profile_overlay);
-        lv_obj_set_size(btn, 50, 28);
-        lv_obj_set_pos(btn, 420, 760);
-        lv_obj_set_style_bg_color(btn, lv_color_hex(0x5588AA), 0);
+        lv_obj_set_size(btn, 80, 45);
+        lv_obj_set_pos(btn, 475, 713);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(0x555555), 0);
+        lv_obj_set_style_bg_opa(btn, LV_OPA_80, 0);
         lv_obj_set_style_radius(btn, 4, 0);
         lv_obj_t *lbl = lv_label_create(btn);
         lv_label_set_text(lbl, "动图");
         lv_obj_set_style_text_color(lbl, lv_color_white(), 0);
-        lv_obj_set_style_text_font(lbl, LV_FONT_DEFAULT, 0);
+        lv_obj_set_style_text_font(lbl, s_chat_font, 0);
+        lv_obj_set_style_transform_rotation(btn, 900, 0);
         lv_obj_center(lbl);
         lv_obj_add_event_cb(btn, [](lv_event_t *e) {
             if (s_profile_loading) return;
@@ -756,6 +764,7 @@ static void profile_hide(void) {
         if (s_profile_btn) lv_obj_remove_flag(s_profile_btn, LV_OBJ_FLAG_HIDDEN);
         if (s_rhodes_btn)  lv_obj_remove_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
         if (s_mode_label)  lv_obj_remove_flag(lv_obj_get_parent(s_mode_label), LV_OBJ_FLAG_HIDDEN);
+        if (s_btn_labels[0]) lv_obj_remove_flag(lv_obj_get_parent(s_btn_labels[0]), LV_OBJ_FLAG_HIDDEN);
         lvgl_port_unlock();
     }
 
@@ -763,9 +772,9 @@ static void profile_hide(void) {
     ppa_use_profile_cache(false);
     ppa_free_profile_slot();
     s_cover_mode = s_profile_was_cover;
-    s_current_index = 0;
-    s_loop_count = 0;
+    s_current_index = 0; s_loop_count = 0;
     video_playback_start(30);
+    if (s_profile_chat_was_visible) chat_overlay_show(true);
     ESP_LOGI(TAG, "Profile hidden");
 }
 

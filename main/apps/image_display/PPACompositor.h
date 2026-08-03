@@ -53,11 +53,9 @@ bool ppa_has_cover(void);
 const char* ppa_get_cover_agent(void);
 // 释放 cover 缓存（agent 切换时）
 void ppa_unload_cover(void);
-
-// ─── 第四槽：Profile 槽（不影响 cover/pending/active）───
-int ppa_preload_profile(const char *path);     // 加载 MJPEG → profile 槽
-int ppa_swap_profile_to_active(void);          // 交换 active ↔ profile
-void ppa_free_profile_slot(void);              // 释放 profile 槽
+int ppa_preload_profile(const char *path);
+void ppa_use_profile_cache(bool use);
+void ppa_free_profile_slot(void);
 
 // 打开MJPEG文件（内存高效模式，fseek读取）
 bool ppa_open_mjpeg(const char *path, int *out_frame_count);
