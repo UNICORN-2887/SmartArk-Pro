@@ -648,9 +648,8 @@ static void profile_show(void) {
     if (s_profile_overlay) return;
 
     s_profile_was_cover = s_cover_mode;
-    // 冻结表情状态—profile 播放期间不被 LLM 表情切换打断
+    // 冻结表情 swaps—profile 播放期间不被 LLM 打断
     s_force_swap = false;
-    s_pending_emotion[0] = '\0';
 
     // 隐藏右上角按钮
     if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
@@ -747,7 +746,7 @@ static void profile_hide(void) {
     }
 
     if (s_profile_was_cover) {
-        // cover 模式进 → cover 在 slot → swap 秒切
+        // cover 模式进 → cover 在 slot, neutral 在 pending 无损 → 秒切
         if (ppa_has_cover()) {
             ppa_swap_to_cover();        // profile→slot, cover→active
             ppa_free_cover_slot();      // 释放 slot(profile 帧)
@@ -755,6 +754,8 @@ static void profile_hide(void) {
             s_image_count = ppa_get_cache_count();
             s_current_index = 0;
             s_loop_count = 0;
+            // pending 槽里 neutral 还在, 恢复标志让对话模式秒切
+            strncpy(s_pending_emotion, "neutral", sizeof(s_pending_emotion) - 1);
             video_playback_start(30);
             ESP_LOGI(TAG, "Profile hidden, cover restored (%d frames, instant)", s_image_count);
         } else {
