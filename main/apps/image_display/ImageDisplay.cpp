@@ -45,6 +45,7 @@ static char s_pending_emotion[32] = {0};   // 后备表情名
 static lv_obj_t *s_mode_label = NULL;    // 模式切换按钮 label
 static lv_obj_t *s_rhodes_btn = NULL;    // 罗德岛按钮（仅 cover 模式显示）
 static lv_obj_t *s_profile_btn = NULL;   // 蟑螂派对！按钮（cover+expression 都显示）
+static lv_img_dsc_t *s_profile_jpg_dsc = NULL; // JPG 解码 buffer(需手动释放)
 static lv_obj_t *s_profile_overlay = NULL; // Profile 全屏 overlay（点击返回）
 static bool s_profile_was_cover = false;  // 进入 profile 前的模式
 static volatile bool s_profile_loading = false;    // 互斥:同时只一个加载任务
@@ -669,8 +670,14 @@ static void profile_show(void) {
         fclose(fp);
         char lv_path[300];
         snprintf(lv_path, sizeof(lv_path), "S:/User/Ur_Info/Profile.jpg");
+        if (s_profile_jpg_dsc) {  // 释放上次泄露的 buffer
+            if (s_profile_jpg_dsc->data) free(s_profile_jpg_dsc->data);
+            heap_caps_free(s_profile_jpg_dsc);
+            s_profile_jpg_dsc = NULL;
+        }
         lv_img_dsc_t *dsc = load_jpg_thumbnail(lv_path, 0);
         if (dsc) {
+            s_profile_jpg_dsc = dsc;
             s_profile_overlay = lv_obj_create(lv_layer_top());
             lv_obj_set_size(s_profile_overlay, 480, 800);
             lv_obj_set_pos(s_profile_overlay, 0, 0);
@@ -719,6 +726,11 @@ static void profile_show(void) {
                             lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_0, 0);
                             lvgl_port_unlock();
                         }
+                        if (s_profile_jpg_dsc) {
+                            if (s_profile_jpg_dsc->data) free(s_profile_jpg_dsc->data);
+                            heap_caps_free(s_profile_jpg_dsc);
+                            s_profile_jpg_dsc = NULL;
+                        }
                         ESP_LOGI(TAG, "Profile: MJPEG %d frames loaded", count);
                     }
                     s_profile_loading = false;
@@ -759,6 +771,11 @@ static void profile_hide(void) {
         lv_obj_del(s_profile_overlay);
         s_profile_overlay = NULL;
         lvgl_port_unlock();
+    }
+    if (s_profile_jpg_dsc) {
+        if (s_profile_jpg_dsc->data) free(s_profile_jpg_dsc->data);
+        heap_caps_free(s_profile_jpg_dsc);
+        s_profile_jpg_dsc = NULL;
     }
 
     // 恢复按钮
