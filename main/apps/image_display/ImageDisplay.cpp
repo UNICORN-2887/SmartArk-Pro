@@ -709,12 +709,7 @@ static void profile_show(void) {
                     delete ctx;
                     int count = ppa_preload_profile(path);
                     free(path);
-                    if (gen != s_profile_gen) {
-                        ppa_free_profile_slot();  // 过期任务，清槽防污染
-                        s_profile_loading = false;
-                        vTaskDelete(NULL);
-                        return;
-                    }
+                    // 决定是否 swap: overlay 在就展示(不论 gen 是否过期)
                     if (s_profile_overlay) {
                         ppa_swap_profile_to_active();
                         s_image_count = count; s_current_index = 0;
@@ -732,6 +727,8 @@ static void profile_show(void) {
                             s_profile_jpg_dsc = NULL;
                         }
                         ESP_LOGI(TAG, "Profile: MJPEG %d frames loaded", count);
+                    } else {
+                        ppa_free_profile_slot();  // 用户已退出，清槽
                     }
                     s_profile_loading = false;
                     vTaskDelete(NULL);
@@ -763,7 +760,6 @@ static void profile_show(void) {
 
 static void profile_hide(void) {
     if (!s_profile_overlay) return;
-    s_profile_gen++;  // 使正在加载的任务完成swap前自检失败
     video_playback_stop();
     vTaskDelay(pdMS_TO_TICKS(100));
 
