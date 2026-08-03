@@ -657,9 +657,10 @@ static void profile_show(void) {
     }
 
     video_playback_stop();
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(200));  // 等视频 task 完全退出
     chat_overlay_show(false);
     ppa_unload_background();
+    ppa_release_jpeg_engine();  // 释放引擎给 JPG 解码独占
     // ① 立刻显示 JPG 占位（释放引擎后 PPA 内置解码）
     const char *jpg_path = "/sdcard/User/Ur_Info/Profile.jpg";
     FILE *fp = fopen(jpg_path, "rb");
