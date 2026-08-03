@@ -668,12 +668,9 @@ static void profile_show(void) {
     if (fp) {
         fclose(fp);
         if (s_profile_jpg_buf) { free(s_profile_jpg_buf); s_profile_jpg_buf = NULL; }
-        char fs_path[300];
-        snprintf(fs_path, sizeof(fs_path), "/sdcard/User/Ur_Info/Profile.jpg");
-        int jpg_w, jpg_h;
-        uint8_t *rgb = ppa_decode_jpeg_to_rgb565(fs_path, &jpg_w, &jpg_h);
-        if (rgb) {
-            s_profile_jpg_buf = rgb;
+        lv_img_dsc_t *dsc = load_jpg_thumbnail("S:/User/Ur_Info/Profile.jpg", 0);
+        if (dsc) {
+            s_profile_jpg_buf = (uint8_t*)dsc->data;
             s_profile_overlay = lv_obj_create(lv_layer_top());
             lv_obj_set_size(s_profile_overlay, 480, 800);
             lv_obj_set_pos(s_profile_overlay, 0, 0);
@@ -682,9 +679,10 @@ static void profile_show(void) {
             lv_obj_set_style_pad_all(s_profile_overlay, 0, 0);
             lv_obj_t *c = lv_canvas_create(s_profile_overlay);
             lv_obj_set_size(c, 480, 800);
-            lv_canvas_set_buffer(c, rgb, 480, 800, LV_COLOR_FORMAT_RGB565);
+            lv_canvas_set_buffer(c, (uint8_t*)dsc->data, dsc->header.w, dsc->header.h, LV_COLOR_FORMAT_RGB565);
+            heap_caps_free(dsc);  // dsc 本身释放（data 由 s_profile_jpg_buf 追踪）
             has_jpg = true;
-            ESP_LOGI(TAG, "Profile: JPG placeholder %dx%d", jpg_w, jpg_h);
+            ESP_LOGI(TAG, "Profile: JPG placeholder");
         }
     }
 
