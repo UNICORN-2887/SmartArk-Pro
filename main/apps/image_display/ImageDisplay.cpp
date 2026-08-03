@@ -47,6 +47,7 @@ static lv_obj_t *s_rhodes_btn = NULL;    // 罗德岛按钮（仅 cover 模式�
 static lv_obj_t *s_profile_btn = NULL;   // 蟑螂派对！按钮（cover+expression 都显示）
 static lv_obj_t *s_profile_overlay = NULL; // Profile 全屏 overlay（点击返回）
 static bool s_profile_was_cover = false;  // 进入 profile 前的模式
+static TaskHandle_t s_profile_task = NULL; // 后台加载任务句柄（防堆积）
 
 // 前向声明（定义在后面）
 void video_playback_stop(void);
@@ -692,6 +693,8 @@ static void profile_show(void) {
     fp = fopen(mjpeg_path, "rb");
     if (fp) {
         fclose(fp);
+        // 杀掉上次未完成的后台任务（防堆积）
+        if (s_profile_task) { vTaskDelete(s_profile_task); s_profile_task = NULL; }
         char *path_copy = strdup(mjpeg_path);
         if (path_copy) {
             xTaskCreate([](void *arg) {
@@ -711,8 +714,9 @@ static void profile_show(void) {
                     }
                     ESP_LOGI(TAG, "Profile: MJPEG %d frames loaded", count);
                 }
+                s_profile_task = NULL;
                 vTaskDelete(NULL);
-            }, "profile_load", 8192, path_copy, 2, NULL);
+            }, "profile_load", 8192, path_copy, 2, &s_profile_task);
         }
     } else if (!has_jpg) {
         profile_hide();  // 无文件，直接退出
@@ -744,6 +748,7 @@ static void profile_hide(void) {
         s_profile_overlay = NULL;
         lvgl_port_unlock();
     }
+    s_profile_task = NULL;  // 后台任务检测到此即停止
 
     // 第4槽: profile↔active 换回旧状态(cover/emotion无损!)
     ppa_swap_profile_to_active();      // active ↔ profile
