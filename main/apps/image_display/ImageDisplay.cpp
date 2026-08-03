@@ -728,7 +728,7 @@ static void profile_show(void) {
                 vTaskDelete(NULL);
             }, "profile_load", 8192, path_copy, 2, NULL);
         }
-    } else if (!has_jpg) {
+    } else if (!has_img) {
         if (ppa_has_cover()) ppa_swap_to_cover();
         profile_hide();
         return;
