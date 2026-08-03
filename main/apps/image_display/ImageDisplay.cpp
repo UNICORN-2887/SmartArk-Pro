@@ -754,12 +754,13 @@ static void profile_hide(void) {
         lvgl_port_unlock();
     }
 
-    // profile 槽→active 换回旧数据 + 清槽 → 页面切换到 cover
+    // profile 槽→active 换回旧数据 + 清槽
     ppa_swap_profile_to_active();
     ppa_free_profile_slot();
-    if (s_agent_path[0]) {
-        cover_display_start(s_agent_path);
-    }
+    // 重启播放（cover 或 expression 数据都在 active 里完好）
+    s_current_index = 0;
+    s_loop_count = 0;
+    video_playback_start(30);
     ESP_LOGI(TAG, "Profile hidden");
 }
 
