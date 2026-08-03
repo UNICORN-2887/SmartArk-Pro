@@ -48,6 +48,7 @@ static lv_obj_t *s_profile_btn = NULL;   // 蟑螂派对！按钮（cover+expres
 static lv_obj_t *s_profile_overlay = NULL; // Profile 全屏 overlay（点击返回）
 static uint8_t *s_profile_jpg_buf = NULL;   // JPG 解码 buffer（需 free）
 static bool s_profile_was_cover = false;  // 进入 profile 前的模式
+static int s_profile_gen = 0;             // 版本号(防旧任务竞态)
 
 // 前向声明（定义在后面）
 void video_playback_stop(void);
@@ -702,10 +703,13 @@ static void profile_show(void) {
 
     // ② 后台加载动图到 profile 槽
     if (fopen("/sdcard/User/Ur_Info/Profile.mjpeg", "rb")) {
+        int gen = ++s_profile_gen;
         char *p = strdup("/sdcard/User/Ur_Info/Profile.mjpeg");
         if (p) xTaskCreate([](void *arg) {
-            char *path = (char*)arg;
+            auto *ctx = (std::pair<char*,int>*)arg;
+            char *path = ctx->first; int gen = ctx->second; delete ctx;
             int n = ppa_preload_profile(path); free(path);
+            if (gen != s_profile_gen) { ppa_free_profile_slot(); vTaskDelete(NULL); return; }
             if (n > 0 && s_profile_overlay) {
                 ppa_swap_profile_to_active();
                 s_image_count = n; s_cover_mode = false;
@@ -720,7 +724,7 @@ static void profile_show(void) {
                 ESP_LOGI(TAG, "Profile: MJPEG loaded");
             }
             vTaskDelete(NULL);
-        }, "pfl", 8192, p, 2, NULL);
+        }, "pfl", 8192, new std::pair<char*,int>(p, gen), 2, NULL);
     }
 
     // 触摸 overlay（JPG 已创建则复用并加触摸，否则新建透明层）
@@ -740,6 +744,7 @@ static void profile_show(void) {
 
 static void profile_hide(void) {
     if (!s_profile_overlay) return;
+    s_profile_gen++;  // 淘汰正在跑的后台任务
     video_playback_stop();
     vTaskDelay(pdMS_TO_TICKS(100));
 
