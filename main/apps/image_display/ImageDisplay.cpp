@@ -661,6 +661,8 @@ static void profile_show(void) {
 
     video_playback_stop();
     vTaskDelay(pdMS_TO_TICKS(100));
+    chat_overlay_show(false);
+    ppa_unload_background();  // 关表达模式色键合成
 
     // ① 立刻显示 JPG 占位（LVGL 顶层 canvas）
     const char *jpg_path = "/sdcard/User/Ur_Info/Profile.jpg";
