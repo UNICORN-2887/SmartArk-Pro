@@ -47,8 +47,6 @@ static lv_obj_t *s_rhodes_btn = NULL;    // 罗德岛按钮（仅 cover 模式�
 static lv_obj_t *s_profile_btn = NULL;   // 蟑螂派对！按钮（cover+expression 都显示）
 static lv_obj_t *s_profile_overlay = NULL; // Profile 全屏 overlay（点击返回）
 static bool s_profile_was_cover = false;  // 进入 profile 前的模式
-static volatile int s_profile_gen = 0;     // 后台任务版本号（新版淘汰旧版）
-struct ProfileLoadCtx { char *path; int gen; };
 
 // 前向声明（定义在后面）
 void video_playback_stop(void);
@@ -648,10 +646,7 @@ static void profile_hide(void);
 
 static void profile_show(void) {
     if (s_profile_overlay) return;
-
     s_profile_was_cover = s_cover_mode;
-    // 冻结表情 swaps—profile 播放期间不被 LLM 打断
-    s_force_swap = false;
 
     // 隐藏右上角按钮
     if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
@@ -663,9 +658,8 @@ static void profile_show(void) {
 
     video_playback_stop();
     vTaskDelay(pdMS_TO_TICKS(100));
-    chat_overlay_show(false);
 
-    // ① JPG 占位（立刻显示）
+    // ① 立刻显示 JPG 占位（LVGL 顶层 canvas）
     const char *jpg_path = "/sdcard/User/Ur_Info/Profile.jpg";
     FILE *fp = fopen(jpg_path, "rb");
     bool has_jpg = false;
@@ -689,26 +683,19 @@ static void profile_show(void) {
         }
     }
 
-    // ② 动图后台加载 → 第4槽（版本号淘汰旧任务，无堆积无残留）
+    // ② 动图后台加载 → 第4槽（不抢 cover/pending, 直通无鬼图）
     const char *mjpeg_path = "/sdcard/User/Ur_Info/Profile.mjpeg";
     fp = fopen(mjpeg_path, "rb");
     if (fp) {
         fclose(fp);
-        int my_gen = ++s_profile_gen;   // 递增版本号（旧任务检测到过期即退出）
-        ProfileLoadCtx *ctx = (ProfileLoadCtx*)malloc(sizeof(ProfileLoadCtx));
-        if (ctx) {
-            ctx->path = strdup(mjpeg_path);
-            ctx->gen = my_gen;
+        char *path_copy = strdup(mjpeg_path);
+        if (path_copy) {
             xTaskCreate([](void *arg) {
-                auto *ctx = (ProfileLoadCtx*)arg;
-                int gen = ctx->gen;
-                char *path = ctx->path;
-                free(ctx);
-                int count = ppa_preload_profile(path);
+                char *path = (char*)arg;
+                int count = ppa_preload_profile(path);  // SD→第4槽(~2s)
                 free(path);
-                if (gen != s_profile_gen) { vTaskDelete(NULL); return; } // 已过期
-                if (count > 0 && s_profile_overlay) {
-                    ppa_swap_profile_to_active();
+                if (count > 0 && s_profile_overlay) {   // 未提前退出才展示
+                    ppa_swap_profile_to_active();        // active↔profile
                     s_image_count = count; s_current_index = 0;
                     s_cover_mode = false;
                     video_playback_start(25);
@@ -721,19 +708,20 @@ static void profile_show(void) {
                     ESP_LOGI(TAG, "Profile: MJPEG %d frames loaded", count);
                 }
                 vTaskDelete(NULL);
-            }, "profile_load", 8192, ctx, 2, NULL);
+            }, "profile_load", 8192, path_copy, 2, NULL);
         }
     } else if (!has_jpg) {
-        profile_hide();  // 无文件，直接退出
+        profile_hide();
         return;
     }
 
+    // 触摸 overlay（JPG 已创建则复用并加触摸，否则新建透明层）
     if (!s_profile_overlay) {
         s_profile_overlay = lv_obj_create(lv_layer_top());
         lv_obj_set_size(s_profile_overlay, 480, 800);
         lv_obj_set_pos(s_profile_overlay, 0, 0);
         lv_obj_set_style_bg_color(s_profile_overlay, lv_color_black(), 0);
-        lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_10, 0);  // 最小不透明(接收点击)
+        lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_10, 0);
         lv_obj_set_style_border_width(s_profile_overlay, 0, 0);
         lv_obj_set_style_pad_all(s_profile_overlay, 0, 0);
     }
@@ -753,25 +741,25 @@ static void profile_hide(void) {
         s_profile_overlay = NULL;
         lvgl_port_unlock();
     }
-    s_profile_gen++;  // 淘汰可能还在跑的旧后台任务
 
-    // 第4槽: profile↔active 换回旧状态(cover/emotion无损!)
-    ppa_swap_profile_to_active();      // active ↔ profile
-    ppa_free_profile_slot();
-
-    s_image_count = ppa_get_cache_count();
-    s_current_index = 0;
-    s_cover_mode = s_profile_was_cover;
-    s_loop_count = 0;
-    s_force_swap = false;
-    video_playback_start(30);
-    ESP_LOGI(TAG, "Profile hidden (%d frames, instant)", s_image_count);
-
+    // 恢复按钮
     if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
         if (s_profile_btn) lv_obj_remove_flag(s_profile_btn, LV_OBJ_FLAG_HIDDEN);
         if (s_rhodes_btn)  lv_obj_remove_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
         if (s_mode_label)  lv_obj_remove_flag(lv_obj_get_parent(s_mode_label), LV_OBJ_FLAG_HIDDEN);
         lvgl_port_unlock();
+    }
+
+    // 第4槽换回旧 active（动图已加载）或恢复 cover（未加载）
+    if (ppa_swap_profile_to_active() > 0) {
+        ppa_free_profile_slot();
+        s_image_count = ppa_get_cache_count();
+        s_cover_mode = s_profile_was_cover;
+        video_playback_start(30);
+        ESP_LOGI(TAG, "Profile hidden (%d frames, instant)", s_image_count);
+    } else if (s_agent_path[0]) {
+        cover_display_start(s_agent_path);
+        ESP_LOGI(TAG, "Profile hidden, cover reloading");
     }
 }
 
