@@ -660,30 +660,43 @@ static void profile_show(void) {
     vTaskDelay(pdMS_TO_TICKS(200));  // 等视频 task 完全退出
     chat_overlay_show(false);
     ppa_unload_background();
-    ppa_release_jpeg_engine();  // 释放引擎给 JPG 解码独占
-    // ① 立刻显示 JPG 占位（释放引擎后 PPA 内置解码）
-    const char *jpg_path = "/sdcard/User/Ur_Info/Profile.jpg";
-    FILE *fp = fopen(jpg_path, "rb");
-    bool has_jpg = false;
+    // ① 立刻显示占位图（raw RGB565 无需解码，秒显；jpg 降级）
+    const char *raw_path = "/sdcard/User/Ur_Info/Profile.raw";
+    uint8_t *raw_buf = NULL;
+    FILE *fp = fopen(raw_path, "rb");
+    bool has_img = false;
     if (fp) {
-        fclose(fp);
-        if (s_profile_jpg_buf) { free(s_profile_jpg_buf); s_profile_jpg_buf = NULL; }
-        lv_img_dsc_t *dsc = load_jpg_thumbnail("S:/User/Ur_Info/Profile.jpg", 0);
-        if (dsc) {
-            s_profile_jpg_buf = (uint8_t*)dsc->data;
-            s_profile_overlay = lv_obj_create(lv_layer_top());
-            lv_obj_set_size(s_profile_overlay, 480, 800);
-            lv_obj_set_pos(s_profile_overlay, 0, 0);
-            lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_COVER, 0);
-            lv_obj_set_style_border_width(s_profile_overlay, 0, 0);
-            lv_obj_set_style_pad_all(s_profile_overlay, 0, 0);
-            lv_obj_t *c = lv_canvas_create(s_profile_overlay);
-            lv_obj_set_size(c, 480, 800);
-            lv_canvas_set_buffer(c, (uint8_t*)dsc->data, dsc->header.w, dsc->header.h, LV_COLOR_FORMAT_RGB565);
-            heap_caps_free(dsc);  // dsc 本身释放（data 由 s_profile_jpg_buf 追踪）
-            has_jpg = true;
-            ESP_LOGI(TAG, "Profile: JPG placeholder");
+        fseek(fp, 0, SEEK_END);
+        if (ftell(fp) >= 480*800*2) {
+            raw_buf = (uint8_t*)heap_caps_malloc(480*800*2, MALLOC_CAP_SPIRAM);
+            if (raw_buf) {
+                fseek(fp, 0, SEEK_SET);
+                fread(raw_buf, 1, 480*800*2, fp);
+                has_img = true;
+            }
         }
+        fclose(fp);
+    }
+    if (!has_img) {
+        // 降级: 尝试 JPG
+        fp = fopen("/sdcard/User/Ur_Info/Profile.jpg", "rb");
+        if (fp) { fclose(fp);
+            lv_img_dsc_t *dsc = load_jpg_thumbnail("S:/User/Ur_Info/Profile.jpg", 0);
+            if (dsc) { raw_buf = (uint8_t*)dsc->data; heap_caps_free(dsc); has_img = true; }
+        }
+    }
+    if (has_img && raw_buf) {
+        s_profile_jpg_buf = raw_buf;
+        s_profile_overlay = lv_obj_create(lv_layer_top());
+        lv_obj_set_size(s_profile_overlay, 480, 800);
+        lv_obj_set_pos(s_profile_overlay, 0, 0);
+        lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(s_profile_overlay, 0, 0);
+        lv_obj_set_style_pad_all(s_profile_overlay, 0, 0);
+        lv_obj_t *c = lv_canvas_create(s_profile_overlay);
+        lv_obj_set_size(c, 480, 800);
+        lv_canvas_set_buffer(c, raw_buf, 480, 800, LV_COLOR_FORMAT_RGB565);
+        ESP_LOGI(TAG, "Profile: placeholder shown");
     }
 
     // ② 动图后台加载 → profile 槽（不抢 cover, 直通无鬼图）

@@ -55,11 +55,19 @@ try:
     bg = bg.resize((480, 800), Image.LANCZOS)
     bg.save(OUT, 'JPEG', quality=92)
     print(f'   Profile.jpg: {bg.size[0]}x{bg.size[1]}, {os.path.getsize(OUT)/1024:.0f} KB')
+    # 同时输出 raw RGB565（设备秒显，无需解码）
+    raw_out = os.path.join(SCRIPT_DIR, 'Profile.raw')
+    pixels = list(bg.getdata())
+    with open(raw_out, 'wb') as f:
+        for r, g, b in pixels:
+            c = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+            f.write(bytes([c & 0xFF, c >> 8]))
+    print(f'   Profile.raw: 480x800 RGB565, {os.path.getsize(raw_out)/1024:.0f} KB')
 except Exception as e:
     fail(f'Conversion failed: {e}')
 
 print(f'\n{"=" * 50}')
-print(f'  DONE! Profile.jpg is ready.')
-print(f'  Insert SD card into device, tap the button to view.')
+print(f'  DONE! Profile.jpg + Profile.raw ready.')
+print(f'  Copy both to SD card, tap the button to view.')
 print(f'{"=" * 50}')
 input('\nPress Enter to exit...')
