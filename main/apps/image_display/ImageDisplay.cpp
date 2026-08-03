@@ -700,6 +700,29 @@ static void profile_show(void) {
     }
     if (!has_img) { profile_hide(); return; }
 
+    // ② 后台加载动图到 profile 槽
+    if (fopen("/sdcard/User/Ur_Info/Profile.mjpeg", "rb")) {
+        char *p = strdup("/sdcard/User/Ur_Info/Profile.mjpeg");
+        if (p) xTaskCreate([](void *arg) {
+            char *path = (char*)arg;
+            int n = ppa_preload_profile(path); free(path);
+            if (n > 0 && s_profile_overlay) {
+                ppa_swap_profile_to_active();
+                s_image_count = n; s_cover_mode = false;
+                video_playback_start(25);
+                if (s_profile_overlay) {
+                    lvgl_port_lock(pdMS_TO_TICKS(200));
+                    lv_obj_clean(s_profile_overlay);
+                    lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_0, 0);
+                    lvgl_port_unlock();
+                }
+                if (s_profile_jpg_buf) { free(s_profile_jpg_buf); s_profile_jpg_buf = NULL; }
+                ESP_LOGI(TAG, "Profile: MJPEG loaded");
+            }
+            vTaskDelete(NULL);
+        }, "pfl", 8192, p, 2, NULL);
+    }
+
     // 触摸 overlay（JPG 已创建则复用并加触摸，否则新建透明层）
     if (!s_profile_overlay) {
         s_profile_overlay = lv_obj_create(lv_layer_top());
@@ -735,7 +758,9 @@ static void profile_hide(void) {
         lvgl_port_unlock();
     }
 
-    // 重启播放（cover/expression 数据在 active 里完好无损）
+    // 清理 profile 槽 + 重启播放
+    ppa_swap_profile_to_active();  // 动图已加载→换回；未加载→no-op
+    ppa_free_profile_slot();
     s_current_index = 0;
     s_loop_count = 0;
     video_playback_start(30);
