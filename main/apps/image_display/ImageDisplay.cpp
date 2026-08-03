@@ -47,7 +47,8 @@ static lv_obj_t *s_rhodes_btn = NULL;    // 罗德岛按钮（仅 cover 模式�
 static lv_obj_t *s_profile_btn = NULL;   // 蟑螂派对！按钮（cover+expression 都显示）
 static lv_obj_t *s_profile_overlay = NULL; // Profile 全屏 overlay（点击返回）
 static bool s_profile_was_cover = false;  // 进入 profile 前的模式
-static TaskHandle_t s_profile_task = NULL; // 后台加载任务句柄（防堆积）
+static volatile int s_profile_gen = 0;     // 后台任务版本号（新版淘汰旧版）
+struct ProfileLoadCtx { char *path; int gen; };
 
 // 前向声明（定义在后面）
 void video_playback_stop(void);
@@ -688,21 +689,26 @@ static void profile_show(void) {
         }
     }
 
-    // ② 动图后台加载 → 第4槽（不争抢 cover/pending，退出秒切）
+    // ② 动图后台加载 → 第4槽（版本号淘汰旧任务，无堆积无残留）
     const char *mjpeg_path = "/sdcard/User/Ur_Info/Profile.mjpeg";
     fp = fopen(mjpeg_path, "rb");
     if (fp) {
         fclose(fp);
-        // 杀掉上次未完成的后台任务（防堆积）
-        if (s_profile_task) { vTaskDelete(s_profile_task); s_profile_task = NULL; }
-        char *path_copy = strdup(mjpeg_path);
-        if (path_copy) {
+        int my_gen = ++s_profile_gen;   // 递增版本号（旧任务检测到过期即退出）
+        ProfileLoadCtx *ctx = (ProfileLoadCtx*)malloc(sizeof(ProfileLoadCtx));
+        if (ctx) {
+            ctx->path = strdup(mjpeg_path);
+            ctx->gen = my_gen;
             xTaskCreate([](void *arg) {
-                char *path = (char*)arg;
-                int count = ppa_preload_profile(path);  // → 第4槽(独立,直通)
+                auto *ctx = (ProfileLoadCtx*)arg;
+                int gen = ctx->gen;
+                char *path = ctx->path;
+                free(ctx);
+                int count = ppa_preload_profile(path);
                 free(path);
-                if (count > 0 && s_profile_overlay) {   // 未提前退出才展示
-                    ppa_swap_profile_to_active();        // profile↔active
+                if (gen != s_profile_gen) { vTaskDelete(NULL); return; } // 已过期
+                if (count > 0 && s_profile_overlay) {
+                    ppa_swap_profile_to_active();
                     s_image_count = count; s_current_index = 0;
                     s_cover_mode = false;
                     video_playback_start(25);
@@ -714,9 +720,8 @@ static void profile_show(void) {
                     }
                     ESP_LOGI(TAG, "Profile: MJPEG %d frames loaded", count);
                 }
-                s_profile_task = NULL;
                 vTaskDelete(NULL);
-            }, "profile_load", 8192, path_copy, 2, &s_profile_task);
+            }, "profile_load", 8192, ctx, 2, NULL);
         }
     } else if (!has_jpg) {
         profile_hide();  // 无文件，直接退出
@@ -748,7 +753,7 @@ static void profile_hide(void) {
         s_profile_overlay = NULL;
         lvgl_port_unlock();
     }
-    s_profile_task = NULL;  // 后台任务检测到此即停止
+    s_profile_gen++;  // 淘汰可能还在跑的旧后台任务
 
     // 第4槽: profile↔active 换回旧状态(cover/emotion无损!)
     ppa_swap_profile_to_active();      // active ↔ profile
