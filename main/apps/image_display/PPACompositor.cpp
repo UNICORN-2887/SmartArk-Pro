@@ -563,7 +563,6 @@ int ppa_preload_profile(const char *path) {
 
 int ppa_swap_profile_to_active(void) {
     if (!s_profile_loaded) return 0;
-    // 只交换 JPEG 帧——遮罩不动（profile 直通无遮罩，旧 active 遮罩原样保留）
     for (int i = 0; i < MAX_CACHE; i++) {
         uint8_t *tmp = s_jpg_cache[i];
         s_jpg_cache[i] = s_profile_cache[i];
@@ -575,6 +574,7 @@ int ppa_swap_profile_to_active(void) {
     int new_count = s_profile_count;
     s_profile_count = s_cache_count;
     s_cache_count = new_count;
+    s_use_alpha = false;  // profile 直通无 alpha 合成
     ESP_LOGI(TAG, "Swapped profile: %d frames active, %d in profile",
              s_cache_count, s_profile_count);
     return s_cache_count;

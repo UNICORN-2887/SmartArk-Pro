@@ -663,6 +663,7 @@ static void profile_show(void) {
     vTaskDelay(pdMS_TO_TICKS(100));
     chat_overlay_show(false);
     ppa_unload_background();  // 关表达模式色键合成
+    ppa_release_jpeg_engine();  // 临时释放 PPA 引擎（JPG 解码需要独占硬件）
 
     // ① 立刻显示 JPG 占位（LVGL 顶层 canvas）
     const char *jpg_path = "/sdcard/User/Ur_Info/Profile.jpg";
@@ -693,6 +694,7 @@ static void profile_show(void) {
             ESP_LOGI(TAG, "Profile: JPG placeholder %dx%d", dsc->header.w, dsc->header.h);
         }
     }
+    ppa_restore_jpeg_engine();  // 归还 PPA 引擎（profile/cover 播放需要）
 
     // ② 动图后台加载 → 第4槽（互斥：同时只一个任务跑）
     const char *mjpeg_path = "/sdcard/User/Ur_Info/Profile.mjpeg";
