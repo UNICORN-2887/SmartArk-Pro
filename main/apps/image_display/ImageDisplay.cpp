@@ -698,41 +698,7 @@ static void profile_show(void) {
         lv_canvas_set_buffer(c, raw_buf, 480, 800, LV_COLOR_FORMAT_RGB565);
         ESP_LOGI(TAG, "Profile: placeholder shown");
     }
-
-    // ② 动图后台加载 → profile 槽（不抢 cover, 直通无鬼图）
-    const char *mjpeg_path = "/sdcard/User/Ur_Info/Profile.mjpeg";
-    fp = fopen(mjpeg_path, "rb");
-    if (fp) {
-        fclose(fp);
-        char *path_copy = strdup(mjpeg_path);
-        if (path_copy) {
-            xTaskCreate([](void *arg) {
-                char *path = (char*)arg;
-                int count = ppa_preload_profile(path);  // SD→第4槽(~2s)
-                free(path);
-                if (count > 0 && s_profile_overlay) {
-                    ppa_swap_profile_to_active();        // profile↔active
-                    s_image_count = count; s_current_index = 0;
-                    s_cover_mode = false;
-                    video_playback_start(25);
-                    // 移除 JPG 遮罩 → 透明 overlay 露出 PPA 动图
-                    if (s_profile_overlay) {
-                        lvgl_port_lock(pdMS_TO_TICKS(200));
-                        lv_obj_clean(s_profile_overlay);
-                        lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_0, 0);
-                        lvgl_port_unlock();
-                    }
-                    if (s_profile_jpg_buf) { free(s_profile_jpg_buf); s_profile_jpg_buf = NULL; }
-                    ESP_LOGI(TAG, "Profile: MJPEG %d frames loaded", count);
-                }
-                vTaskDelete(NULL);
-            }, "profile_load", 8192, path_copy, 2, NULL);
-        }
-    } else if (!has_img) {
-        if (ppa_has_cover()) ppa_swap_to_cover();
-        profile_hide();
-        return;
-    }
+    if (!has_img) { profile_hide(); return; }
 
     // 触摸 overlay（JPG 已创建则复用并加触摸，否则新建透明层）
     if (!s_profile_overlay) {
@@ -769,10 +735,7 @@ static void profile_hide(void) {
         lvgl_port_unlock();
     }
 
-    // profile 槽→active 换回旧数据 + 清槽
-    ppa_swap_profile_to_active();
-    ppa_free_profile_slot();
-    // 重启播放（cover 或 expression 数据都在 active 里完好）
+    // 重启播放（cover/expression 数据在 active 里完好无损）
     s_current_index = 0;
     s_loop_count = 0;
     video_playback_start(30);
