@@ -49,7 +49,7 @@ static lv_img_dsc_t *s_profile_jpg_dsc = NULL; // JPG 解码 buffer(需手动释
 static lv_obj_t *s_profile_overlay = NULL; // Profile 全屏 overlay（点击返回）
 static bool s_profile_was_cover = false;  // 进入 profile 前的模式
 static volatile bool s_profile_loading = false;    // 互斥:同时只一个加载任务
-static volatile int s_profile_gen = 0;             // 让旧任务swap前自检过期
+static int s_profile_gen = 0;                      // 让旧任务swap前自检过期
 
 // 前向声明（定义在后面）
 void video_playback_stop(void);
@@ -671,7 +671,7 @@ static void profile_show(void) {
         char lv_path[300];
         snprintf(lv_path, sizeof(lv_path), "S:/User/Ur_Info/Profile.jpg");
         if (s_profile_jpg_dsc) {  // 释放上次泄露的 buffer
-            if (s_profile_jpg_dsc->data) free(s_profile_jpg_dsc->data);
+            if (s_profile_jpg_dsc->data) free((void*)s_profile_jpg_dsc->data);
             heap_caps_free(s_profile_jpg_dsc);
             s_profile_jpg_dsc = NULL;
         }
@@ -727,7 +727,7 @@ static void profile_show(void) {
                             lvgl_port_unlock();
                         }
                         if (s_profile_jpg_dsc) {
-                            if (s_profile_jpg_dsc->data) free(s_profile_jpg_dsc->data);
+                            if (s_profile_jpg_dsc->data) free((void*)s_profile_jpg_dsc->data);
                             heap_caps_free(s_profile_jpg_dsc);
                             s_profile_jpg_dsc = NULL;
                         }
@@ -773,7 +773,7 @@ static void profile_hide(void) {
         lvgl_port_unlock();
     }
     if (s_profile_jpg_dsc) {
-        if (s_profile_jpg_dsc->data) free(s_profile_jpg_dsc->data);
+        if (s_profile_jpg_dsc->data) free((void*)s_profile_jpg_dsc->data);
         heap_caps_free(s_profile_jpg_dsc);
         s_profile_jpg_dsc = NULL;
     }
