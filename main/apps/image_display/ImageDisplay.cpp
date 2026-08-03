@@ -786,15 +786,17 @@ static void profile_hide(void) {
         lvgl_port_unlock();
     }
 
-    // 动图已加载完 → swap back 恢复旧 active
-    if (ppa_swap_profile_to_active() > 0) {
-        ppa_free_profile_slot();
+    // 页面切换: 清理 profile → 干净重建 cover 页面
+    ppa_free_profile_slot();
+    ppa_free_cover_slot();
+    if (s_agent_path[0]) {
+        cover_display_start(s_agent_path);  // 重建 cover(含背景/alpha等全部状态)
     }
-    s_image_count = ppa_get_cache_count();
-    s_cover_mode = s_profile_was_cover;
-    s_current_index = 0;
-    video_playback_start(30);
-    ESP_LOGI(TAG, "Profile hidden (%d frames)", s_image_count);
+    // 来源是表达模式 → 自动切回
+    if (!s_profile_was_cover) {
+        s_req_expression = true;
+    }
+    ESP_LOGI(TAG, "Profile hidden");
 }
 
 // ─── 角色索引页面（罗德岛）──────────────────────────────
