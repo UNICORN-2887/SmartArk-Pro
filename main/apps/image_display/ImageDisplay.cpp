@@ -724,7 +724,7 @@ static void profile_show(void) {
         lv_obj_set_size(s_profile_overlay, 480, 800);
         lv_obj_set_pos(s_profile_overlay, 0, 0);
         lv_obj_set_style_bg_color(s_profile_overlay, lv_color_black(), 0);
-        lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_1, 0);  // 最小不透明(接收点击)
+        lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_10, 0);  // 最小不透明(接收点击)
         lv_obj_set_style_border_width(s_profile_overlay, 0, 0);
         lv_obj_set_style_pad_all(s_profile_overlay, 0, 0);
     }
