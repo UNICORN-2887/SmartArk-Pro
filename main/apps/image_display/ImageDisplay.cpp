@@ -667,7 +667,6 @@ static void profile_show(void) {
     if (fp) {
         fclose(fp);
         if (s_profile_jpg_buf) { free(s_profile_jpg_buf); s_profile_jpg_buf = NULL; }
-        ppa_release_jpeg_engine();
         char fs_path[300];
         snprintf(fs_path, sizeof(fs_path), "/sdcard/User/Ur_Info/Profile.jpg");
         int jpg_w, jpg_h;
