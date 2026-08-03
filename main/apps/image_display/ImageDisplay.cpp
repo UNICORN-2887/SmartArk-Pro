@@ -47,6 +47,7 @@ static lv_obj_t *s_rhodes_btn = NULL;    // 罗德岛按钮（仅 cover 模式�
 static lv_obj_t *s_profile_btn = NULL;   // 蟑螂派对！按钮（cover+expression 都显示）
 static lv_obj_t *s_profile_overlay = NULL; // Profile 全屏 overlay（点击返回）
 static bool s_profile_was_cover = false;  // 进入 profile 前的模式
+static volatile bool s_profile_loading = false; // 后台任务运行中(防重复)
 
 // 前向声明（定义在后面）
 void video_playback_stop(void);
@@ -683,32 +684,38 @@ static void profile_show(void) {
         }
     }
 
-    // ② 动图后台加载 → 第4槽（不抢 cover/pending, 直通无鬼图）
+    // ② 动图后台加载 → 第4槽（互斥：同时只一个任务跑）
     const char *mjpeg_path = "/sdcard/User/Ur_Info/Profile.mjpeg";
     fp = fopen(mjpeg_path, "rb");
     if (fp) {
         fclose(fp);
-        char *path_copy = strdup(mjpeg_path);
-        if (path_copy) {
-            xTaskCreate([](void *arg) {
-                char *path = (char*)arg;
-                int count = ppa_preload_profile(path);  // SD→第4槽(~2s)
-                free(path);
-                if (count > 0 && s_profile_overlay) {   // 未提前退出才展示
-                    ppa_swap_profile_to_active();        // active↔profile
-                    s_image_count = count; s_current_index = 0;
-                    s_cover_mode = false;
-                    video_playback_start(25);
-                    if (s_profile_overlay) {
-                        lvgl_port_lock(pdMS_TO_TICKS(200));
-                        lv_obj_clean(s_profile_overlay);
-                        lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_0, 0);
-                        lvgl_port_unlock();
+        if (!s_profile_loading) {
+            s_profile_loading = true;
+            char *path_copy = strdup(mjpeg_path);
+            if (path_copy) {
+                xTaskCreate([](void *arg) {
+                    char *path = (char*)arg;
+                    int count = ppa_preload_profile(path);
+                    free(path);
+                    if (count > 0 && s_profile_overlay) {
+                        ppa_swap_profile_to_active();
+                        s_image_count = count; s_current_index = 0;
+                        s_cover_mode = false;
+                        video_playback_start(25);
+                        if (s_profile_overlay) {
+                            lvgl_port_lock(pdMS_TO_TICKS(200));
+                            lv_obj_clean(s_profile_overlay);
+                            lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_0, 0);
+                            lvgl_port_unlock();
+                        }
+                        ESP_LOGI(TAG, "Profile: MJPEG %d frames loaded", count);
                     }
-                    ESP_LOGI(TAG, "Profile: MJPEG %d frames loaded", count);
-                }
-                vTaskDelete(NULL);
-            }, "profile_load", 8192, path_copy, 2, NULL);
+                    s_profile_loading = false;
+                    vTaskDelete(NULL);
+                }, "profile_load", 8192, path_copy, 2, NULL);
+            } else {
+                s_profile_loading = false;
+            }
         }
     } else if (!has_jpg) {
         profile_hide();
@@ -733,6 +740,7 @@ static void profile_show(void) {
 
 static void profile_hide(void) {
     if (!s_profile_overlay) return;
+    s_profile_loading = false;  // 允许下次重新加载
     video_playback_stop();
     vTaskDelay(pdMS_TO_TICKS(100));
 
