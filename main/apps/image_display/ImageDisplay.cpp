@@ -661,15 +661,7 @@ static void profile_show(void) {
     vTaskDelay(pdMS_TO_TICKS(100));
     chat_overlay_show(false);
 
-    // ── 槽位布局（两阶段保存）──
-    // ① pending ← active(旧内容暂存)
-    ppa_swap_emotion();
-    // ② 如果还有 cover 在槽里(expr模式默认就有) → 搬到 active
-    if (ppa_has_cover()) ppa_swap_to_cover();
-    // 此刻: active=旧cover或0, pending=旧active(cover或emotion), slot=空
-    // ③ slot ← profile(cover直通无合成)
-
-    // ④ JPG 占位（立刻显示）
+    // ① JPG 占位（立刻显示）
     const char *jpg_path = "/sdcard/User/Ur_Info/Profile.jpg";
     FILE *fp = fopen(jpg_path, "rb");
     bool has_jpg = false;
@@ -693,7 +685,7 @@ static void profile_show(void) {
         }
     }
 
-    // ⑤ 动图后台加载 → slot（cover 直通路径，无鬼图）
+    // ② 动图后台加载（cover 槽直通，无合成鬼图；退出时 SD 重载 cover）
     const char *mjpeg_path = "/sdcard/User/Ur_Info/Profile.mjpeg";
     fp = fopen(mjpeg_path, "rb");
     if (fp) {
@@ -703,7 +695,7 @@ static void profile_show(void) {
             xTaskCreate([](void *arg) {
                 char *path = (char*)arg;
                 ppa_wait_cover_preload();
-                int count = ppa_preload_cover(path);  // → slot (直通)
+                int count = ppa_preload_cover(path);  // → cover 槽 (直通路径)
                 free(path);
                 if (count > 0) {
                     ppa_swap_to_cover();               // slot→active
@@ -722,8 +714,7 @@ static void profile_show(void) {
             }, "profile_load", 8192, path_copy, 2, NULL);
         }
     } else if (!has_jpg) {
-        ppa_swap_emotion();  // 恢复旧 active（cover 模式：cover→active; expr 模式：emotion→active）
-        profile_hide();
+        profile_hide();  // 无文件，直接退出
         return;
     }
 
@@ -752,21 +743,11 @@ static void profile_hide(void) {
         lvgl_port_unlock();
     }
 
-    // ① active(profile)↔slot(cover or 0) — profile→slot, 旧active→...
-    //    注意: 如果是 expression 模式, slot 可能还有前一次 swap 的 cover
-    if (ppa_has_cover()) {
-        ppa_swap_to_cover();       // active(profile)↔slot, active=旧slot内容
-        ppa_free_cover_slot();     // 释放 slot(profile 帧)
+    // 清理 profile 帧，干净重载 cover（1-3秒 SD 读取；简单可靠，三槽不打架）
+    ppa_free_cover_slot();
+    if (s_agent_path[0]) {
+        cover_display_start(s_agent_path);
     }
-    // ② pending(旧active)↔active — 恢复原来的 active!
-    ppa_swap_emotion();
-
-    s_image_count = ppa_get_cache_count();
-    s_current_index = 0;
-    s_cover_mode = s_profile_was_cover;
-    s_pending_emotion[0] = '\0';
-    s_force_swap = false;
-    video_playback_start(30);
 
     if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
         if (s_profile_btn) lv_obj_remove_flag(s_profile_btn, LV_OBJ_FLAG_HIDDEN);
@@ -775,7 +756,7 @@ static void profile_hide(void) {
         lvgl_port_unlock();
     }
 
-    ESP_LOGI(TAG, "Profile hidden (was_cover=%d, %d frames restored)", s_profile_was_cover, s_image_count);
+    ESP_LOGI(TAG, "Profile hidden");
 }
 
 // ─── 角色索引页面（罗德岛）──────────────────────────────
