@@ -648,6 +648,9 @@ static void profile_show(void) {
     if (s_profile_overlay) return;
 
     s_profile_was_cover = s_cover_mode;
+    // 冻结表情状态—profile 播放期间不被 LLM 表情切换打断
+    s_force_swap = false;
+    s_pending_emotion[0] = '\0';
 
     // 隐藏右上角按钮
     if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
@@ -743,22 +746,31 @@ static void profile_hide(void) {
         lvgl_port_unlock();
     }
 
-    // cover 模式进：cover 在 slot（被 preload_cover+swap 挤进去的）→ swap 回 active
-    // expr 模式进：cover 被 preload_cover 覆盖了 → 只能 SD 重载
-    if (s_profile_was_cover && ppa_has_cover()) {
-        ppa_swap_to_cover();        // profile→slot, cover→active
-        ppa_free_cover_slot();      // 释放 slot(profile 帧)
-        s_cover_mode = true;
-        s_image_count = ppa_get_cache_count();
-        s_current_index = 0;
-        video_playback_start(30);
-        ESP_LOGI(TAG, "Profile hidden, cover restored (%d frames, instant)", s_image_count);
+    if (s_profile_was_cover) {
+        // cover 模式进 → cover 在 slot → swap 秒切
+        if (ppa_has_cover()) {
+            ppa_swap_to_cover();        // profile→slot, cover→active
+            ppa_free_cover_slot();      // 释放 slot(profile 帧)
+            s_cover_mode = true;
+            s_image_count = ppa_get_cache_count();
+            s_current_index = 0;
+            s_loop_count = 0;
+            video_playback_start(30);
+            ESP_LOGI(TAG, "Profile hidden, cover restored (%d frames, instant)", s_image_count);
+        } else {
+            ppa_free_cover_slot();
+            cover_display_start(s_agent_path);
+            ESP_LOGI(TAG, "Profile hidden, cover reloading");
+        }
     } else {
+        // expr 模式进 → cover 已被 preload_cover 覆盖 → 重载 cover 并切到 expression
         ppa_free_cover_slot();
         if (s_agent_path[0]) {
             cover_display_start(s_agent_path);
         }
-        ESP_LOGI(TAG, "Profile hidden, cover reloading");
+        // 自动切回对话模式（与用户原始状态一致）
+        s_req_expression = true;
+        ESP_LOGI(TAG, "Profile hidden, restoring to cover→expression");
     }
 
     if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
