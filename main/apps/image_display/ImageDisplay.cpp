@@ -46,6 +46,7 @@ static lv_obj_t *s_mode_label = NULL;    // 模式切换按钮 label
 static lv_obj_t *s_rhodes_btn = NULL;    // 罗德岛按钮（仅 cover 模式显示）
 static lv_obj_t *s_profile_btn = NULL;   // 蟑螂派对！按钮（cover+expression 都显示）
 static lv_obj_t *s_profile_overlay = NULL; // Profile 全屏 overlay（点击返回）
+static uint8_t *s_profile_jpg_buf = NULL;   // JPG 解码 buffer（需 free）
 static bool s_profile_was_cover = false;  // 进入 profile 前的模式
 
 // 前向声明（定义在后面）
@@ -665,12 +666,14 @@ static void profile_show(void) {
     bool has_jpg = false;
     if (fp) {
         fclose(fp);
-        ppa_release_jpeg_engine();  // 释放 cover 引擎（PPA decode 会重建）
+        if (s_profile_jpg_buf) { free(s_profile_jpg_buf); s_profile_jpg_buf = NULL; }
+        ppa_release_jpeg_engine();
         char fs_path[300];
         snprintf(fs_path, sizeof(fs_path), "/sdcard/User/Ur_Info/Profile.jpg");
         int jpg_w, jpg_h;
         uint8_t *rgb = ppa_decode_jpeg_to_rgb565(fs_path, &jpg_w, &jpg_h);
         if (rgb) {
+            s_profile_jpg_buf = rgb;
             s_profile_overlay = lv_obj_create(lv_layer_top());
             lv_obj_set_size(s_profile_overlay, 480, 800);
             lv_obj_set_pos(s_profile_overlay, 0, 0);
@@ -708,6 +711,7 @@ static void profile_show(void) {
                         lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_0, 0);
                         lvgl_port_unlock();
                     }
+                    if (s_profile_jpg_buf) { free(s_profile_jpg_buf); s_profile_jpg_buf = NULL; }
                     ESP_LOGI(TAG, "Profile: MJPEG %d frames loaded", count);
                 }
                 vTaskDelete(NULL);
@@ -744,6 +748,7 @@ static void profile_hide(void) {
         s_profile_overlay = NULL;
         lvgl_port_unlock();
     }
+    if (s_profile_jpg_buf) { free(s_profile_jpg_buf); s_profile_jpg_buf = NULL; }
 
     // 恢复按钮
     if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
