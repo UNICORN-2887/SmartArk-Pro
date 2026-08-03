@@ -750,16 +750,21 @@ static void profile_hide(void) {
         lvgl_port_unlock();
     }
 
-    // 第4槽换回旧 active（动图已加载）或恢复 cover（未加载）
+    // 第4槽换回旧 active（动图已加载）→ 秒切
+    // 否则旧 active 无损 → 直接恢复（后台继续填第4槽）
     if (ppa_swap_profile_to_active() > 0) {
         ppa_free_profile_slot();
         s_image_count = ppa_get_cache_count();
         s_cover_mode = s_profile_was_cover;
         video_playback_start(30);
         ESP_LOGI(TAG, "Profile hidden (%d frames, instant)", s_image_count);
-    } else if (s_agent_path[0]) {
-        cover_display_start(s_agent_path);
-        ESP_LOGI(TAG, "Profile hidden, cover reloading");
+    } else {
+        // MJPEG还没加载完，旧active里cover/emotion完好无损
+        s_cover_mode = s_profile_was_cover;
+        s_image_count = ppa_get_cache_count();
+        s_current_index = 0;
+        video_playback_start(30);
+        ESP_LOGI(TAG, "Profile hidden, resume old state (bg load continues)");
     }
 }
 
