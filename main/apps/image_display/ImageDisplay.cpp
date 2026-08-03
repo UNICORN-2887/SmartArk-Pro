@@ -698,7 +698,7 @@ static void profile_show(void) {
                 char *path = (char*)arg;
                 int count = ppa_preload_profile(path);  // → 第4槽(独立,直通)
                 free(path);
-                if (count > 0) {
+                if (count > 0 && s_profile_overlay) {   // 未提前退出才展示
                     ppa_swap_profile_to_active();        // profile↔active
                     s_image_count = count; s_current_index = 0;
                     s_cover_mode = false;
@@ -723,7 +723,8 @@ static void profile_show(void) {
         s_profile_overlay = lv_obj_create(lv_layer_top());
         lv_obj_set_size(s_profile_overlay, 480, 800);
         lv_obj_set_pos(s_profile_overlay, 0, 0);
-        lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_0, 0);
+        lv_obj_set_style_bg_color(s_profile_overlay, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_1, 0);  // 最小不透明(接收点击)
         lv_obj_set_style_border_width(s_profile_overlay, 0, 0);
         lv_obj_set_style_pad_all(s_profile_overlay, 0, 0);
     }
