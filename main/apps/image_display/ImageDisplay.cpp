@@ -45,11 +45,8 @@ static char s_pending_emotion[32] = {0};   // 后备表情名
 static lv_obj_t *s_mode_label = NULL;    // 模式切换按钮 label
 static lv_obj_t *s_rhodes_btn = NULL;    // 罗德岛按钮（仅 cover 模式显示）
 static lv_obj_t *s_profile_btn = NULL;   // 蟑螂派对！按钮（cover+expression 都显示）
-static lv_img_dsc_t *s_profile_jpg_dsc = NULL; // JPG 解码 buffer(需手动释放)
 static lv_obj_t *s_profile_overlay = NULL; // Profile 全屏 overlay（点击返回）
 static bool s_profile_was_cover = false;  // 进入 profile 前的模式
-static volatile bool s_profile_loading = false;    // 互斥:同时只一个加载任务
-static int s_profile_gen = 0;                      // 让旧任务swap前自检过期
 
 // 前向声明（定义在后面）
 void video_playback_stop(void);
@@ -649,7 +646,6 @@ static void profile_hide(void);
 
 static void profile_show(void) {
     if (s_profile_overlay) return;
-    s_profile_was_cover = s_cover_mode;
 
     // 隐藏右上角按钮
     if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
@@ -662,8 +658,8 @@ static void profile_show(void) {
     video_playback_stop();
     vTaskDelay(pdMS_TO_TICKS(100));
     chat_overlay_show(false);
-    ppa_unload_background();  // 关表达模式色键合成
-    ppa_release_jpeg_engine();  // 临时释放 PPA 引擎（JPG 解码需要独占硬件）
+    ppa_unload_background();
+    ppa_release_jpeg_engine();  // 释放PPA引擎给JPG解码用
 
     // ① 立刻显示 JPG 占位（LVGL 顶层 canvas）
     const char *jpg_path = "/sdcard/User/Ur_Info/Profile.jpg";
@@ -673,14 +669,8 @@ static void profile_show(void) {
         fclose(fp);
         char lv_path[300];
         snprintf(lv_path, sizeof(lv_path), "S:/User/Ur_Info/Profile.jpg");
-        if (s_profile_jpg_dsc) {  // 释放上次泄露的 buffer
-            if (s_profile_jpg_dsc->data) free((void*)s_profile_jpg_dsc->data);
-            heap_caps_free(s_profile_jpg_dsc);
-            s_profile_jpg_dsc = NULL;
-        }
         lv_img_dsc_t *dsc = load_jpg_thumbnail(lv_path, 0);
         if (dsc) {
-            s_profile_jpg_dsc = dsc;
             s_profile_overlay = lv_obj_create(lv_layer_top());
             lv_obj_set_size(s_profile_overlay, 480, 800);
             lv_obj_set_pos(s_profile_overlay, 0, 0);
@@ -694,54 +684,38 @@ static void profile_show(void) {
             ESP_LOGI(TAG, "Profile: JPG placeholder %dx%d", dsc->header.w, dsc->header.h);
         }
     }
-    ppa_restore_jpeg_engine();  // 归还 PPA 引擎（profile/cover 播放需要）
+    ppa_restore_jpeg_engine();  // 归还PPA引擎
 
-    // ② 动图后台加载 → 第4槽（互斥：同时只一个任务跑）
+    // ② 动图后台加载 → profile 槽（不抢 cover, 直通无鬼图）
     const char *mjpeg_path = "/sdcard/User/Ur_Info/Profile.mjpeg";
     fp = fopen(mjpeg_path, "rb");
     if (fp) {
         fclose(fp);
-        if (!s_profile_loading) {
-            s_profile_loading = true;
-            int my_gen = ++s_profile_gen;
-            char *path_copy = strdup(mjpeg_path);
-            if (path_copy) {
-                xTaskCreate([](void *arg) {
-                    auto ctx = (std::pair<char*,int>*)arg;
-                    char *path = ctx->first;
-                    int gen = ctx->second;
-                    delete ctx;
-                    int count = ppa_preload_profile(path);
-                    free(path);
-                    // 决定是否 swap: overlay 在就展示(不论 gen 是否过期)
+        char *path_copy = strdup(mjpeg_path);
+        if (path_copy) {
+            xTaskCreate([](void *arg) {
+                char *path = (char*)arg;
+                int count = ppa_preload_profile(path);  // SD→第4槽(~2s)
+                free(path);
+                if (count > 0 && s_profile_overlay) {
+                    ppa_swap_profile_to_active();        // profile↔active
+                    s_image_count = count; s_current_index = 0;
+                    s_cover_mode = false;
+                    video_playback_start(25);
+                    // 移除 JPG 遮罩 → 透明 overlay 露出 PPA 动图
                     if (s_profile_overlay) {
-                        ppa_swap_profile_to_active();
-                        s_image_count = count; s_current_index = 0;
-                        s_cover_mode = false;
-                        video_playback_start(25);
-                        if (s_profile_overlay) {
-                            lvgl_port_lock(pdMS_TO_TICKS(200));
-                            lv_obj_clean(s_profile_overlay);
-                            lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_0, 0);
-                            lvgl_port_unlock();
-                        }
-                        if (s_profile_jpg_dsc) {
-                            if (s_profile_jpg_dsc->data) free((void*)s_profile_jpg_dsc->data);
-                            heap_caps_free(s_profile_jpg_dsc);
-                            s_profile_jpg_dsc = NULL;
-                        }
-                        ESP_LOGI(TAG, "Profile: MJPEG %d frames loaded", count);
-                    } else {
-                        ppa_free_profile_slot();  // 用户已退出，清槽
+                        lvgl_port_lock(pdMS_TO_TICKS(200));
+                        lv_obj_clean(s_profile_overlay);
+                        lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_0, 0);
+                        lvgl_port_unlock();
                     }
-                    s_profile_loading = false;
-                    vTaskDelete(NULL);
-                }, "profile_load", 8192, new std::pair<char*,int>(path_copy, my_gen), 2, NULL);
-            } else {
-                s_profile_loading = false;
-            }
+                    ESP_LOGI(TAG, "Profile: MJPEG %d frames loaded", count);
+                }
+                vTaskDelete(NULL);
+            }, "profile_load", 8192, path_copy, 2, NULL);
         }
     } else if (!has_jpg) {
+        if (ppa_has_cover()) ppa_swap_to_cover();
         profile_hide();
         return;
     }
@@ -751,8 +725,7 @@ static void profile_show(void) {
         s_profile_overlay = lv_obj_create(lv_layer_top());
         lv_obj_set_size(s_profile_overlay, 480, 800);
         lv_obj_set_pos(s_profile_overlay, 0, 0);
-        lv_obj_set_style_bg_color(s_profile_overlay, lv_color_black(), 0);
-        lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_10, 0);
+        lv_obj_set_style_bg_opa(s_profile_overlay, LV_OPA_0, 0);
         lv_obj_set_style_border_width(s_profile_overlay, 0, 0);
         lv_obj_set_style_pad_all(s_profile_overlay, 0, 0);
     }
@@ -772,11 +745,6 @@ static void profile_hide(void) {
         s_profile_overlay = NULL;
         lvgl_port_unlock();
     }
-    if (s_profile_jpg_dsc) {
-        if (s_profile_jpg_dsc->data) free((void*)s_profile_jpg_dsc->data);
-        heap_caps_free(s_profile_jpg_dsc);
-        s_profile_jpg_dsc = NULL;
-    }
 
     // 恢复按钮
     if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
@@ -786,15 +754,11 @@ static void profile_hide(void) {
         lvgl_port_unlock();
     }
 
-    // 页面切换: 清理 profile → 干净重建 cover 页面
+    // profile 槽→active 换回旧数据 + 清槽 → 页面切换到 cover
+    ppa_swap_profile_to_active();
     ppa_free_profile_slot();
-    ppa_free_cover_slot();
     if (s_agent_path[0]) {
-        cover_display_start(s_agent_path);  // 重建 cover(含背景/alpha等全部状态)
-    }
-    // 来源是表达模式 → 自动切回
-    if (!s_profile_was_cover) {
-        s_req_expression = true;
+        cover_display_start(s_agent_path);
     }
     ESP_LOGI(TAG, "Profile hidden");
 }
