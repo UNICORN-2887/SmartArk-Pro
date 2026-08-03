@@ -659,18 +659,18 @@ static void profile_show(void) {
     vTaskDelay(pdMS_TO_TICKS(100));
     chat_overlay_show(false);
     ppa_unload_background();
-    ppa_release_jpeg_engine();  // 释放PPA引擎给JPG解码用
-
-    // ① 立刻显示 JPG 占位（LVGL 顶层 canvas）
+    // ① 立刻显示 JPG 占位（释放引擎后 PPA 内置解码）
     const char *jpg_path = "/sdcard/User/Ur_Info/Profile.jpg";
     FILE *fp = fopen(jpg_path, "rb");
     bool has_jpg = false;
     if (fp) {
         fclose(fp);
-        char lv_path[300];
-        snprintf(lv_path, sizeof(lv_path), "S:/User/Ur_Info/Profile.jpg");
-        lv_img_dsc_t *dsc = load_jpg_thumbnail(lv_path, 0);
-        if (dsc) {
+        ppa_release_jpeg_engine();  // 释放 cover 引擎（PPA decode 会重建）
+        char fs_path[300];
+        snprintf(fs_path, sizeof(fs_path), "/sdcard/User/Ur_Info/Profile.jpg");
+        int jpg_w, jpg_h;
+        uint8_t *rgb = ppa_decode_jpeg_to_rgb565(fs_path, &jpg_w, &jpg_h);
+        if (rgb) {
             s_profile_overlay = lv_obj_create(lv_layer_top());
             lv_obj_set_size(s_profile_overlay, 480, 800);
             lv_obj_set_pos(s_profile_overlay, 0, 0);
@@ -679,12 +679,11 @@ static void profile_show(void) {
             lv_obj_set_style_pad_all(s_profile_overlay, 0, 0);
             lv_obj_t *c = lv_canvas_create(s_profile_overlay);
             lv_obj_set_size(c, 480, 800);
-            lv_canvas_set_buffer(c, (uint8_t*)dsc->data, dsc->header.w, dsc->header.h, LV_COLOR_FORMAT_RGB565);
+            lv_canvas_set_buffer(c, rgb, 480, 800, LV_COLOR_FORMAT_RGB565);
             has_jpg = true;
-            ESP_LOGI(TAG, "Profile: JPG placeholder %dx%d", dsc->header.w, dsc->header.h);
+            ESP_LOGI(TAG, "Profile: JPG placeholder %dx%d", jpg_w, jpg_h);
         }
     }
-    ppa_restore_jpeg_engine();  // 归还PPA引擎
 
     // ② 动图后台加载 → profile 槽（不抢 cover, 直通无鬼图）
     const char *mjpeg_path = "/sdcard/User/Ur_Info/Profile.mjpeg";
