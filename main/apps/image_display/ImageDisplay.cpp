@@ -743,10 +743,22 @@ static void profile_hide(void) {
         lvgl_port_unlock();
     }
 
-    // 清理 profile 帧，干净重载 cover（1-3秒 SD 读取；简单可靠，三槽不打架）
-    ppa_free_cover_slot();
-    if (s_agent_path[0]) {
-        cover_display_start(s_agent_path);
+    // cover 模式进：cover 在 slot（被 preload_cover+swap 挤进去的）→ swap 回 active
+    // expr 模式进：cover 被 preload_cover 覆盖了 → 只能 SD 重载
+    if (s_profile_was_cover && ppa_has_cover()) {
+        ppa_swap_to_cover();        // profile→slot, cover→active
+        ppa_free_cover_slot();      // 释放 slot(profile 帧)
+        s_cover_mode = true;
+        s_image_count = ppa_get_cache_count();
+        s_current_index = 0;
+        video_playback_start(30);
+        ESP_LOGI(TAG, "Profile hidden, cover restored (%d frames, instant)", s_image_count);
+    } else {
+        ppa_free_cover_slot();
+        if (s_agent_path[0]) {
+            cover_display_start(s_agent_path);
+        }
+        ESP_LOGI(TAG, "Profile hidden, cover reloading");
     }
 
     if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
@@ -755,8 +767,6 @@ static void profile_hide(void) {
         if (s_mode_label)  lv_obj_remove_flag(lv_obj_get_parent(s_mode_label), LV_OBJ_FLAG_HIDDEN);
         lvgl_port_unlock();
     }
-
-    ESP_LOGI(TAG, "Profile hidden");
 }
 
 // ─── 角色索引页面（罗德岛）──────────────────────────────
