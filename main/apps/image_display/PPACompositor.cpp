@@ -123,11 +123,12 @@ static size_t s_jpg_cache_size[MAX_CACHE];
 static int s_cache_count = 0;
 static bool s_use_mjpeg = false;
 
-// ─── 第四槽：Profile 缓存（独立，不争抢 cover/pending 槽）───
+// ─── 第四槽：Profile 缓存（独立，不争抢其他槽）───
 static uint8_t *s_profile_cache[MAX_CACHE];
 static size_t s_profile_sizes[MAX_CACHE];
 static int s_profile_count = 0;
 static bool s_profile_loaded = false;
+static bool s_use_profile = false;  // 播放源：false=active, true=profile
 
 // Alpha 遮罩缓存（RLE 压缩, ~10KB/帧）
 static uint8_t *s_mask_cache[MAX_CACHE];
@@ -547,47 +548,26 @@ void ppa_unload_cover(void) {
     ESP_LOGI(TAG, "Cover cache unloaded");
 }
 
-// ─── 第四槽：Profile 缓存操作 ───────────────────────────
+// ─── 第四槽：Profile 操作 ──────────────────────────
 
 int ppa_preload_profile(const char *path) {
-    // 释放旧数据
     for (int i = 0; i < s_profile_count; i++) {
         if (s_profile_cache[i]) { free(s_profile_cache[i]); s_profile_cache[i] = NULL; }
     }
     s_profile_count = load_mjpeg_into(path, s_profile_cache, s_profile_sizes, MAX_CACHE);
     s_profile_loaded = (s_profile_count > 0);
-    if (s_profile_loaded)
-        ESP_LOGI(TAG, "Profile cached: %d frames (%s)", s_profile_count, path);
+    if (s_profile_loaded) ESP_LOGI(TAG, "Profile cached: %d frames (%s)", s_profile_count, path);
     return s_profile_count;
 }
 
-int ppa_swap_profile_to_active(void) {
-    if (!s_profile_loaded) return 0;
-    for (int i = 0; i < MAX_CACHE; i++) {
-        uint8_t *tmp = s_jpg_cache[i];
-        s_jpg_cache[i] = s_profile_cache[i];
-        s_profile_cache[i] = tmp;
-        size_t stmp = s_jpg_cache_size[i];
-        s_jpg_cache_size[i] = s_profile_sizes[i];
-        s_profile_sizes[i] = stmp;
-    }
-    int new_count = s_profile_count;
-    s_profile_count = s_cache_count;
-    s_cache_count = new_count;
-    s_use_alpha = false;  // profile 直通无 alpha 合成
-    ESP_LOGI(TAG, "Swapped profile: %d frames active, %d in profile",
-             s_cache_count, s_profile_count);
-    return s_cache_count;
-}
+void ppa_use_profile_cache(bool use) { s_use_profile = use; }
 
 void ppa_free_profile_slot(void) {
-    // swap 回去后再调用——此时 active 已恢复，profile 槽里是 profile 帧
     for (int i = 0; i < s_profile_count; i++) {
         if (s_profile_cache[i]) { free(s_profile_cache[i]); s_profile_cache[i] = NULL; }
     }
     s_profile_count = 0;
     s_profile_loaded = false;
-    ESP_LOGI(TAG, "Profile slot freed");
 }
 
 bool ppa_open_mjpeg(const char *path, int *out_frame_count) {
@@ -679,6 +659,10 @@ uint8_t* ppa_composite_frame(int frame_index) {
     if (s_use_mjpeg) {
         if (!mjpeg_get_frame(frame_index, &jpg_data, &jpg_size)) return NULL;
         need_free = true;
+    } else if (s_use_profile) {
+        if (frame_index < 0 || frame_index >= s_profile_count || !s_profile_cache[frame_index]) return NULL;
+        jpg_size = s_profile_sizes[frame_index];
+        jpg_data = s_profile_cache[frame_index];
     } else {
         if (frame_index < 0 || frame_index >= s_cache_count || !s_jpg_cache[frame_index]) return NULL;
         jpg_size = s_jpg_cache_size[frame_index];
@@ -711,7 +695,7 @@ uint8_t* ppa_composite_frame(int frame_index) {
     uint8_t *fg_for_blend = s_fg_buf;
     ppa_blend_color_mode_t fg_cm = PPA_BLEND_COLOR_MODE_RGB565;
 
-    if (s_use_alpha && s_mask_cache[frame_index]) {
+    if (!s_use_profile && s_use_alpha && s_mask_cache[frame_index]) {
         apply_rle_mask(s_mask_cache[frame_index], s_mask_cache_size[frame_index],
                        (uint16_t*)s_fg_buf, DISPLAY_W * DISPLAY_H);
         fg_for_blend = s_alpha_buf;
