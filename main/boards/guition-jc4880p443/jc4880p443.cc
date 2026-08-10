@@ -245,12 +245,8 @@ static esp_err_t bsp_enable_dsi_phy_power(void)
             }
         });
 
-        int_button_.OnPressDown([this]() {
-            Application::GetInstance().StartListening();
-        });
-        int_button_.OnPressUp([this]() {
-            Application::GetInstance().StopListening();
-        });
+        // 触屏已通过 LVGL 驱动正常工作，GPIO 21 中断不再触发监听
+        // int_button_.OnPressDown/OnPressUp 已移除
     }
 
     // 物联网初始化，添加对 AI 可见设备

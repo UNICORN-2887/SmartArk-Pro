@@ -8,6 +8,7 @@
 #include "font_awesome_symbols.h"
 #include "assets/lang_config.h"
 #include "mcp_server.h"
+#include "audio/tts_engine.h"
 
 #include <cstring>
 #include <esp_log.h>
@@ -346,6 +347,11 @@ void Application::Start() {
     audio_service_.Initialize(codec);
     audio_service_.Start();
 
+    // Initialize TTS (partition-based loading avoids P4 PSRAM XIP crash)
+    if (!tts_init()) {
+        ESP_LOGW(TAG, "TTS init failed — keyboard Send will be silent");
+    }
+
     AudioServiceCallbacks callbacks;
     callbacks.on_send_queue_available = [this]() {
         xEventGroupSetBits(event_group_, MAIN_EVENT_SEND_AUDIO);
@@ -418,6 +424,10 @@ void Application::Start() {
                     cover_display_start("/sdcard/main/operator/MEDIC/6STAR/Kaltsit");
                 else if (protocol_->agent_id() == "5838c85f30ab4b33a4341bf8b0736e26")
                     cover_display_start("/sdcard/main/operator/CASTER/5STAR/Amiya");
+                else if (protocol_->agent_id() == "ef84ee6764ce44e78ec131aa9d5ebb1d")
+                    cover_display_start("/sdcard/main/operator/SUPPORTER/6STAR/Civilight_Eterna");
+                else if (protocol_->agent_id() == "27da698865dc4922a0654941626ae1f4")
+                    cover_display_start("/sdcard/main/operator/MEDIC/6STAR/Mon3tr");
                 else
                     cover_display_start("/sdcard/main/operator/MEDIC/6STAR/Kaltsit");
             } else {
@@ -636,13 +646,21 @@ void Application::OnWakeWordDetected() {
         // 唤醒词 → 智能体 agent_id + SD路径 映射
         static const std::string agent_kaltsit = "0a20483553fe4ff784a016d0fafabfff";
         static const std::string agent_amiya = "5838c85f30ab4b33a4341bf8b0736e26";
+        static const std::string agent_civilight = "ef84ee6764ce44e78ec131aa9d5ebb1d";
+        static const std::string agent_mon3tr = "27da698865dc4922a0654941626ae1f4";
         static const std::string path_kaltsit = "/sdcard/main/operator/MEDIC/6STAR/Kaltsit";
         static const std::string path_amiya = "/sdcard/main/operator/CASTER/5STAR/Amiya";
+        static const std::string path_civilight = "/sdcard/main/operator/SUPPORTER/6STAR/Civilight_Eterna";
+        static const std::string path_mon3tr = "/sdcard/main/operator/MEDIC/6STAR/Mon3tr";
         std::string target_agent, target_path;
         if (wake_word.find("凯尔希") != std::string::npos) {
             target_agent = agent_kaltsit; target_path = path_kaltsit;
         } else if (wake_word.find("阿米娅") != std::string::npos) {
             target_agent = agent_amiya; target_path = path_amiya;
+        } else if (wake_word.find("特蕾西亚") != std::string::npos) {
+            target_agent = agent_civilight; target_path = path_civilight;
+        } else if (wake_word.find("Mon3tr") != std::string::npos) {
+            target_agent = agent_mon3tr; target_path = path_mon3tr;
         }
         // "你好小智" → target_agent 为空，不发 X-Agent-ID（默认智能体）
 
@@ -828,6 +846,9 @@ void application_set_wake_word_detection(bool enable) {
 }
 void application_end_conversation(void) {
     Application::GetInstance().CloseAudioChannel();
+}
+void application_audio_notify_output(void) {
+    Application::GetInstance().GetAudioService().NotifyOutputActive();
 }
 
 void Application::SendMcpMessage(const std::string& payload) {

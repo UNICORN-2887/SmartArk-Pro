@@ -1,5 +1,110 @@
 # 表情动画播放 — 变更记录
 
+## 2026-08-10 — Live2D 实时渲染 + 待机动画
+
+### 架构
+- **PC 端导出**：Cubism SDK Demo 按 L 导出 `.l2d`（几何+UV），按 K 导出 `keyforms.bin`（参数变形数据）
+- **P4 端渲染**：自研 C 软件光栅器 `lv2_render.c`，RGBA8888 纹理 + Alpha 混合 + 遮罩裁剪
+- **动画系统**：Keyform 参数驱动顶点变形，`lv2_animate()` 计算变形位置
+
+### 修复路径
+1. **UV 坐标**：SDK `GetDrawableVertexUvs()` 返回纹理图集 [0,1] 空间，直接使用无需转换
+2. **顶点坐标**：SDK 顶点需乘 ppu=3600 缩放到像素空间；keyform 偏移也需乘 ppu
+3. **V 轴翻转**：OpenGL 纹理原点在左下，P4 在左上，需 `tv=1.0-v`
+4. **渲染顺序**：Cubism 用 `GetRenderOrders()` 控制前后遮挡，导出时按 z-order 排序
+5. **遮罩裁剪**：遮罩 drawable 渲染到蒙版缓冲，被遮罩 drawable 渲染时逐像素检查蒙版
+6. **Alpha 混合**：原始 RGBA 纹理保留透明通道，渲染时 `if alpha==0: skip` + 半透明混合
+7. **纹理缩放**：用 NEAREST 而非 LANCZOS，防止透明边缘白色像素污染
+8. **Keyform 对齐**：导出时必须与 `.l2d` 使用相同的渲染顺序，顶点数一致（含遮罩）
+9. **Header 偏移**：`keyforms.bin` header 是 3×uint32=12 字节，非 2×uint32=8 字节
+10. **ppu 缩放**：Keyform 偏移是模型单位，需 ×3600 匹配 `.l2d` 的像素空间
+11. **参数选取**：Keyforms 按需加载 6 个参数（AngleX/Y/Z, EyeL, EyeR, Mouth），非连续索引
+12. **看门狗**：软件光栅太慢阻塞 CPU，退订 TWDT 再渲染，2fps 定时器
+
+### 新增文件
+- `main/apps/live2d/lv2_render.h/c` — RGBA8888 + Alpha + 遮罩 + Keyform 动画渲染器
+- `converter/fix_texture.py` — RGBA→RGBA8888 raw 纹理生成（NEAREST 缩放）
+- PC Demo: `LAppModel::DumpGeometry/DumpKeyforms` — `.l2d` + `keyforms.bin` 导出
+
+### SD 卡文件
+- `/Amiya/model.l2d` — 几何数据（122 drawable，14679 顶点）
+- `/Amiya/amiya_tex.raw` — RGBA8888 纹理（1024×1024，4MB）
+- `/Amiya/keyforms.bin` — 动画关键帧（47 参数，P4 加载 6 个核心参数）
+
+---
+
+## 2026-08-07 #34 — 键盘 Send 本地 TTS + 多字节退格修复
+
+### TTS（文本→语音）
+- ESP-TTS 通过 flash 分区加载（绕过 P4 PSRAM XIP 崩溃）
+- 分区表新增 `voice` 分区（3MB，地址 0xD00000）
+- 语音数据来自 ESP-SR GitHub：`esp_tts_voice_data_xiaole.dat`（需 `esptool write_flash 0xD00000` 单独烧录）
+- 编码器对齐：TTS 768-sample chunk → 缓冲 960-sample Opus 帧
+- 发送前 ClearSendQueue 清麦克风遗留数据
+- TTS 任务栈从 16KB→40KB（解决 buffer 栈溢出致字符破损）
+
+### 多字节退格修复
+- **Bug**：键盘 Del 只删 1 字节，UTF-8 中文字符（3 字节）被拆碎→残留 2 字节乱码→下次输入菱形 `�`
+- **修复**：`kb_backspace()` 检测 UTF-8 continuation byte (0x80-0xBF)，按 2/3/4 字节完整回溯删除
+
+### 键盘输入 buffer 改为 PSRAM 分配
+- `s_kb_input` 从 static array (BSS) → `heap_caps_malloc(320, SPIRAM)`（避免 BSS 被栈溢出覆盖）
+
+### 键盘布局调整
+- 26-key: Clear 按钮替掉 Row 4 Send，Send 移到 Row 2 "l" 右侧
+- a 对齐 q（去偏移），z 对齐 x（去偏移）
+- Del 按钮填满 Row 3 剩余宽度
+- 9-key: Clear 按钮加入
+
+### SDK 配置修复（fullclean 后恢复）
+| 配置 | 值 |
+|---|---|
+| OTA URL | `https://xrobo.qiniuapi.com/v1/ota/` |
+| 唤醒词 | `CUSTOM_WAKE_WORD` |
+| MultiNet | `MULTINET7_AC_QUANT` |
+| FATFS | `LFN_STACK` (255 字符) |
+| 分区表 | `16m_custom_wakeword_voice.csv` |
+
+## 2026-08-05 #33 — 语音记录 + 背景音乐 + 九键拼音键盘 + 新角色导入工具链
+
+### 语音记录按钮
+- 新增"语音记录"按钮（cover+expression 可见），九键拼音输入
+- 双层下拉框：分类（日常/作战中/晋升）→ 中文条目 → 播放 WAV
+- 中文→英文文件名映射表内嵌，WAV 16kHz mono 直接播放
+- 联动 text.yaml 显示语音文本
+
+### 背景音乐按钮
+- 新增"背景音乐"按钮，读取 `/sdcard/main/music/backgroundmusic.yaml`
+- 下拉框显示中文名，选择后播放对应 WAV
+- 音乐与语音互斥抢占，取消标志安全退出
+
+### 九键拼音键盘
+- 新增"弹出键盘"按钮（仅 expression 模式），全屏 overlay
+- 多击法输入（同键 700ms 内连按循环字母），数字支持
+- 拼音→汉字映射表（394 音节 3035 字），二进制搜索查找
+- 候选栏 6 个汉字按钮，点击替换拼音
+- 自动空格/中文边界分词，连续输入多个汉字
+
+### 角色导入工具链 (converter/)
+| 脚本 | 用途 |
+|---|---|
+| `jpg2mjpeg.py` | JPG 序列 → MJPEG cover（自动缩放 480×800） |
+| `png2emoji.py` | PNG 序列 → MJPEG + RLE Mask（alpha 抠图） |
+| `import_voice.py` | PRTS Wiki → 下载+重命名+分类+16kHz+text.yaml 一键 |
+| `make_thumbnail.py` | 任意图 → 108×228 INDEX 缩略图 |
+| `wav_converter.py` | WAV → 16kHz mono（ffprobe 跳过已转换） |
+| `music_converter.py` | 同上，音乐专用副本 |
+| `gen_pinyin_table.py` | 生成拼音→汉字 C 头文件 |
+
+### 新角色
+- Civilight_Eterna（特蕾西亚）：SUPPORTER 6★
+- Mon3tr：MEDIC 6★
+
+### 音频输出修复
+- AudioService 电源管理抢输出 → 加 `NotifyOutputActive()` 刷新时间戳
+- WAV 解析改为扫描 chunk（兼容 ffmpeg 额外元数据）
+- 取消标志替代 vTaskDelete 暴力杀任务
+
 ## 2026-08-02 #32 — 全局 LVGL 竞态修复（lvgl_port_lock 超时）
 
 ### 问题

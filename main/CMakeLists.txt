@@ -7,6 +7,7 @@ set(SOURCES "audio/audio_codec.cc"
             "audio/codecs/es8388_audio_codec.cc"
             "audio/codecs/es8389_audio_codec.cc"
             "audio/codecs/dummy_audio_codec.cc"
+            "audio/tts_engine.cc"
             "audio/processors/audio_debugger.cc"
             "led/single_led.cc"
             "led/circular_strip.cc"
@@ -28,9 +29,11 @@ set(SOURCES "audio/audio_codec.cc"
             "apps/image_display/ImageDisplay.cpp"
             "apps/image_display/MjpegPlayer.cpp"
             "apps/image_display/PPACompositor.cpp"
+            "apps/live2d/moc3_parser.c"
+            "apps/live2d/lv2_render.c"
             )
 
-set(INCLUDE_DIRS "." "display" "audio" "protocols" "apps/image_display")
+set(INCLUDE_DIRS "." "display" "audio" "protocols" "apps/image_display" "apps/live2d")
 
 # 添加板级公共文件
 file(GLOB BOARD_COMMON_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/boards/common/*.cc)

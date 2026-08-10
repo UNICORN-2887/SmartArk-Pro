@@ -1,65 +1,45 @@
-I (32107) AFE: AFE Pipeline: [input] -> |VAD(WebRTC)| -> [output]
-W (32108) AFE: Ringbuffer of AFE(FEED) is full, Please use fetch() to read data to avoid data loss or overwriting
-I (32109) AppImageDisplay: FPS:19 [expr]
-I (32113) AfeAudioProcessor: Audio communication task started, feed size: 512 fetch size: 512
-I (32175) Application: >> 你好凯尔希
-I (33156) AppImageDisplay: FPS:19 [expr]
-I (33989) Application: STATE: speaking
-I (33992) Application: 🎭 LLM → expression: thinking
-I (33998) Application: << 博士，你迟到了。
-I (34170) AppImageDisplay: FPS:19 [expr]
-I (35187) AppImageDisplay: FPS:19 [expr]
-I (36206) AppImageDisplay: FPS:19 [expr]
-I (36933) PPACompositor: /sdcard/main/operator/MEDIC/6STAR/Kaltsit/emoji/thinking.mjpeg: 120/120 frames, 3382 KB PSRAM (streaming, 0 seek)
-I (37234) AppImageDisplay: FPS:20 [expr]
-I (37323) Application: 🎭 LLM → expression: thinking
-I (37323) Application: << 今天的日程已经排满，请直接说明来意。
-I (38259) AppImageDisplay: FPS:21 [expr]
-I (39283) AppImageDisplay: FPS:21 [expr]
-I (40301) AppImageDisplay: FPS:21 [expr]
-I (40546) PPACompositor: Mask loaded: /sdcard/main/operator/MEDIC/6STAR/Kaltsit/emoji/thinking.mask (120/120 frames)
-I (40546) PPACompositor: Pending emotion ready: 120 frames (/sdcard/main/operator/MEDIC/6STAR/Kaltsit/emoji/thinking.mjpeg)
-I (40592) PPACompositor: Swapped emotion: 120 frames active, 120 pending
-I (40592) AppImageDisplay: 🎭 Preemptive swap: 120 frames
-I (41302) AppImageDisplay: FPS:21 [expr]
-I (42342) AppImageDisplay: FPS:22 [expr]
-I (42803) Application: STATE: listening
-I (43345) AppImageDisplay: FPS:21 [expr]
-I (44355) AppImageDisplay: FPS:21 [expr]
-I (45356) AppImageDisplay: FPS:21 [expr]
-I (46362) AppImageDisplay: FPS:21 [expr]
-I (47367) AppImageDisplay: FPS:21 [expr]
-I (48370) AppImageDisplay: FPS:21 [expr]
-I (49380) AppImageDisplay: FPS:21 [expr]
-I (50087) Application: >> 解释一下 LQR 控制算法。
-I (50390) AppImageDisplay: FPS:21 [expr]
-I (51397) AppImageDisplay: FPS:21 [expr]
-I (51691) Application: 🎭 LLM → expression: thinking
-I (51692) Application: << 一个典型的线性二次型调节器问题。
-I (51724) Application: STATE: speaking
-I (52436) AppImageDisplay: FPS:20 [expr]
-I (53447) AppImageDisplay: FPS:19 [expr]
-I (54451) AppImageDisplay: FPS:19 [expr]
-I (55467) AppImageDisplay: FPS:19 [expr]
-I (55772) Application: 🎭 LLM → expression: thinking
-I (55774) Application: << 它在控制理论中用于最小化一个二次型代价函数，找到最优状态反馈增益矩阵。
-I (56497) AppImageDisplay: FPS:19 [expr]
-I (57525) AppImageDisplay: FPS:19 [expr]
-I (57670) PPACompositor: /sdcard/main/operator/MEDIC/6STAR/Kaltsit/emoji/thinking.mjpeg: 120/120 frames, 3382 KB PSRAM (streaming, 0 seek)
-I (58548) AppImageDisplay: FPS:21 [expr]
-I (59569) AppImageDisplay: FPS:21 [expr]
-I (60589) AppImageDisplay: FPS:21 [expr]
-I (61025) SystemInfo: free sram: 290515 minimal sram: 222979
-I (61315) PPACompositor: Mask loaded: /sdcard/main/operator/MEDIC/6STAR/Kaltsit/emoji/thinking.mask (120/120 frames)
-I (61315) PPACompositor: Pending emotion ready: 120 frames (/sdcard/main/operator/MEDIC/6STAR/Kaltsit/emoji/thinking.mjpeg)
-I (61316) PPACompositor: Swapped emotion: 120 frames active, 120 pending
-I (61331) AppImageDisplay: 🎭 Preemptive swap: 120 frames
-I (61616) AppImageDisplay: FPS:21 [expr]
-I (62656) AppImageDisplay: FPS:22 [expr]
-I (63695) AppImageDisplay: FPS:22 [expr]
-I (64024) Application: 🎭 LLM → expression: thinking
-I (64025) Application: << 你突然问这个，是打算在罗德岛的战术无人机上应用，还是单纯想测试我的知识储备？
-I (64737) AppImageDisplay: FPS:20 [expr]
-I (65767) AppImageDisplay: FPS:19 [expr]
-I (66791) AppImageDisplay: FPS:19 [expr]
-I (67296) AudioCodec: Set input enable to false
+I (42138) AppImageDisplay: FPS:25 [cover]
+I (43073) SystemInfo: free sram: 200139 minimal sram: 187039
+I (43140) AppImageDisplay: FPS:24 [cover]
+I (44174) AppImageDisplay: FPS:24 [cover]
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -0.003517, nb log prob: -inf, normed log prob: -0.001759, num_blanks:56
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -inf, nb log prob: -inf, normed log prob: nan, num_blanks:0     
+I (45204) AppImageDisplay: FPS:25 [cover]
+I (46251) AppImageDisplay: FPS:24 [cover]
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -0.002686, nb log prob: -inf, normed log prob: -0.001343, num_blanks:56
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -inf, nb log prob: -inf, normed log prob: nan, num_blanks:0
+I (47336) AppImageDisplay: FPS:26 [cover]
+I (48363) AppImageDisplay: FPS:24 [cover]
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -0.005342, nb log prob: -inf, normed log prob: -0.002671, num_blanks:56
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -inf, nb log prob: -inf, normed log prob: nan, num_blanks:0     
+I (49399) AppImageDisplay: FPS:24 [cover]
+I (50436) AppImageDisplay: FPS:25 [cover]
+I (51463) AppImageDisplay: FPS:24 [cover]
+I (51706) AudioCodec: Set output enable to false
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -0.000538, nb log prob: -inf, normed log prob: -0.000269, num_blanks:56
+unfinished id:[], str: , state id: 0, command id: 0, b log prob: -inf, nb log prob: -inf, normed log prob: nan, num_blanks:0     
+I (52500) AppImageDisplay: FPS:25 [cover]
+I (52920) AppImageDisplay: Live2D preview shown (animated, AFE disabled)
+I (53862) LV2: KF: 6/47 params, 688 KB
+I (54310) SystemInfo: free sram: 204507 minimal sram: 187039
+E (63862) task_wdt: Task watchdog got triggered. The following tasks/users did not reset the watchdog in time:
+E (63862) task_wdt:  - IDLE0 (CPU 0)
+E (63862) task_wdt: Tasks currently running:
+E (63862) task_wdt: CPU 0: esp_timer
+E (63862) task_wdt: CPU 1: IDLE1
+E (63862) task_wdt: Print CPU 0 (current core) registers
+--- Stack dump detected
+Core  0 register dump:
+MEPC    : 0x4fc1a048  RA      : 0x48021e3e  SP      : 0x4ff2b820  GP      : 0x4ff16000
+--- 0x48021e3e: render_core at E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/main/apps/live2d/lv2_render.c:116
+TP      : 0x4ff2b910  T0      : 0x44837c6f  T1      : 0x0000000f  T2      : 0x44312d7f
+S0/FP   : 0x48422728  S1      : 0x000001e0  A0      : 0x4903e090  A1      : 0x00000000  
+A2      : 0x00000000  A3      : 0x490f9890  A4      : 0x490c0ac0  A5      : 0x00000000
+A6      : 0x00000006  A7      : 0x00000006  S2      : 0x4903e090  S3      : 0x00000320
+S4      : 0x49c4832c  S5      : 0x0005dc00  S6      : 0x4ff29000  S7      : 0x00000000
+S8      : 0x00000000  S9      : 0x00000000  S10     : 0x0348f224  S11     : 0x00000000  
+T3      : 0x44831990  T4      : 0x442fb928  T5      : 0x447f62ba  T6      : 0x4432e044
+MSTATUS : 0x00001888  MTVEC   : 0x4ff00003  MCAUSE  : 0xdeadc0de  MTVAL   : 0xdeadc0de
+--- 0x4ff00003: _vector_table at ??:?
+MHARTID : 0x00000000
+Please enable CONFIG_ESP_SYSTEM_USE_FRAME_POINTER option to have a full backtrace.

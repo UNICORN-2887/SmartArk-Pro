@@ -73,6 +73,10 @@ bool CustomWakeWord::Initialize(AudioCodec* codec) {
     esp_mn_commands_add(3, "ni hao xiao zhi");           // 小智(保底)
     esp_mn_commands_add(4, "ni hao a mi ya");            // 阿米娅
     esp_mn_commands_add(5, "a mi ya");                   // 阿米娅(短)
+    esp_mn_commands_add(6, "ni hao te lei xi ya");       // 特蕾西亚
+    esp_mn_commands_add(7, "te lei xi ya");              // 特蕾西亚(短)
+    esp_mn_commands_add(8, "ni hao meng si te");         // Mon3tr
+    esp_mn_commands_add(9, "meng si te");                // Mon3tr(短)
     esp_mn_commands_update();
     
     // 打印所有的命令词
@@ -195,9 +199,10 @@ void CustomWakeWord::AudioDetectionTask() {
 
             // 多唤醒词 → 不同显示名（为智能体切换做准备）
             static const char *names[] = {
-                "", "你好凯尔希", "凯尔希", "你好小智", "你好阿米娅", "阿米娅"
+                "", "你好凯尔希", "凯尔希", "你好小智", "你好阿米娅", "阿米娅",
+                "你好特蕾西亚", "特蕾西亚", "你好Mon3tr", "Mon3tr"
             };
-            const char *display = (id >= 1 && id <= 5) ? names[id] : CONFIG_CUSTOM_WAKE_WORD_DISPLAY;
+            const char *display = (id >= 1 && id <= 9) ? names[id] : CONFIG_CUSTOM_WAKE_WORD_DISPLAY;
             ESP_LOGI(TAG, "Wake word #%d: '%s' prob=%.2f → %s",
                     id, mn_result->string, mn_result->prob[0], display);
 

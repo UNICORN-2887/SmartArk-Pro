@@ -557,6 +557,21 @@ void AudioService::ResetDecoder() {
     audio_queue_cv_.notify_all();
 }
 
+void AudioService::NotifyOutputActive() {
+    last_output_time_ = std::chrono::steady_clock::now();
+}
+
+void AudioService::PushAudioForSend(std::vector<int16_t>&& pcm) {
+    PushTaskToEncodeQueue(kAudioTaskTypeEncodeToSendQueue, std::move(pcm));
+}
+
+void AudioService::ClearSendQueue() {
+    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+    audio_send_queue_.clear();
+    audio_encode_queue_.clear();
+    audio_queue_cv_.notify_all();
+}
+
 void AudioService::CheckAndUpdateAudioPowerState() {
     auto now = std::chrono::steady_clock::now();
     auto input_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_input_time_).count();
