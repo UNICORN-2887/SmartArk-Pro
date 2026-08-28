@@ -453,7 +453,7 @@ config USE_AUDIO_PROCESSOR
 config USE_DEVICE_AEC
     bool "Enable Device-Side AEC"
     default n
-        depends on USE_AUDIO_PROCESSOR && (BOARD_TYPE_ESP_BOX_3 || BOARD_TYPE_ESP_BOX || BOARD_TYPE_ESP_BOX_LITE || BOARD_TYPE_LICHUANG_DEV || BOARD_TYPE_ESP32S3_KORVO2_V3 || BOARD_TYPE_ESP32S3_Touch_AMOLED_1_75 || BOARD_TYPE_ESP32S3_Touch_AMOLED_2_06 || BOARD_TYPE_ESP32P4_WIFI6_Touch_LCD_4B || BOARD_TYPE_ESP32P4_WIFI6_Touch_LCD_XC)
+        depends on USE_AUDIO_PROCESSOR && (BOARD_TYPE_ESP_BOX_3 || BOARD_TYPE_ESP_BOX || BOARD_TYPE_ESP_BOX_LITE || BOARD_TYPE_LICHUANG_DEV || BOARD_TYPE_ESP32S3_KORVO2_V3 || BOARD_TYPE_ESP32S3_Touch_AMOLED_1_75 || BOARD_TYPE_ESP32S3_Touch_AMOLED_2_06 || BOARD_TYPE_ESP32P4_WIFI6_Touch_LCD_4B || BOARD_TYPE_ESP32P4_WIFI6_Touch_LCD_XC || BOARD_TYPE_GUITION_JC4880P443)
     help
         因为性能不够，不建议和微信聊天界面风格同时开启
 
@@ -512,5 +512,19 @@ choice I2S_TYPE_TAIJIPI_S3
     config TAIJIPAI_I2S_TYPE_PDM
         bool "I2S Type PDM"
 endchoice
+
+config AGENT_BRIDGE_URL
+    string "Agent Bridge URL"
+    default "http://192.168.1.100:7863"
+    help
+        电脑 Agent 桥地址（语音遥控电脑 Claude 用）。
+        电脑上运行 agent_bridge.py 后，填电脑的局域网 IP，如 http://192.168.1.100:7863
+
+config AGENT_BRIDGE_TOKEN
+    string "Agent Bridge Token"
+    default ""
+    help
+        电脑 Agent 桥的访问 token（电脑 agent_token.txt 文件里的值）。
+        留空则 agent.* 工具返回"未配置"提示
 
 endmenu

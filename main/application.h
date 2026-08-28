@@ -80,6 +80,8 @@ private:
     bool has_server_time_ = false;
     bool aborted_ = false;
     int clock_ticks_ = 0;
+    int stop_switch_pending_ = 0;   // 正常播完（is_aborted=false）延迟切 listening 的剩余秒数
+    int64_t last_wake_word_detect_time_ = 0;  // 唤醒词检测冷却时间戳（ms）
     TaskHandle_t check_new_version_task_handle_ = nullptr;
 
     void MainEventLoop();

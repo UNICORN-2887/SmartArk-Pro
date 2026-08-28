@@ -8,6 +8,7 @@
 #include "font_awesome_symbols.h"
 #include "assets/lang_config.h"
 #include "mcp_server.h"
+#include "agent_tools.h"
 #include "audio/tts_engine.h"
 
 #include <cstring>
@@ -382,6 +383,7 @@ void Application::Start() {
 
     // Add MCP common tools before initializing the protocol
     McpServer::GetInstance().AddCommonTools();
+    AddAgentTools(McpServer::GetInstance());
 
     if (ota.HasMqttConfig()) {
         protocol_ = std::make_unique<MqttProtocol>();
@@ -414,25 +416,16 @@ void Application::Start() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
             SetDeviceState(kDeviceStateIdle);
-            // 如果新通道已打开（agent 切换中），跳过 cover 切换
+            // 如果新通道已打开（agent 切换中），跳过待机处理
             if (protocol_ && protocol_->IsAudioChannelOpened()) return;
-            // 回到展示模式（当前智能体的 cover）
-            extern bool cover_display_start(const char *agent_sd_path);
-            if (protocol_ && !protocol_->agent_id().empty()) {
-                // 根据 agent_id 确定路径
-                if (protocol_->agent_id() == "0a20483553fe4ff784a016d0fafabfff")
-                    cover_display_start("/sdcard/main/operator/MEDIC/6STAR/Kaltsit");
-                else if (protocol_->agent_id() == "5838c85f30ab4b33a4341bf8b0736e26")
-                    cover_display_start("/sdcard/main/operator/CASTER/5STAR/Amiya");
-                else if (protocol_->agent_id() == "ef84ee6764ce44e78ec131aa9d5ebb1d")
-                    cover_display_start("/sdcard/main/operator/SUPPORTER/6STAR/Civilight_Eterna");
-                else if (protocol_->agent_id() == "27da698865dc4922a0654941626ae1f4")
-                    cover_display_start("/sdcard/main/operator/MEDIC/6STAR/Mon3tr");
-                else
-                    cover_display_start("/sdcard/main/operator/MEDIC/6STAR/Kaltsit");
-            } else {
-                cover_display_start("/sdcard/main/operator/MEDIC/6STAR/Kaltsit");
-            }
+            /* 通道关闭 = 对话空闲超时：所有场景都留在原地回待机表情，不切 cover 立绘——
+               对话模式留对话模式（MJPEG neutral 待机）、PPD/Live2D 交互留引擎待机。
+               cover 立绘仅通过用户手动点模式切换按钮进入。
+               例外：横屏 Q 版互动中唤醒的对话 → 通道关闭自动返回横屏立牌 */
+            extern void pdq_chat_idle_check(void);
+            pdq_chat_idle_check();
+            extern void expression_switch_emotion(const char *emotion);
+            expression_switch_emotion("neutral");
         });
     });
     protocol_->OnIncomingJson([this, display](const cJSON* root) {
@@ -443,19 +436,29 @@ void Application::Start() {
             if (strcmp(state->valuestring, "start") == 0) {
                 Schedule([this]() {
                     aborted_ = false;
+                    stop_switch_pending_ = 0;  // 新 TTS 开始：取消延迟切换
                     if (device_state_ == kDeviceStateIdle || device_state_ == kDeviceStateListening) {
                         SetDeviceState(kDeviceStateSpeaking);
                     }
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
-                Schedule([this]() {
-                    if (device_state_ == kDeviceStateSpeaking) {
-                        if (listening_mode_ == kListeningModeManualStop) {
-                            SetDeviceState(kDeviceStateIdle);
-                        } else {
-                            SetDeviceState(kDeviceStateListening);
-                        }
+                auto aborted_obj = cJSON_GetObjectItem(root, "is_aborted");
+                bool is_aborted = cJSON_IsBool(aborted_obj) && aborted_obj->valueint;
+                Schedule([this, is_aborted]() {
+                    if (device_state_ != kDeviceStateSpeaking) return;
+                    if (is_aborted) {
+                        // 打断：立即清播放缓冲（用户新输入打断）
+                        audio_service_.ResetDecoder();
+                        SetDeviceState(listening_mode_ == kListeningModeManualStop
+                                           ? kDeviceStateIdle
+                                           : kDeviceStateListening);
+                        return;
                     }
+                    // 正常播完：延迟 3 秒切换。立即切换会走
+                    // EnableVoiceProcessing → ResetDecoder 清掉积压未播音频
+                    // （实测"念到一半没声音"）；服务器流控积压上限 2.4 秒，
+                    // 3 秒后必然播完。期间新唤醒/新 TTS 会重置本计数。
+                    stop_switch_pending_ = 3;
                 });
             } else if (strcmp(state->valuestring, "sentence_start") == 0) {
                 auto text = cJSON_GetObjectItem(root, "text");
@@ -553,8 +556,10 @@ void Application::Start() {
     extern bool cover_display_start(const char *agent_sd_path);
     extern void chat_overlay_init(const lv_font_t *font);
     extern void chat_overlay_set_font(const lv_font_t *font);
+    extern void settings_ui_init(const lv_font_t *font);
     if (image_display_init()) {
         chat_overlay_init(display->GetTextFont());  // 直接传中文字体
+        settings_ui_init(display->GetTextFont());
         // 默认启动凯尔希 cover（展示模式）
         cover_display_start("/sdcard/main/operator/MEDIC/6STAR/Kaltsit");
     }
@@ -565,6 +570,17 @@ void Application::Start() {
 
 void Application::OnClockTimer() {
     clock_ticks_++;
+
+    // 正常播完（is_aborted=false）延迟切换：3 秒后若仍在 speaking（积压音频
+    // 已播完）切 listening。新 TTS 开始/打断会重置本计数。
+    if (stop_switch_pending_ > 0) {
+        stop_switch_pending_--;
+        if (stop_switch_pending_ == 0 && device_state_ == kDeviceStateSpeaking) {
+            SetDeviceState(listening_mode_ == kListeningModeManualStop
+                               ? kDeviceStateIdle
+                               : kDeviceStateListening);
+        }
+    }
 
     auto display = Board::GetInstance().GetDisplay();
     display->UpdateStatusBar();
@@ -638,6 +654,16 @@ void Application::OnWakeWordDetected() {
     if (!protocol_) {
         return;
     }
+
+    // 唤醒词检测冷却：触发后 5 秒内的重复检测视为同一事件。
+    // 唤醒词音频残留/回响会被 AFE 二次识别（实测：speaking 状态自我打断，
+    // 唤醒后"直接退出"），冷却期内忽略。
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    if (now_ms - last_wake_word_detect_time_ < 5000) {
+        ESP_LOGW(TAG, "Wake word re-detected within cooldown, ignored");
+        return;
+    }
+    last_wake_word_detect_time_ = now_ms;
 
     if (device_state_ == kDeviceStateIdle) {
         auto wake_word = audio_service_.GetLastWakeWord();

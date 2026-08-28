@@ -9,9 +9,11 @@
 #include "freertos/task.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "driver/ppa.h"
 #include "driver/jpeg_decode.h"
 #include "MjpegPlayer.h"
+#include "PPACompositor.h"
 
 #define TAG "PPACompositor"
 
@@ -25,12 +27,22 @@ static ppa_client_handle_t s_ppa_client = NULL;
 static uint8_t *s_bg_buf = NULL;       // Background (static)
 static uint8_t *s_fg_buf = NULL;       // Foreground (JPEG decoded, RGB565)
 static uint8_t *s_alpha_buf = NULL;    // Foreground (ARGB8888 for alpha blend)
+static bool s_alpha_oom = false;       // 分配失败置位：不再每帧重试，释放缓存时复位
 static uint8_t *s_comp_buf = NULL;     // Composited output (RGB565)
+static int s_frame_idx = 0;            // 双缓冲槽位（0/1 翻转）
+static uint8_t *s_tx_buf = NULL;       // JPEG 输入缓冲（一次分配复用，防 PSRAM 碎片化）
+static size_t s_tx_cap = 0;
+
+// ── 加载进度回调（加载动画用）──
+static PPALoadProgressCb s_ppa_prog_cb = NULL;
+void ppa_set_load_progress_cb(PPALoadProgressCb cb) { s_ppa_prog_cb = cb; }
+static inline void ppa_prog(const char* s, int p) { if (s_ppa_prog_cb) s_ppa_prog_cb(s, p); }
 
 // JPEG decoder config
 static jpeg_decoder_handle_t s_jpg_handle = NULL;
 static uint32_t s_last_decoded_size = 0;
 static jpeg_decode_engine_cfg_t s_jpg_eng_cfg = { .timeout_ms = 40 };
+static int s_decode_cool_down = 0;  // 解码失败后的提交冷却帧数（防 DMA2D 悬挂累积）
 static jpeg_decode_cfg_t s_jpg_cfg_rgb = {
     .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
     .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
@@ -39,6 +51,7 @@ static jpeg_decode_cfg_t s_jpg_cfg_rgb = {
 // ─── Background ───────────────────────────────────────────────
 
 bool ppa_load_background(const char *path) {
+    ppa_prog("加载背景", -1);  // 单文件读+解码，无内循环，不可量化
     // Read JPEG file
     FILE *fp = fopen(path, "rb");
     if (!fp) { ESP_LOGE(TAG, "Cannot open %s", path); return false; }
@@ -46,7 +59,13 @@ bool ppa_load_background(const char *path) {
     size_t size = ftell(fp);
     fseek(fp, 0, SEEK_SET);
     uint8_t *jpg_data = (uint8_t*)heap_caps_malloc(size, MALLOC_CAP_SPIRAM);
-    fread(jpg_data, 1, size, fp);
+    if (!jpg_data) {
+        fclose(fp);
+        ESP_LOGE(TAG, "bg jpg alloc failed (%u B, PSRAM free %u KB)", (unsigned)size,
+                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+        return false;
+    }
+    if (fread(jpg_data, 1, size, fp) != size) { fclose(fp); free(jpg_data); ESP_LOGE(TAG, "bg jpg short read"); return false; }
     fclose(fp);
 
     // Decode background to RGB565
@@ -56,20 +75,45 @@ bool ppa_load_background(const char *path) {
     size_t out_size;
     size_t tx_size;
     uint8_t *tx_buf = (uint8_t*)jpeg_alloc_decoder_mem(size, &tx_cfg, &tx_size);
+    if (!tx_buf) {
+        free(jpg_data);
+        ESP_LOGE(TAG, "bg tx_buf alloc failed (PSRAM free %u KB)",
+                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+        return false;
+    }
     memcpy(tx_buf, jpg_data, size);
     free(jpg_data);
 
+    // 先释放旧背景（防重复加载泄漏）；失败时置 NULL 保持 has_background 语义一致
+    if (s_bg_buf) { free(s_bg_buf); s_bg_buf = NULL; }
     s_bg_buf = (uint8_t*)jpeg_alloc_decoder_mem(FRAME_SIZE_RGB565, &rx_cfg, &out_size);
+    if (!s_bg_buf) {
+        free(tx_buf);
+        ESP_LOGE(TAG, "bg rx_buf alloc failed (PSRAM free %u KB)",
+                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+        return false;
+    }
 
-    jpeg_decoder_handle_t tmp_handle;
-    jpeg_new_decoder_engine(&s_jpg_eng_cfg, &tmp_handle);
+    jpeg_decoder_handle_t tmp_handle = NULL;
+    if (jpeg_new_decoder_engine(&s_jpg_eng_cfg, &tmp_handle) != ESP_OK) {
+        free(tx_buf); free(s_bg_buf); s_bg_buf = NULL;
+        ESP_LOGE(TAG, "bg engine create failed (PSRAM free %u KB)",
+                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+        return false;
+    }
 
     uint32_t decoded_size;
-    jpeg_decoder_process(tmp_handle, &s_jpg_cfg_rgb, tx_buf, tx_size, s_bg_buf, out_size, &decoded_size);
+    esp_err_t ret = jpeg_decoder_process(tmp_handle, &s_jpg_cfg_rgb, tx_buf, tx_size, s_bg_buf, out_size, &decoded_size);
     jpeg_del_decoder_engine(tmp_handle);
     free(tx_buf);
+    if (ret != ESP_OK) {
+        free(s_bg_buf); s_bg_buf = NULL;
+        ESP_LOGE(TAG, "bg decode failed: %s", esp_err_to_name(ret));
+        return false;
+    }
 
     ESP_LOGI(TAG, "Background loaded: %s (%ux%u)", path, DISPLAY_W, DISPLAY_H);
+    ppa_prog("加载背景", 100);
     return true;
 }
 
@@ -78,6 +122,7 @@ void ppa_unload_background(void) {
     ESP_LOGI(TAG, "Background unloaded");
 }
 bool ppa_has_background(void) { return s_bg_buf != NULL; }
+const uint8_t* ppa_get_background_buffer(void) { return s_bg_buf; }
 
 int ppa_get_last_decoded_height(void) {
     // RGB565: height = total_bytes / (width * 2)
@@ -87,18 +132,24 @@ int ppa_get_last_decoded_height(void) {
 
 // ─── PPA Client ───────────────────────────────────────────────
 
+// 双缓冲每份 stride：全屏 768KB + 64KB 冗余（cover 直通裁切跳过顶部 ≤64 行时
+// canvas 指针后移仍在本份内，不越界到下一份）
+#define BUF_STRIDE (FRAME_SIZE_RGB565 + 65536)
+
 bool ppa_init(void) {
-    // Allocate buffers in PSRAM (cache-line aligned)
-    s_fg_buf = (uint8_t*)heap_caps_calloc(1, FRAME_SIZE_RGB565 + 64, MALLOC_CAP_SPIRAM);
-    s_alpha_buf = (uint8_t*)heap_caps_calloc(1, FRAME_SIZE_ARGB + 64, MALLOC_CAP_SPIRAM);
-    s_comp_buf = (uint8_t*)heap_caps_calloc(1, FRAME_SIZE_RGB565 + 64, MALLOC_CAP_SPIRAM);
+    // 双缓冲：fg/comp 各两份交替使用——canvas 显示上一帧 buffer 的同时，
+    // 本帧解码/blend 写另一份，消除单缓冲读写撕裂（cover 黑屏闪烁根因）
+    // 注意：用 heap_caps_aligned_alloc 保证 64B 对齐（手动 +63&~63 后 free 会
+    // 指向非块首 → TLSF block_next 断言崩溃）
+    s_fg_buf = (uint8_t*)heap_caps_aligned_alloc(64, 2 * BUF_STRIDE, MALLOC_CAP_SPIRAM);
+    s_alpha_buf = (uint8_t*)heap_caps_aligned_alloc(64, FRAME_SIZE_ARGB, MALLOC_CAP_SPIRAM);
+    s_comp_buf = (uint8_t*)heap_caps_aligned_alloc(64, 2 * BUF_STRIDE, MALLOC_CAP_SPIRAM);
     if (!s_fg_buf || !s_alpha_buf || !s_comp_buf) {
         ESP_LOGE(TAG, "Failed to allocate PSRAM buffers");
         return false;
     }
-    s_fg_buf = (uint8_t*)(((uintptr_t)s_fg_buf + 63) & ~63);
-    s_alpha_buf = (uint8_t*)(((uintptr_t)s_alpha_buf + 63) & ~63);
-    s_comp_buf = (uint8_t*)(((uintptr_t)s_comp_buf + 63) & ~63);
+    memset(s_fg_buf, 0, 2 * BUF_STRIDE);
+    memset(s_comp_buf, 0, 2 * BUF_STRIDE);
 
     // Register PPA BLEND client
     ppa_client_config_t client_cfg = {
@@ -136,6 +187,7 @@ static size_t  s_mask_cache_size[MAX_CACHE];
 static bool    s_use_alpha = false;
 
 // 双缓冲：后台异步预加载下一个表情
+static volatile bool s_preload_cancel = false;  // 取消正在跑的预加载（防释放竞态）
 static uint8_t *s_pending_cache[MAX_CACHE];
 static size_t  s_pending_sizes[MAX_CACHE];
 static uint8_t *s_pending_mask[MAX_CACHE];
@@ -195,7 +247,7 @@ void ppa_preload_frames(const char *paths[], int count) {
 int ppa_get_cache_count(void) { return s_cache_count; }
 
 // 前向声明（逐帧fread，支持大文件）
-static int load_mjpeg_into(const char *path, uint8_t *cache[], size_t sizes[], int max_count);
+static int load_mjpeg_into(const char *path, uint8_t *cache[], size_t sizes[], int max_count, const char *stage);
 static bool load_mask_file(const char *path, uint8_t *mask_cache[], size_t mask_sizes[], int expected_fc);
 
 int ppa_preload_mjpeg(const char *path) {
@@ -211,7 +263,7 @@ int ppa_preload_mjpeg(const char *path) {
     s_use_alpha = false;
 
     // 复用逐帧加载逻辑（无整文件缓冲，支持大文件）
-    s_cache_count = load_mjpeg_into(path, s_jpg_cache, s_jpg_cache_size, MAX_CACHE);
+    s_cache_count = load_mjpeg_into(path, s_jpg_cache, s_jpg_cache_size, MAX_CACHE, "表情");
     if (s_cache_count == 0) return 0;
 
     // 尝试加载配套 .mask 文件
@@ -228,7 +280,8 @@ int ppa_preload_mjpeg(const char *path) {
 
 // ── 内部：加载MJPEG到指定缓冲区（顺序流式读取，零fseek）──
 static int load_mjpeg_into(const char *path,
-                           uint8_t *cache[], size_t sizes[], int max_count) {
+                           uint8_t *cache[], size_t sizes[], int max_count,
+                           const char *stage) {
     FILE *fp = fopen(path, "rb");
     if (!fp) { ESP_LOGE(TAG, "Cannot open %s", path); return 0; }
 
@@ -243,6 +296,7 @@ static int load_mjpeg_into(const char *path,
     for (int i = 0; i < (int)frame_count; i++) {
         if (fread(&offsets[i], 4, 1, fp) != 1) { fclose(fp); return 0; }
     }
+    ppa_prog(stage, 0);
 
     // Step 2: 跳到第一帧位置，帧在文件中连续存储 — 顺序读取，零 seek！
     fseek(fp, offsets[0], SEEK_SET);
@@ -257,6 +311,7 @@ static int load_mjpeg_into(const char *path,
     size_t chunk_pos = 0, chunk_filled = 0;
 
     for (int i = 0; i < (int)frame_count && loaded < max_count; i++) {
+        if (s_preload_cancel) break;  // 预加载被取消（释放方等待退出，防 free 竞态）
         size_t start = offsets[i];
         size_t end = (i < (int)frame_count - 1) ? offsets[i + 1] : (size_t)-1;
         if (end == (size_t)-1) { fseek(fp, 0, SEEK_END); end = ftell(fp); }
@@ -289,18 +344,24 @@ static int load_mjpeg_into(const char *path,
         sizes[loaded] = sz;
         loaded++;
         total_kb += (uint32_t)(sz / 1024);
+        ppa_prog(stage, (int)(loaded * 100 / frame_count));  // 帧级百分比
     }
     free(chunk);
     fclose(fp);
 
     ESP_LOGI(TAG, "%s: %d/%lu frames, %u KB PSRAM (streaming, 0 seek)",
              path, loaded, (unsigned long)frame_count, total_kb);
+    ppa_prog(stage, 100);
     return loaded;
 }
 
 // ── 异步预加载到后备缓冲区 ──
 static void preload_task(void *arg) {
     const char *path = (const char*)arg;
+    // 注意：s_preload_cancel 在这里绝不能清零！
+    // 任务创建与首次运行之间存在窗口：释放方可能已设 cancel 并等待退出，
+    // 任务一跑就清零会把取消信号吃掉 → 释放方超时后 free 槽，任务继续写入 → PSRAM 幽灵占用
+    // 清零点已移到 ppa_preload_mjpeg_async（任务创建之前）
     // 先清空后备缓冲区
     for (int i = 0; i < s_pending_count; i++) {
         if (s_pending_cache[i]) free(s_pending_cache[i]);
@@ -310,8 +371,8 @@ static void preload_task(void *arg) {
     s_pending_ready = false;
     s_pending_has_alpha = false;
 
-    int count = load_mjpeg_into(path, s_pending_cache, s_pending_sizes, MAX_CACHE);
-    if (count > 0) {
+    int count = load_mjpeg_into(path, s_pending_cache, s_pending_sizes, MAX_CACHE, "表情");
+    if (count > 0 && !s_preload_cancel) {
         // 尝试加载配套 .mask
         char mask_path[320];
         snprintf(mask_path, sizeof(mask_path), "%s", path);
@@ -324,6 +385,17 @@ static void preload_task(void *arg) {
         s_pending_ready = true;
         ESP_LOGI(TAG, "Pending emotion ready: %d frames (%s)", count, path);
     }
+    if (s_preload_cancel) {
+        // 取消：清掉本任务已加载的部分帧（释放方随后也会清）
+        for (int i = 0; i < count; i++) {
+            if (s_pending_cache[i]) { free(s_pending_cache[i]); s_pending_cache[i] = NULL; }
+        }
+        s_pending_count = 0;
+        s_pending_ready = false;
+        ESP_LOGI(TAG, "Preload cancelled (%d frames discarded)", count);
+    }
+    s_preload_cancel = false;  // 任务退出时复位——否则残留 true 会让后续
+                               // cover/表情同步加载首帧即 break（0 帧 → 立绘切换卡死）
     s_preload_task = NULL;
     vTaskDelete(NULL);
 }
@@ -336,6 +408,7 @@ void ppa_preload_mjpeg_async(const char *path) {
     // 复制路径字符串（任务可能在函数返回后才用）
     static char s_path_buf[256];
     strncpy(s_path_buf, path, sizeof(s_path_buf) - 1);
+    s_preload_cancel = false;  // 创建前清零：任务首次运行时不会吃掉释放方设的 cancel
     xTaskCreate(preload_task, "mjpeg_preload", 8192, (void*)s_path_buf, 2, &s_preload_task);
 }
 
@@ -381,7 +454,7 @@ int ppa_preload_cover(const char *path) {
     s_cover_count = 0;
     s_cover_location = 0;
 
-    s_cover_count = load_mjpeg_into(path, s_cover_cache, s_cover_sizes, MAX_CACHE);
+    s_cover_count = load_mjpeg_into(path, s_cover_cache, s_cover_sizes, MAX_CACHE, "封面");
     if (s_cover_count == 0) return 0;
 
     char mask_path[320];
@@ -520,6 +593,32 @@ int ppa_swap_to_cover(void) {
     return s_cache_count;
 }
 
+// 把 active 帧整体搬进 cover 槽（槽必须为空），active 清空。
+// 场景：profile 打开时 release_expendable 释放了 cover 槽，退出 profile 后
+// cover 帧仍在 active 播放；此时切 expression，若没有槽可用，
+// mode_switch_task 的"复用"逻辑会误把 cover 帧当表情复用 → 搬走后 active=0 → 强制加载表情
+int ppa_save_active_to_cover(const char *agent_path) {
+    if (s_cover_location != 0) return 0;  // 槽非空：调用方应走 swap_to_cover
+    for (int i = 0; i < s_cache_count; i++) {
+        s_cover_cache[i] = s_jpg_cache[i];
+        s_jpg_cache[i] = NULL;
+        s_cover_sizes[i] = s_jpg_cache_size[i];
+        s_cover_mask[i] = s_mask_cache[i];
+        s_mask_cache[i] = NULL;
+        s_cover_mask_sizes[i] = s_mask_cache_size[i];
+    }
+    s_cover_count = s_cache_count;
+    s_cache_count = 0;
+    s_use_alpha = false;  // active 已清空，alpha 标志一并复位（composite 靠 mask 数组判空兜底）
+    s_cover_location = 1;  // cover 在槽里
+    if (agent_path && agent_path[0]) {
+        strncpy(s_cover_agent, agent_path, sizeof(s_cover_agent) - 1);
+        s_cover_agent[sizeof(s_cover_agent) - 1] = '\0';
+    }
+    ESP_LOGI(TAG, "Active→cover slot saved: %d frames (%s)", s_cover_count, s_cover_agent);
+    return s_cover_count;
+}
+
 // 释放 cover 槽中的旧数据（swap 后 slot 被污染，清掉避免下次 save-cover 误复用）
 void ppa_free_cover_slot(void) {
     for (int i = 0; i < s_cover_count; i++) {
@@ -554,7 +653,7 @@ int ppa_preload_profile(const char *path) {
     for (int i = 0; i < s_profile_count; i++) {
         if (s_profile_cache[i]) { free(s_profile_cache[i]); s_profile_cache[i] = NULL; }
     }
-    s_profile_count = load_mjpeg_into(path, s_profile_cache, s_profile_sizes, MAX_CACHE);
+    s_profile_count = load_mjpeg_into(path, s_profile_cache, s_profile_sizes, MAX_CACHE, "资料");
     s_profile_loaded = (s_profile_count > 0);
     if (s_profile_loaded) ESP_LOGI(TAG, "Profile cached: %d frames (%s)", s_profile_count, path);
     return s_profile_count;
@@ -568,6 +667,71 @@ void ppa_free_profile_slot(void) {
     }
     s_profile_count = 0;
     s_profile_loaded = false;
+}
+
+// 等待正在跑的预加载任务退出（取消 + 轮询，防与 pending 释放竞态 → TLSF 破坏）
+static void preload_wait_cancel(void) {
+    if (s_preload_task) {
+        s_preload_cancel = true;
+        // 最多 10s：任务每帧检查 cancel（单帧 SD 读 ~30ms），正常应在百 ms 内退出
+        for (int i = 0; i < 1000 && s_preload_task; i++) vTaskDelay(pdMS_TO_TICKS(10));
+        if (s_preload_task) {
+            ESP_LOGW(TAG, "preload task still running after 10s wait! (SD stuck?)");
+        } else {
+            s_preload_cancel = false;  // 双保险：任务退出后复位（残留 true 会毒死后续同步加载）
+        }
+    }
+}
+
+// 释放可牺牲缓存但保留 active 帧 + mask（profile 打开/退出可秒切）
+void ppa_release_expendable_caches(void) {
+    preload_wait_cancel();
+    // pending 槽
+    for (int i = 0; i < s_pending_count; i++) {
+        if (s_pending_cache[i]) { free(s_pending_cache[i]); s_pending_cache[i] = NULL; }
+    }
+    s_pending_count = 0;
+    s_pending_ready = false;      // 防 swap_emotion 把已释放的 NULL 数组换进 active
+    s_pending_has_alpha = false;
+    // cover 槽
+    ppa_free_cover_slot();
+    s_cover_location = 0;
+    // profile 槽
+    ppa_free_profile_slot();
+    // streaming 模式文件
+    mjpeg_close();
+    s_use_mjpeg = false;
+    // alpha 混合缓冲（1.7MB，惰性重建：expression 模式 mask 合成时按需分配）
+    if (s_alpha_buf) { free(s_alpha_buf); s_alpha_buf = NULL; }
+    s_alpha_oom = false;
+    ESP_LOGI(TAG, "Expendable caches released (active frames kept)");
+}
+
+void ppa_release_playback_caches(void) {
+    preload_wait_cancel();
+    // active 槽（含 mask）
+    for (int i = 0; i < s_cache_count; i++) {
+        if (s_jpg_cache[i]) { free(s_jpg_cache[i]); s_jpg_cache[i] = NULL; }
+        if (s_mask_cache[i]) { free(s_mask_cache[i]); s_mask_cache[i] = NULL; }
+    }
+    s_cache_count = 0;
+    s_use_alpha = false;
+    // cover 槽
+    ppa_free_cover_slot();
+    s_cover_location = 0;
+    // profile 槽
+    ppa_free_profile_slot();
+    // pending 槽
+    for (int i = 0; i < s_pending_count; i++) {
+        if (s_pending_cache[i]) { free(s_pending_cache[i]); s_pending_cache[i] = NULL; }
+    }
+    s_pending_count = 0;
+    s_pending_ready = false;
+    s_pending_has_alpha = false;
+    // streaming 模式文件（固定帧缓冲保留，后续重新 open 复用）
+    mjpeg_close();
+    s_use_mjpeg = false;
+    ESP_LOGI(TAG, "Playback caches released (PSRAM reclaimed)");
 }
 
 bool ppa_open_mjpeg(const char *path, int *out_frame_count) {
@@ -651,14 +815,34 @@ static void apply_rle_mask(uint8_t *mask_data, size_t mask_size, uint16_t *fg_rg
 uint8_t* ppa_composite_frame(int frame_index) {
     if (!s_fg_buf || !s_comp_buf) return NULL;
 
+    // 解码失败冷却期：跳过提交，等 PPA/DMA2D 硬件复位（见 decode 失败路径注释）
+    if (s_decode_cool_down > 0) {
+        s_decode_cool_down--;
+        return NULL;
+    }
+
+    // 每 30 帧做一次堆完整性检查（定位内存损坏源，损坏时打印告警）
+    static int s_integrity_ticks = 0;
+    if (++s_integrity_ticks >= 30) {
+        s_integrity_ticks = 0;
+        if (!heap_caps_check_integrity_all(false)) {
+            ESP_LOGE(TAG, "HEAP CORRUPTED! (detected at frame %d)", frame_index);
+        }
+    }
+
+    // 双缓冲：本帧写 idx 槽位，canvas 仍显示上一帧的另一个槽位
+    s_frame_idx ^= 1;
+    uint8_t *fg = s_fg_buf + s_frame_idx * BUF_STRIDE;
+    uint8_t *comp = s_comp_buf + s_frame_idx * BUF_STRIDE;
+
     // ── Step 1: Get JPEG data ──
     size_t jpg_size;
     uint8_t *jpg_data = NULL;
     bool need_free = false;
 
     if (s_use_mjpeg) {
+        // 固定缓冲（MjpegPlayer 内部复用），不再 free
         if (!mjpeg_get_frame(frame_index, &jpg_data, &jpg_size)) return NULL;
-        need_free = true;
     } else if (s_use_profile) {
         if (frame_index < 0 || frame_index >= s_profile_count || !s_profile_cache[frame_index]) return NULL;
         jpg_size = s_profile_sizes[frame_index];
@@ -671,7 +855,21 @@ uint8_t* ppa_composite_frame(int frame_index) {
 
     jpeg_decode_memory_alloc_cfg_t tx_cfg = { .buffer_direction = JPEG_DEC_ALLOC_INPUT_BUFFER };
     size_t tx_size;
-    uint8_t *tx_buf = (uint8_t*)jpeg_alloc_decoder_mem(jpg_size, &tx_cfg, &tx_size);
+    // 输入缓冲一次分配后复用（每帧 alloc/free 会造成 PSRAM 碎片化，
+    // 索引页缩略图加载后大块分配失败返回 NULL → memcpy(NULL) 崩溃）
+    if (!s_tx_buf || s_tx_cap < jpg_size) {
+        if (s_tx_buf) { free(s_tx_buf); s_tx_buf = NULL; s_tx_cap = 0; }
+        s_tx_buf = (uint8_t*)jpeg_alloc_decoder_mem(jpg_size, &tx_cfg, &tx_size);
+        if (!s_tx_buf) {
+            ESP_LOGW(TAG, "tx_buf alloc failed (%u bytes), drop frame", (unsigned)jpg_size);
+            if (need_free) free(jpg_data);
+            return NULL;  // 丢帧不崩，下一帧重试
+        }
+        s_tx_cap = jpg_size;
+    } else {
+        tx_size = s_tx_cap;
+    }
+    uint8_t *tx_buf = s_tx_buf;
     memcpy(tx_buf, jpg_data, jpg_size);
     if (need_free) free(jpg_data);
 
@@ -680,26 +878,56 @@ uint8_t* ppa_composite_frame(int frame_index) {
     }
 
     uint32_t decoded_size;
+    // 解码前清零：帧小于全屏（480×800）时，未覆盖区域防上一帧残留（白边）
+    memset(fg, 0, FRAME_SIZE_RGB565);
     esp_err_t ret = jpeg_decoder_process(s_jpg_handle, &s_jpg_cfg_rgb,
                                           tx_buf, tx_size,
-                                          s_fg_buf, FRAME_SIZE_RGB565,
+                                          fg, FRAME_SIZE_RGB565,
                                           &decoded_size);
-    free(tx_buf);
+    // tx_buf 为复用缓冲，不释放
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "JPEG decode failed: %s", esp_err_to_name(ret));
+        // 数据流损坏会让 PPA 硬件通道悬挂（实测表情坏帧连败后 DMA2D assert：
+        // _dma2d_default_rx_isr FSM not idle）。对策：冷却 30 帧（约 1-2 秒）
+        // 期间不提交任何 PPA 任务，等硬件自然复位（PPA 驱动内部有超时恢复）。
+        // 注意：不要 jpeg_del_decoder_engine 重建——重建时 dma2d_connect 在
+        // 硬件未完全释放时会死等复位（实测 Interrupt wdt timeout panic）。
+        s_decode_cool_down = 30;
         return NULL;
     }
     s_last_decoded_size = decoded_size;
 
-    // ── Step 2: Apply alpha mask → ARGB8888 ──
-    uint8_t *fg_for_blend = s_fg_buf;
+    // ── Step 2: Apply alpha mask → ARGB8888（alpha 缓冲惰性分配：cover 播放期不占用）──
+    uint8_t *fg_for_blend = fg;
     ppa_blend_color_mode_t fg_cm = PPA_BLEND_COLOR_MODE_RGB565;
 
     if (!s_use_profile && s_use_alpha && s_mask_cache[frame_index]) {
-        apply_rle_mask(s_mask_cache[frame_index], s_mask_cache_size[frame_index],
-                       (uint16_t*)s_fg_buf, DISPLAY_W * DISPLAY_H);
-        fg_for_blend = s_alpha_buf;
-        fg_cm = PPA_BLEND_COLOR_MODE_ARGB8888;
+        if (!s_alpha_buf && !s_alpha_oom) {
+            // 惰性分配（同样用 aligned_alloc，free 指针即块首）
+            s_alpha_buf = (uint8_t*)heap_caps_aligned_alloc(64, FRAME_SIZE_ARGB, MALLOC_CAP_SPIRAM);
+            if (!s_alpha_buf) {
+                // 第一次失败：释放 cover 槽（~3.5MB，播放期间闲置）再试一次。
+                // mask 混合正确性 > cover 秒切（切回 cover 时重新从 SD 加载即可）
+                ppa_free_cover_slot();
+                s_cover_location = 0;
+                s_alpha_buf = (uint8_t*)heap_caps_aligned_alloc(64, FRAME_SIZE_ARGB, MALLOC_CAP_SPIRAM);
+                if (s_alpha_buf) {
+                    ESP_LOGI(TAG, "alpha buf alloc retried after cover slot release (PSRAM free %u KB)",
+                             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+                }
+            }
+            if (!s_alpha_buf) {
+                s_alpha_oom = true;  // 不再每帧重试（日志刷屏+无效开销），释放缓存时复位
+                ESP_LOGW(TAG, "alpha buf alloc failed (mask blending degraded, PSRAM free %u KB)",
+                         (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+            }
+        }
+        if (s_alpha_buf) {
+            apply_rle_mask(s_mask_cache[frame_index], s_mask_cache_size[frame_index],
+                           (uint16_t*)fg, DISPLAY_W * DISPLAY_H);
+            fg_for_blend = s_alpha_buf;
+            fg_cm = PPA_BLEND_COLOR_MODE_ARGB8888;
+        }
     }
 
     // ── Step 3: PPA BLEND (or pass-through if no background) ──
@@ -719,7 +947,7 @@ uint8_t* ppa_composite_frame(int frame_index) {
     fg_cfg.blend_cm = fg_cm;
 
     ppa_out_pic_blk_config_t out_cfg = {};
-    out_cfg.buffer = s_comp_buf;
+    out_cfg.buffer = comp;
     out_cfg.buffer_size = FRAME_SIZE_RGB565;
     out_cfg.pic_w = DISPLAY_W; out_cfg.pic_h = DISPLAY_H;
     out_cfg.blend_cm = PPA_BLEND_COLOR_MODE_RGB565;
@@ -730,7 +958,9 @@ uint8_t* ppa_composite_frame(int frame_index) {
     blend_cfg.out = out_cfg;
     blend_cfg.mode = PPA_TRANS_MODE_BLOCKING;
 
-    if (s_use_alpha) {
+    // 注意：必须同时检查 s_alpha_buf——OOM 降级时 fg 仍是 RGB565（无 alpha 通道），
+    // 若仍走 alpha 配置（色键全关），红底不会被抠掉，整块矩形盖住背景（"背景变红"）
+    if (s_use_alpha && s_alpha_buf) {
         // Alpha 混合：ARGB8888 逐像素 A 通道
         blend_cfg.bg_alpha_update_mode = PPA_ALPHA_NO_CHANGE;
         blend_cfg.fg_alpha_update_mode = PPA_ALPHA_NO_CHANGE;
@@ -756,10 +986,90 @@ uint8_t* ppa_composite_frame(int frame_index) {
         return NULL;
     }
 
-    return s_comp_buf;
+    return comp;
+}
+
+// ─── 横屏立牌：PC 导出端已转好 90°，设备端 480×800 竖帧直通（无旋转）───
+// 帧数据来自独立预加载槽（PSRAM），播放零 SD 读（SD/SDIO 共享总线只有 ~620KB/s）
+#define STANDEE_SIZE_RGB565 (DISPLAY_W * DISPLAY_H * 2)   // 480×800×2
+
+static uint8_t *s_standee_cache[MAX_CACHE];
+static size_t  s_standee_sizes[MAX_CACHE];
+static int     s_standee_count = 0;
+static char    s_standee_agent[256] = {0};   // standee 所属文件路径（重进秒切判定）
+
+int ppa_preload_standee(const char *path) {
+    // 同路径已缓存：秒返回（退出/重进零加载）
+    if (s_standee_count > 0 && s_standee_agent[0] && strcmp(s_standee_agent, path) == 0)
+        return s_standee_count;
+    ppa_free_standee_slot();
+    s_standee_count = load_mjpeg_into(path, s_standee_cache, s_standee_sizes, MAX_CACHE, "横屏立牌");
+    if (s_standee_count > 0) {
+        strncpy(s_standee_agent, path, sizeof(s_standee_agent) - 1);
+        s_standee_agent[sizeof(s_standee_agent) - 1] = 0;
+    }
+    ESP_LOGI(TAG, "Standee cached: %d frames (%s)", s_standee_count, path);
+    return s_standee_count;
+}
+
+void ppa_free_standee_slot(void) {
+    for (int i = 0; i < s_standee_count; i++) {
+        if (s_standee_cache[i]) { free(s_standee_cache[i]); s_standee_cache[i] = NULL; }
+    }
+    s_standee_count = 0;
+    s_standee_agent[0] = 0;
+}
+
+uint8_t* ppa_composite_standee_frame(int frame_index) {
+    if (!s_comp_buf) return NULL;
+    if (frame_index < 0 || frame_index >= s_standee_count || !s_standee_cache[frame_index]) return NULL;
+
+    // 双槽交替：本帧写 idx 槽，canvas 仍显示上一帧的另一个槽（与主路径同机制）
+    s_frame_idx ^= 1;
+    uint8_t *comp = s_comp_buf + s_frame_idx * BUF_STRIDE;
+
+    // Step 1: 帧数据直接来自 standee 槽（零 SD 读）
+    size_t jpg_size = s_standee_sizes[frame_index];
+    uint8_t *jpg_data = s_standee_cache[frame_index];
+
+    // Step 2: 输入缓冲（复用主管线 s_tx_buf，互斥使用）
+    if (!s_tx_buf || s_tx_cap < jpg_size) {
+        if (s_tx_buf) { free(s_tx_buf); s_tx_buf = NULL; s_tx_cap = 0; }
+        jpeg_decode_memory_alloc_cfg_t tx_cfg = { .buffer_direction = JPEG_DEC_ALLOC_INPUT_BUFFER };
+        size_t tx_size;
+        s_tx_buf = (uint8_t*)jpeg_alloc_decoder_mem(jpg_size, &tx_cfg, &tx_size);
+        if (!s_tx_buf) { ESP_LOGW(TAG, "standee tx_buf alloc fail, drop frame"); return NULL; }
+        s_tx_cap = jpg_size;
+    }
+    memcpy(s_tx_buf, jpg_data, jpg_size);
+
+    // Step 3: JPEG 解码直通到 comp 槽（480×800 竖帧，与竖屏 cover 同构 → 18fps 同款性能）
+    if (!s_jpg_handle) jpeg_new_decoder_engine(&s_jpg_eng_cfg, &s_jpg_handle);
+    int64_t t_decode0 = esp_timer_get_time();
+    uint32_t decoded_size = 0;
+    esp_err_t ret = jpeg_decoder_process(s_jpg_handle, &s_jpg_cfg_rgb,
+                                         s_tx_buf, jpg_size,
+                                         comp, STANDEE_SIZE_RGB565,
+                                         &decoded_size);
+    int64_t t_decode1 = esp_timer_get_time();
+    if (ret != ESP_OK) { ESP_LOGE(TAG, "standee decode fail: %s", esp_err_to_name(ret)); return NULL; }
+    if (decoded_size != STANDEE_SIZE_RGB565) {
+        ESP_LOGW(TAG, "standee frame size %u != %u（期望 PC 端转好 90° 的 480x800 竖帧导出）",
+                 (unsigned)decoded_size, (unsigned)STANDEE_SIZE_RGB565);
+        return NULL;   // 尺寸不符丢帧
+    }
+    // 计时日志（每 30 帧一次；%d：nano printf 不支持 %lld，之前打印出 "ld" 字面量）
+    static int s_standee_tick = 0;
+    if (++s_standee_tick >= 30) {
+        s_standee_tick = 0;
+        ESP_LOGI(TAG, "standee timing: decode %d ms",
+                 (int)((t_decode1 - t_decode0) / 1000));
+    }
+    return comp;
 }
 
 void ppa_deinit(void) {
+    ppa_free_standee_slot();
     mjpeg_close();
     s_use_mjpeg = false;
     for (int i = 0; i < s_cache_count; i++) {
@@ -773,5 +1083,6 @@ void ppa_deinit(void) {
     if (s_bg_buf) { free(s_bg_buf); s_bg_buf = NULL; }
     if (s_fg_buf) { free(s_fg_buf); s_fg_buf = NULL; }
     if (s_alpha_buf) { free(s_alpha_buf); s_alpha_buf = NULL; }
+    s_alpha_oom = false;
     if (s_comp_buf) { free(s_comp_buf); s_comp_buf = NULL; }
 }
