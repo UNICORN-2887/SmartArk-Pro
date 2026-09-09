@@ -1,0 +1,7 @@
+# 依赖与可再生成的产物不入库
+tools/node_modules/
+tools/ppd_out/
+tools/spine_raw/
+tools/__pycache__/
+tools/*.png
+tools/compare_*.csv

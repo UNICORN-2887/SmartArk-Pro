@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spine 仿真器（原始资源直接渲染）</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    #stage { width: 800px; height: 800px; }
+    #view { width: 800px; height: 800px; }
+    #canvas { width: 800px; height: 800px; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <aside id="panel">
+      <h1>🦴 Spine 仿真器（原始资源）</h1>
+      <section>
+        <h2>角色</h2>
+        <select id="charSel"></select>
+      </section>
+      <section>
+        <h2>形态</h2>
+        <select id="formSel"></select>
+      </section>
+      <section>
+        <h2>动画</h2>
+        <select id="animSel"></select>
+        <div class="row">
+          <button id="btnPlay">▶ 播放</button>
+          <button id="btnStop">⏹ 停止</button>
+          <span class="hint" id="loopBadge"></span>
+        </div>
+        <div class="row">
+          <input type="range" id="seek" min="0" max="1000" value="0">
+        </div>
+        <div class="hint" id="timeLabel">0.00 / 0.00s</div>
+      </section>
+      <section>
+        <h2>画布</h2>
+        <div class="row">
+          <label>缩放
+            <select id="zoomSel">
+              <option value="0.5">50%</option>
+              <option value="0.7" selected>70%</option>
+              <option value="0.9">90%</option>
+              <option value="1">100%</option>
+            </select>
+          </label>
+          <label>角色缩放
+            <select id="fitSel">
+              <option value="1.0" selected>1.0x</option>
+              <option value="0.8">0.8x</option>
+              <option value="0.6">0.6x</option>
+              <option value="0.4">0.4x</option>
+            </select>
+          </label>
+        </div>
+        <div class="row">
+          <label>背景
+            <select id="bgSel">
+              <option value="white" selected>白</option>
+              <option value="checker">棋盘格</option>
+              <option value="black">黑</option>
+            </select>
+          </label>
+        </div>
+        <div class="row"><button id="btnExport">导出当前帧 PNG</button></div>
+      </section>
+      <section>
+        <h2>说明</h2>
+        <div class="hint">
+          用官方 spine-canvas 3.8.99 运行时直接渲染原始 .skel/.atlas/.png，
+          不经任何 PPD 转换。切换动画自动适配画面（fit），播放中相机固定。
+        </div>
+      </section>
+    </aside>
+    <main id="stageWrap">
+      <div id="stageHint">加载中…</div>
+      <div id="stage"><div id="view"><canvas id="canvas" width="800" height="800"></canvas></div></div>
+    </main>
+  </div>
+  <script src="spine-core.js"></script>
+  <script src="spine-canvas.js"></script>
+  <script src="data_spine.js"></script>
+  <script src="spine_sim.js"></script>
+</body>
+</html>
