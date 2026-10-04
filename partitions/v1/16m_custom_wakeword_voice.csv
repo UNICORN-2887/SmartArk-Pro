@@ -1,9 +1,10 @@
 # ESP-IDF Partition Table (custom wakeword + voice TTS)
+# 2026-09-07:model 4032K→3008K(实际模型约2903K),app 各+512K(4608K→5120K,缓解 2% 余量告警)
 # Name,   Type, SubType, Offset,  Size, Flags
 nvs,      data, nvs,     0x9000,    0x4000,
 otadata,  data, ota,     0xd000,    0x2000,
 phy_init, data, phy,     0xf000,    0x1000,
-model,    data, spiffs,  0x10000,   0x3f0000,
-ota_0,    app,  ota_0,   0x400000,  4608K,
-ota_1,    app,  ota_1,   0x880000,  4608K,
+model,    data, spiffs,  0x10000,   0x2f0000,
+ota_0,    app,  ota_0,   0x300000,  5120K,
+ota_1,    app,  ota_1,   0x800000,  5120K,
 voice,    data,  fat,     0xd00000,  3M,

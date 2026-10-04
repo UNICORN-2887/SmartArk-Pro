@@ -1,0 +1,783 @@
+{
+ "name": "阿米娅_背面",
+ "landscape": true,
+ "eye_bar": null,
+ "head_pivot": [
+  240,
+  400
+ ],
+ "mouth_pivot": [
+  240,
+  400
+ ],
+ "face_tilt": 5,
+ "no_cavity": true,
+ "mouth_compress": true,
+ "mouth_gain": 2.5,
+ "mouth_floor": 0.45,
+ "mouth_width_open": 0.3,
+ "mouth_open_gain": 0.55,
+ "hair_factor": 0.7,
+ "layers": [
+  {
+   "name": "B_L_Coat",
+   "x": 98,
+   "y": 400,
+   "w": 60,
+   "h": 90,
+   "cx": 129,
+   "cy": 438,
+   "bbox": [
+    98,
+    400,
+    157,
+    489
+   ],
+   "z": 0,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_L_Coat2",
+   "x": 107,
+   "y": 330,
+   "w": 59,
+   "h": 90,
+   "cx": 136,
+   "cy": 381,
+   "bbox": [
+    107,
+    330,
+    165,
+    419
+   ],
+   "z": 1,
+   "group": "body",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "B_R_Coat",
+   "x": 107,
+   "y": 321,
+   "w": 50,
+   "h": 43,
+   "cx": 130,
+   "cy": 343,
+   "bbox": [
+    107,
+    321,
+    156,
+    363
+   ],
+   "z": 2,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_R_Coat2",
+   "x": 111,
+   "y": 443,
+   "w": 50,
+   "h": 40,
+   "cx": 133,
+   "cy": 461,
+   "bbox": [
+    111,
+    443,
+    160,
+    482
+   ],
+   "z": 3,
+   "group": "body",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "B_L_Arm",
+   "x": 196,
+   "y": 415,
+   "w": 54,
+   "h": 46,
+   "cx": 223,
+   "cy": 438,
+   "bbox": [
+    196,
+    415,
+    249,
+    460
+   ],
+   "z": 4,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_L_Arm2",
+   "x": 203,
+   "y": 357,
+   "w": 54,
+   "h": 47,
+   "cx": 230,
+   "cy": 380,
+   "bbox": [
+    203,
+    357,
+    256,
+    403
+   ],
+   "z": 5,
+   "group": "body",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "B_L_Hand",
+   "x": 141,
+   "y": 459,
+   "w": 48,
+   "h": 54,
+   "cx": 164,
+   "cy": 484,
+   "bbox": [
+    141,
+    459,
+    188,
+    512
+   ],
+   "z": 6,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_L_Hand2",
+   "x": 149,
+   "y": 300,
+   "w": 47,
+   "h": 55,
+   "cx": 172,
+   "cy": 329,
+   "bbox": [
+    149,
+    300,
+    195,
+    354
+   ],
+   "z": 7,
+   "group": "body",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "B_L_Forearm",
+   "x": 167,
+   "y": 437,
+   "w": 53,
+   "h": 48,
+   "cx": 194,
+   "cy": 459,
+   "bbox": [
+    167,
+    437,
+    219,
+    484
+   ],
+   "z": 8,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_L_Forearm2",
+   "x": 174,
+   "y": 330,
+   "w": 53,
+   "h": 49,
+   "cx": 201,
+   "cy": 356,
+   "bbox": [
+    174,
+    330,
+    226,
+    378
+   ],
+   "z": 9,
+   "group": "body",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "B_R_Calf",
+   "x": 26,
+   "y": 302,
+   "w": 105,
+   "h": 69,
+   "cx": 76,
+   "cy": 337,
+   "bbox": [
+    26,
+    302,
+    130,
+    370
+   ],
+   "z": 10,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_R_Foot",
+   "x": 18,
+   "y": 289,
+   "w": 33,
+   "h": 60,
+   "cx": 33,
+   "cy": 320,
+   "bbox": [
+    18,
+    289,
+    50,
+    348
+   ],
+   "z": 11,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_R_Leg",
+   "x": 105,
+   "y": 344,
+   "w": 66,
+   "h": 55,
+   "cx": 138,
+   "cy": 371,
+   "bbox": [
+    105,
+    344,
+    170,
+    398
+   ],
+   "z": 12,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_L_Calf",
+   "x": 30,
+   "y": 407,
+   "w": 94,
+   "h": 88,
+   "cx": 76,
+   "cy": 451,
+   "bbox": [
+    30,
+    407,
+    123,
+    494
+   ],
+   "z": 13,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_L_Foot",
+   "x": 17,
+   "y": 441,
+   "w": 35,
+   "h": 60,
+   "cx": 32,
+   "cy": 472,
+   "bbox": [
+    17,
+    441,
+    51,
+    500
+   ],
+   "z": 14,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_L_Leg",
+   "x": 96,
+   "y": 407,
+   "w": 84,
+   "h": 33,
+   "cx": 138,
+   "cy": 423,
+   "bbox": [
+    96,
+    407,
+    179,
+    439
+   ],
+   "z": 15,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_Waist",
+   "x": 139,
+   "y": 359,
+   "w": 129,
+   "h": 92,
+   "cx": 192,
+   "cy": 404,
+   "bbox": [
+    139,
+    359,
+    267,
+    450
+   ],
+   "z": 16,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_R_Forearm_2_Back",
+   "x": 158,
+   "y": 337,
+   "w": 29,
+   "h": 29,
+   "cx": 172,
+   "cy": 351,
+   "bbox": [
+    158,
+    337,
+    186,
+    365
+   ],
+   "z": 17,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_R_Hair",
+   "x": 185,
+   "y": 303,
+   "w": 114,
+   "h": 58,
+   "cx": 248,
+   "cy": 331,
+   "bbox": [
+    185,
+    303,
+    298,
+    360
+   ],
+   "z": 18,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_L_Hair",
+   "x": 195,
+   "y": 382,
+   "w": 86,
+   "h": 69,
+   "cx": 242,
+   "cy": 412,
+   "bbox": [
+    195,
+    382,
+    280,
+    450
+   ],
+   "z": 19,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_L_Ear",
+   "x": 366,
+   "y": 431,
+   "w": 100,
+   "h": 77,
+   "cx": 410,
+   "cy": 477,
+   "bbox": [
+    366,
+    431,
+    465,
+    507
+   ],
+   "z": 20,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_Front_Hair_C",
+   "x": 272,
+   "y": 462,
+   "w": 95,
+   "h": 25,
+   "cx": 321,
+   "cy": 476,
+   "bbox": [
+    272,
+    462,
+    366,
+    486
+   ],
+   "z": 21,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_Head",
+   "x": 247,
+   "y": 333,
+   "w": 139,
+   "h": 150,
+   "cx": 315,
+   "cy": 406,
+   "bbox": [
+    247,
+    333,
+    385,
+    482
+   ],
+   "z": 22,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_Front_Hair_B",
+   "x": 251,
+   "y": 323,
+   "w": 108,
+   "h": 40,
+   "cx": 310,
+   "cy": 339,
+   "bbox": [
+    251,
+    323,
+    358,
+    362
+   ],
+   "z": 23,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_R_Ear",
+   "x": 363,
+   "y": 298,
+   "w": 97,
+   "h": 76,
+   "cx": 406,
+   "cy": 328,
+   "bbox": [
+    363,
+    298,
+    459,
+    373
+   ],
+   "z": 24,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_Coat",
+   "x": 115,
+   "y": 321,
+   "w": 145,
+   "h": 171,
+   "cx": 176,
+   "cy": 408,
+   "bbox": [
+    115,
+    321,
+    259,
+    491
+   ],
+   "z": 25,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_Coat2",
+   "x": 120,
+   "y": 328,
+   "w": 147,
+   "h": 158,
+   "cx": 184,
+   "cy": 406,
+   "bbox": [
+    120,
+    328,
+    266,
+    485
+   ],
+   "z": 26,
+   "group": "body",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "B_R_Arm",
+   "x": 185,
+   "y": 354,
+   "w": 60,
+   "h": 48,
+   "cx": 215,
+   "cy": 378,
+   "bbox": [
+    185,
+    354,
+    244,
+    401
+   ],
+   "z": 27,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_R_Arm2",
+   "x": 193,
+   "y": 410,
+   "w": 58,
+   "h": 48,
+   "cx": 221,
+   "cy": 433,
+   "bbox": [
+    193,
+    410,
+    250,
+    457
+   ],
+   "z": 28,
+   "group": "body",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "B_R_Hand",
+   "x": 134,
+   "y": 307,
+   "w": 51,
+   "h": 52,
+   "cx": 159,
+   "cy": 334,
+   "bbox": [
+    134,
+    307,
+    184,
+    358
+   ],
+   "z": 29,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_R_Hand2",
+   "x": 143,
+   "y": 454,
+   "w": 50,
+   "h": 53,
+   "cx": 167,
+   "cy": 478,
+   "bbox": [
+    143,
+    454,
+    192,
+    506
+   ],
+   "z": 30,
+   "group": "body",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "B_R_Forearm",
+   "x": 159,
+   "y": 336,
+   "w": 52,
+   "h": 47,
+   "cx": 185,
+   "cy": 361,
+   "bbox": [
+    159,
+    336,
+    210,
+    382
+   ],
+   "z": 31,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_R_Forearm2",
+   "x": 169,
+   "y": 426,
+   "w": 49,
+   "h": 57,
+   "cx": 195,
+   "cy": 452,
+   "bbox": [
+    169,
+    426,
+    217,
+    482
+   ],
+   "z": 32,
+   "group": "body",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "B_Hood",
+   "x": 202,
+   "y": 366,
+   "w": 65,
+   "h": 136,
+   "cx": 236,
+   "cy": 428,
+   "bbox": [
+    202,
+    366,
+    266,
+    501
+   ],
+   "z": 33,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_Hood2",
+   "x": 209,
+   "y": 314,
+   "w": 66,
+   "h": 135,
+   "cx": 243,
+   "cy": 386,
+   "bbox": [
+    209,
+    314,
+    274,
+    448
+   ],
+   "z": 34,
+   "group": "body",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "B_Belt",
+   "x": 146,
+   "y": 452,
+   "w": 107,
+   "h": 15,
+   "cx": 199,
+   "cy": 461,
+   "bbox": [
+    146,
+    452,
+    252,
+    466
+   ],
+   "z": 35,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_Belt2",
+   "x": 155,
+   "y": 385,
+   "w": 107,
+   "h": 11,
+   "cx": 208,
+   "cy": 392,
+   "bbox": [
+    155,
+    385,
+    261,
+    395
+   ],
+   "z": 36,
+   "group": "body",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "B_Ponytail",
+   "x": 92,
+   "y": 428,
+   "w": 209,
+   "h": 99,
+   "cx": 191,
+   "cy": 490,
+   "bbox": [
+    92,
+    428,
+    300,
+    526
+   ],
+   "z": 37,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Hand_5_v",
+   "x": 133,
+   "y": 310,
+   "w": 63,
+   "h": 48,
+   "cx": 164,
+   "cy": 333,
+   "bbox": [
+    133,
+    310,
+    195,
+    357
+   ],
+   "z": 7,
+   "group": "body",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "B_R_Hand_2_v",
+   "x": 131,
+   "y": 310,
+   "w": 51,
+   "h": 52,
+   "cx": 154,
+   "cy": 339,
+   "bbox": [
+    131,
+    310,
+    181,
+    361
+   ],
+   "z": 29,
+   "group": "body",
+   "special": "",
+   "visible": false
+  }
+ ]
+}

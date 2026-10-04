@@ -12,6 +12,8 @@ public:
     static size_t GetMinimumFreeHeapSize();
     static size_t GetFreeHeapSize();
     static std::string GetMacAddress();
+    // 6 位设备绑定码:标准 CRC-32(mac) % 1000000(与服务器 zlib.crc32 同款算法)
+    static std::string GetBindCode();
     static std::string GetChipModelName();
     static esp_err_t PrintTaskCpuUsage(TickType_t xTicksToWait);
     static void PrintTaskList();

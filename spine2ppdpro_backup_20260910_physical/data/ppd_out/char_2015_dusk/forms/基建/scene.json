@@ -1,0 +1,1600 @@
+{
+ "name": "夕_基建",
+ "landscape": true,
+ "eye_bar": null,
+ "head_pivot": [
+  392,
+  243
+ ],
+ "mouth_pivot": [
+  240,
+  400
+ ],
+ "face_tilt": 5,
+ "no_cavity": true,
+ "mouth_compress": true,
+ "mouth_gain": 2.5,
+ "mouth_floor": 0.45,
+ "mouth_width_open": 0.3,
+ "mouth_open_gain": 0.55,
+ "hair_factor": 0.7,
+ "layers": [
+  {
+   "name": "F_Hair_e",
+   "x": 288,
+   "y": 319,
+   "w": 99,
+   "h": 57,
+   "cx": 339,
+   "cy": 342,
+   "bbox": [
+    288,
+    319,
+    386,
+    375
+   ],
+   "z": 0,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Hair_v",
+   "x": 301,
+   "y": 182,
+   "w": 83,
+   "h": 152,
+   "cx": 343,
+   "cy": 256,
+   "bbox": [
+    301,
+    182,
+    383,
+    333
+   ],
+   "z": 2,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Hair_u",
+   "x": 250,
+   "y": 312,
+   "w": 26,
+   "h": 38,
+   "cx": 259,
+   "cy": 334,
+   "bbox": [
+    250,
+    312,
+    275,
+    349
+   ],
+   "z": 3,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Hair_t",
+   "x": 228,
+   "y": 182,
+   "w": 144,
+   "h": 166,
+   "cx": 293,
+   "cy": 265,
+   "bbox": [
+    228,
+    182,
+    371,
+    347
+   ],
+   "z": 4,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Hair_s",
+   "x": 261,
+   "y": 127,
+   "w": 119,
+   "h": 114,
+   "cx": 297,
+   "cy": 184,
+   "bbox": [
+    261,
+    127,
+    379,
+    240
+   ],
+   "z": 5,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Hair_r",
+   "x": 221,
+   "y": 127,
+   "w": 44,
+   "h": 205,
+   "cx": 244,
+   "cy": 227,
+   "bbox": [
+    221,
+    127,
+    264,
+    331
+   ],
+   "z": 6,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Hair_q",
+   "x": 199,
+   "y": 257,
+   "w": 32,
+   "h": 80,
+   "cx": 214,
+   "cy": 295,
+   "bbox": [
+    199,
+    257,
+    230,
+    336
+   ],
+   "z": 7,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Hair_p",
+   "x": 304,
+   "y": 320,
+   "w": 58,
+   "h": 57,
+   "cx": 323,
+   "cy": 343,
+   "bbox": [
+    304,
+    320,
+    361,
+    376
+   ],
+   "z": 8,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Hair_o",
+   "x": 243,
+   "y": 214,
+   "w": 66,
+   "h": 172,
+   "cx": 280,
+   "cy": 300,
+   "bbox": [
+    243,
+    214,
+    308,
+    385
+   ],
+   "z": 9,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_R_Forearm",
+   "x": 228,
+   "y": 181,
+   "w": 45,
+   "h": 39,
+   "cx": 249,
+   "cy": 201,
+   "bbox": [
+    228,
+    181,
+    272,
+    219
+   ],
+   "z": 10,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_R_Hand_A_b",
+   "x": 211,
+   "y": 147,
+   "w": 36,
+   "h": 46,
+   "cx": 229,
+   "cy": 170,
+   "bbox": [
+    211,
+    147,
+    246,
+    192
+   ],
+   "z": 11,
+   "group": "body",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "F_R_Hand_A_a",
+   "x": 204,
+   "y": 144,
+   "w": 39,
+   "h": 40,
+   "cx": 223,
+   "cy": 166,
+   "bbox": [
+    204,
+    144,
+    242,
+    183
+   ],
+   "z": 12,
+   "group": "body",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "F_R_Hand_B_f",
+   "x": 211,
+   "y": 168,
+   "w": 36,
+   "h": 41,
+   "cx": 228,
+   "cy": 188,
+   "bbox": [
+    211,
+    168,
+    246,
+    208
+   ],
+   "z": 13,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_R_Hand_B_e",
+   "x": 199,
+   "y": 196,
+   "w": 23,
+   "h": 12,
+   "cx": 211,
+   "cy": 201,
+   "bbox": [
+    199,
+    196,
+    221,
+    207
+   ],
+   "z": 14,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_R_Hand_B_d",
+   "x": 192,
+   "y": 187,
+   "w": 30,
+   "h": 14,
+   "cx": 207,
+   "cy": 194,
+   "bbox": [
+    192,
+    187,
+    221,
+    200
+   ],
+   "z": 15,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_R_Hand_B_c",
+   "x": 190,
+   "y": 178,
+   "w": 30,
+   "h": 11,
+   "cx": 205,
+   "cy": 183,
+   "bbox": [
+    190,
+    178,
+    219,
+    188
+   ],
+   "z": 16,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_R_Hand_B_b",
+   "x": 193,
+   "y": 166,
+   "w": 32,
+   "h": 14,
+   "cx": 209,
+   "cy": 172,
+   "bbox": [
+    193,
+    166,
+    224,
+    179
+   ],
+   "z": 17,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_R_Hand_B_a",
+   "x": 210,
+   "y": 173,
+   "w": 34,
+   "h": 23,
+   "cx": 228,
+   "cy": 183,
+   "bbox": [
+    210,
+    173,
+    243,
+    195
+   ],
+   "z": 18,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_R_Arm",
+   "x": 257,
+   "y": 195,
+   "w": 60,
+   "h": 45,
+   "cx": 287,
+   "cy": 217,
+   "bbox": [
+    257,
+    195,
+    316,
+    239
+   ],
+   "z": 22,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_R_Coat_a",
+   "x": 222,
+   "y": 177,
+   "w": 55,
+   "h": 50,
+   "cx": 247,
+   "cy": 207,
+   "bbox": [
+    222,
+    177,
+    276,
+    226
+   ],
+   "z": 23,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Coat_g",
+   "x": 173,
+   "y": 180,
+   "w": 134,
+   "h": 115,
+   "cx": 236,
+   "cy": 234,
+   "bbox": [
+    173,
+    180,
+    306,
+    294
+   ],
+   "z": 24,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Tail_A_d",
+   "x": 146,
+   "y": 222,
+   "w": 117,
+   "h": 113,
+   "cx": 200,
+   "cy": 265,
+   "bbox": [
+    146,
+    222,
+    262,
+    334
+   ],
+   "z": 25,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Tail_A_c",
+   "x": 111,
+   "y": 158,
+   "w": 43,
+   "h": 175,
+   "cx": 131,
+   "cy": 242,
+   "bbox": [
+    111,
+    158,
+    153,
+    332
+   ],
+   "z": 26,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_R_Foot_b",
+   "x": 100,
+   "y": 186,
+   "w": 28,
+   "h": 14,
+   "cx": 115,
+   "cy": 194,
+   "bbox": [
+    100,
+    186,
+    127,
+    199
+   ],
+   "z": 27,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_R_Calf",
+   "x": 84,
+   "y": 190,
+   "w": 111,
+   "h": 51,
+   "cx": 135,
+   "cy": 218,
+   "bbox": [
+    84,
+    190,
+    194,
+    240
+   ],
+   "z": 28,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_R_Leg",
+   "x": 178,
+   "y": 206,
+   "w": 79,
+   "h": 34,
+   "cx": 217,
+   "cy": 222,
+   "bbox": [
+    178,
+    206,
+    256,
+    239
+   ],
+   "z": 29,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_R_Foot_a",
+   "x": 79,
+   "y": 182,
+   "w": 32,
+   "h": 61,
+   "cx": 93,
+   "cy": 214,
+   "bbox": [
+    79,
+    182,
+    110,
+    242
+   ],
+   "z": 30,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "C_Tail_c",
+   "x": 89,
+   "y": 614,
+   "w": 65,
+   "h": 91,
+   "cx": 122,
+   "cy": 654,
+   "bbox": [
+    89,
+    614,
+    153,
+    704
+   ],
+   "z": 31,
+   "group": "body",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "C_Tail_a",
+   "x": 75,
+   "y": 380,
+   "w": 175,
+   "h": 263,
+   "cx": 132,
+   "cy": 469,
+   "bbox": [
+    75,
+    380,
+    249,
+    642
+   ],
+   "z": 32,
+   "group": "body",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "F_L_Calf",
+   "x": 79,
+   "y": 240,
+   "w": 118,
+   "h": 47,
+   "cx": 134,
+   "cy": 261,
+   "bbox": [
+    79,
+    240,
+    196,
+    286
+   ],
+   "z": 33,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Leg",
+   "x": 177,
+   "y": 238,
+   "w": 79,
+   "h": 35,
+   "cx": 216,
+   "cy": 255,
+   "bbox": [
+    177,
+    238,
+    255,
+    272
+   ],
+   "z": 34,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Foot_a",
+   "x": 79,
+   "y": 230,
+   "w": 32,
+   "h": 60,
+   "cx": 92,
+   "cy": 261,
+   "bbox": [
+    79,
+    230,
+    110,
+    289
+   ],
+   "z": 35,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Foot_b",
+   "x": 96,
+   "y": 277,
+   "w": 28,
+   "h": 15,
+   "cx": 111,
+   "cy": 283,
+   "bbox": [
+    96,
+    277,
+    123,
+    291
+   ],
+   "z": 36,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Coat_f",
+   "x": 212,
+   "y": 191,
+   "w": 60,
+   "h": 96,
+   "cx": 238,
+   "cy": 239,
+   "bbox": [
+    212,
+    191,
+    271,
+    286
+   ],
+   "z": 37,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Waist",
+   "x": 255,
+   "y": 214,
+   "w": 45,
+   "h": 49,
+   "cx": 277,
+   "cy": 236,
+   "bbox": [
+    255,
+    214,
+    299,
+    262
+   ],
+   "z": 38,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Chest",
+   "x": 284,
+   "y": 209,
+   "w": 52,
+   "h": 59,
+   "cx": 307,
+   "cy": 239,
+   "bbox": [
+    284,
+    209,
+    335,
+    267
+   ],
+   "z": 39,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Coat_e",
+   "x": 246,
+   "y": 219,
+   "w": 70,
+   "h": 18,
+   "cx": 285,
+   "cy": 227,
+   "bbox": [
+    246,
+    219,
+    315,
+    236
+   ],
+   "z": 40,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Coat_d",
+   "x": 218,
+   "y": 188,
+   "w": 84,
+   "h": 35,
+   "cx": 265,
+   "cy": 206,
+   "bbox": [
+    218,
+    188,
+    301,
+    222
+   ],
+   "z": 41,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Coat_c",
+   "x": 261,
+   "y": 201,
+   "w": 47,
+   "h": 13,
+   "cx": 285,
+   "cy": 207,
+   "bbox": [
+    261,
+    201,
+    307,
+    213
+   ],
+   "z": 42,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Coat_b",
+   "x": 280,
+   "y": 211,
+   "w": 24,
+   "h": 9,
+   "cx": 292,
+   "cy": 214,
+   "bbox": [
+    280,
+    211,
+    303,
+    219
+   ],
+   "z": 43,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Coat_a",
+   "x": 173,
+   "y": 248,
+   "w": 122,
+   "h": 51,
+   "cx": 227,
+   "cy": 268,
+   "bbox": [
+    173,
+    248,
+    294,
+    298
+   ],
+   "z": 44,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Tail_A_b",
+   "x": 77,
+   "y": 153,
+   "w": 43,
+   "h": 110,
+   "cx": 94,
+   "cy": 203,
+   "bbox": [
+    77,
+    153,
+    119,
+    262
+   ],
+   "z": 45,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Tail_A_a",
+   "x": 65,
+   "y": 258,
+   "w": 57,
+   "h": 95,
+   "cx": 94,
+   "cy": 302,
+   "bbox": [
+    65,
+    258,
+    121,
+    352
+   ],
+   "z": 46,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Forearm",
+   "x": 226,
+   "y": 260,
+   "w": 61,
+   "h": 40,
+   "cx": 255,
+   "cy": 278,
+   "bbox": [
+    226,
+    260,
+    286,
+    299
+   ],
+   "z": 47,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Hand",
+   "x": 208,
+   "y": 296,
+   "w": 43,
+   "h": 44,
+   "cx": 229,
+   "cy": 317,
+   "bbox": [
+    208,
+    296,
+    250,
+    339
+   ],
+   "z": 48,
+   "group": "body",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "F_L_Hand_B_f",
+   "x": 198,
+   "y": 269,
+   "w": 37,
+   "h": 21,
+   "cx": 218,
+   "cy": 279,
+   "bbox": [
+    198,
+    269,
+    234,
+    289
+   ],
+   "z": 49,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Hand_B_e",
+   "x": 212,
+   "y": 270,
+   "w": 39,
+   "h": 40,
+   "cx": 232,
+   "cy": 289,
+   "bbox": [
+    212,
+    270,
+    250,
+    309
+   ],
+   "z": 50,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Hand_B_d",
+   "x": 209,
+   "y": 300,
+   "w": 25,
+   "h": 13,
+   "cx": 221,
+   "cy": 306,
+   "bbox": [
+    209,
+    300,
+    233,
+    312
+   ],
+   "z": 51,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Hand_B_c",
+   "x": 202,
+   "y": 293,
+   "w": 30,
+   "h": 16,
+   "cx": 217,
+   "cy": 301,
+   "bbox": [
+    202,
+    293,
+    231,
+    308
+   ],
+   "z": 52,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Hand_B_b",
+   "x": 194,
+   "y": 288,
+   "w": 31,
+   "h": 16,
+   "cx": 209,
+   "cy": 296,
+   "bbox": [
+    194,
+    288,
+    224,
+    303
+   ],
+   "z": 53,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Hand_B_a",
+   "x": 192,
+   "y": 278,
+   "w": 31,
+   "h": 17,
+   "cx": 207,
+   "cy": 286,
+   "bbox": [
+    192,
+    278,
+    222,
+    294
+   ],
+   "z": 54,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Arm",
+   "x": 271,
+   "y": 250,
+   "w": 47,
+   "h": 29,
+   "cx": 294,
+   "cy": 263,
+   "bbox": [
+    271,
+    250,
+    317,
+    278
+   ],
+   "z": 55,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Coat_c",
+   "x": 224,
+   "y": 267,
+   "w": 36,
+   "h": 40,
+   "cx": 241,
+   "cy": 287,
+   "bbox": [
+    224,
+    267,
+    259,
+    306
+   ],
+   "z": 56,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Coat_b",
+   "x": 217,
+   "y": 252,
+   "w": 73,
+   "h": 60,
+   "cx": 253,
+   "cy": 275,
+   "bbox": [
+    217,
+    252,
+    289,
+    311
+   ],
+   "z": 57,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Coat_a",
+   "x": 268,
+   "y": 243,
+   "w": 34,
+   "h": 48,
+   "cx": 284,
+   "cy": 267,
+   "bbox": [
+    268,
+    243,
+    301,
+    290
+   ],
+   "z": 58,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Hair_n",
+   "x": 329,
+   "y": 145,
+   "w": 61,
+   "h": 39,
+   "cx": 361,
+   "cy": 168,
+   "bbox": [
+    329,
+    145,
+    389,
+    183
+   ],
+   "z": 59,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Hair_n_a",
+   "x": 299,
+   "y": 145,
+   "w": 35,
+   "h": 25,
+   "cx": 321,
+   "cy": 159,
+   "bbox": [
+    299,
+    145,
+    333,
+    169
+   ],
+   "z": 60,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Hair_l",
+   "x": 346,
+   "y": 165,
+   "w": 33,
+   "h": 39,
+   "cx": 358,
+   "cy": 188,
+   "bbox": [
+    346,
+    165,
+    378,
+    203
+   ],
+   "z": 61,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Hair_k",
+   "x": 306,
+   "y": 185,
+   "w": 45,
+   "h": 8,
+   "cx": 327,
+   "cy": 188,
+   "bbox": [
+    306,
+    185,
+    350,
+    192
+   ],
+   "z": 62,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Hair_j",
+   "x": 278,
+   "y": 187,
+   "w": 125,
+   "h": 19,
+   "cx": 344,
+   "cy": 196,
+   "bbox": [
+    278,
+    187,
+    402,
+    205
+   ],
+   "z": 63,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Face_Default_m",
+   "x": 349,
+   "y": 191,
+   "w": 23,
+   "h": 21,
+   "cx": 361,
+   "cy": 201,
+   "bbox": [
+    349,
+    191,
+    371,
+    211
+   ],
+   "z": 64,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Face_Default_l",
+   "x": 345,
+   "y": 235,
+   "w": 27,
+   "h": 37,
+   "cx": 359,
+   "cy": 252,
+   "bbox": [
+    345,
+    235,
+    371,
+    271
+   ],
+   "z": 65,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Face_Default_k",
+   "x": 350,
+   "y": 193,
+   "w": 22,
+   "h": 15,
+   "cx": 361,
+   "cy": 200,
+   "bbox": [
+    350,
+    193,
+    371,
+    207
+   ],
+   "z": 66,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Face_Default_j",
+   "x": 358,
+   "y": 199,
+   "w": 8,
+   "h": 2,
+   "cx": 362,
+   "cy": 200,
+   "bbox": [
+    358,
+    199,
+    365,
+    200
+   ],
+   "z": 67,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Face_Default_d",
+   "x": 347,
+   "y": 238,
+   "w": 24,
+   "h": 24,
+   "cx": 360,
+   "cy": 249,
+   "bbox": [
+    347,
+    238,
+    370,
+    261
+   ],
+   "z": 68,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Face_Default_c",
+   "x": 357,
+   "y": 246,
+   "w": 13,
+   "h": 3,
+   "cx": 363,
+   "cy": 247,
+   "bbox": [
+    357,
+    246,
+    369,
+    248
+   ],
+   "z": 69,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Head",
+   "x": 327,
+   "y": 183,
+   "w": 126,
+   "h": 125,
+   "cx": 392,
+   "cy": 243,
+   "bbox": [
+    327,
+    183,
+    452,
+    307
+   ],
+   "z": 70,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Face_Default_i",
+   "x": 362,
+   "y": 204,
+   "w": 5,
+   "h": 5,
+   "cx": 364,
+   "cy": 206,
+   "bbox": [
+    362,
+    204,
+    366,
+    208
+   ],
+   "z": 71,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Face_Default_ha",
+   "x": 357,
+   "y": 189,
+   "w": 10,
+   "h": 4,
+   "cx": 362,
+   "cy": 191,
+   "bbox": [
+    357,
+    189,
+    366,
+    192
+   ],
+   "z": 72,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Face_Default_h",
+   "x": 367,
+   "y": 186,
+   "w": 9,
+   "h": 22,
+   "cx": 371,
+   "cy": 196,
+   "bbox": [
+    367,
+    186,
+    375,
+    207
+   ],
+   "z": 73,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Face_Default_g",
+   "x": 376,
+   "y": 196,
+   "w": 4,
+   "h": 13,
+   "cx": 378,
+   "cy": 202,
+   "bbox": [
+    376,
+    196,
+    379,
+    208
+   ],
+   "z": 74,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Face_Default_e",
+   "x": 375,
+   "y": 234,
+   "w": 6,
+   "h": 25,
+   "cx": 378,
+   "cy": 245,
+   "bbox": [
+    375,
+    234,
+    380,
+    258
+   ],
+   "z": 76,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Hair_i",
+   "x": 352,
+   "y": 180,
+   "w": 109,
+   "h": 147,
+   "cx": 413,
+   "cy": 267,
+   "bbox": [
+    352,
+    180,
+    460,
+    326
+   ],
+   "z": 77,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Hair_h",
+   "x": 396,
+   "y": 243,
+   "w": 69,
+   "h": 78,
+   "cx": 426,
+   "cy": 278,
+   "bbox": [
+    396,
+    243,
+    464,
+    320
+   ],
+   "z": 78,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Hair_g",
+   "x": 346,
+   "y": 179,
+   "w": 103,
+   "h": 71,
+   "cx": 399,
+   "cy": 214,
+   "bbox": [
+    346,
+    179,
+    448,
+    249
+   ],
+   "z": 79,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Hair_f",
+   "x": 369,
+   "y": 167,
+   "w": 93,
+   "h": 84,
+   "cx": 420,
+   "cy": 195,
+   "bbox": [
+    369,
+    167,
+    461,
+    250
+   ],
+   "z": 80,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Hair_d",
+   "x": 344,
+   "y": 273,
+   "w": 26,
+   "h": 44,
+   "cx": 354,
+   "cy": 290,
+   "bbox": [
+    344,
+    273,
+    369,
+    316
+   ],
+   "z": 81,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Hair_c",
+   "x": 302,
+   "y": 281,
+   "w": 46,
+   "h": 13,
+   "cx": 324,
+   "cy": 286,
+   "bbox": [
+    302,
+    281,
+    347,
+    293
+   ],
+   "z": 82,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Face_Default_b",
+   "x": 362,
+   "y": 252,
+   "w": 6,
+   "h": 8,
+   "cx": 365,
+   "cy": 255,
+   "bbox": [
+    362,
+    252,
+    367,
+    259
+   ],
+   "z": 83,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Face_Default_aa",
+   "x": 351,
+   "y": 264,
+   "w": 13,
+   "h": 10,
+   "cx": 357,
+   "cy": 269,
+   "bbox": [
+    351,
+    264,
+    363,
+    273
+   ],
+   "z": 84,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Face_Default_a",
+   "x": 365,
+   "y": 232,
+   "w": 11,
+   "h": 42,
+   "cx": 370,
+   "cy": 253,
+   "bbox": [
+    365,
+    232,
+    375,
+    273
+   ],
+   "z": 85,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Hair_b",
+   "x": 279,
+   "y": 264,
+   "w": 121,
+   "h": 20,
+   "cx": 343,
+   "cy": 273,
+   "bbox": [
+    279,
+    264,
+    399,
+    283
+   ],
+   "z": 86,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Hair_a",
+   "x": 397,
+   "y": 158,
+   "w": 65,
+   "h": 39,
+   "cx": 428,
+   "cy": 180,
+   "bbox": [
+    397,
+    158,
+    461,
+    196
+   ],
+   "z": 87,
+   "group": "head",
+   "special": "",
+   "visible": true
+  }
+ ]
+}

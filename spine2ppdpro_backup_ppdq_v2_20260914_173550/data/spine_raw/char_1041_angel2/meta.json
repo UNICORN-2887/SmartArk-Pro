@@ -1,0 +1,28 @@
+{
+  "prefix": "https://torappu.prts.wiki/assets/char_spine/char_1041_angel2/",
+  "name": "新约能天使",
+  "skin": {
+    "默认": {
+      "基建": {
+        "file": "defaultskin/build/build_char_1041_angel2"
+      },
+      "正面": {
+        "file": "defaultskin/front/char_1041_angel2"
+      },
+      "背面": {
+        "file": "defaultskin/back/char_1041_angel2"
+      }
+    },
+    "寻翼之歌": {
+      "基建": {
+        "file": "char_1041_angel2_iteration_6/build/build_char_1041_angel2_iteration_6"
+      },
+      "背面": {
+        "file": "char_1041_angel2_iteration_6/back/char_1041_angel2_iteration_6"
+      },
+      "正面": {
+        "file": "char_1041_angel2_iteration_6/front/char_1041_angel2_iteration_6"
+      }
+    }
+  }
+}

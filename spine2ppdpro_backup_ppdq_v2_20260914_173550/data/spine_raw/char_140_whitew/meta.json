@@ -1,0 +1,28 @@
+{
+  "prefix": "https://torappu.prts.wiki/assets/char_spine/char_140_whitew/",
+  "name": "拉普兰德",
+  "skin": {
+    "默认": {
+      "正面": {
+        "file": "defaultskin/front/char_140_whitew"
+      },
+      "基建": {
+        "file": "defaultskin/build/build_char_140_whitew"
+      },
+      "背面": {
+        "file": "defaultskin/back/char_140_whitew"
+      }
+    },
+    "典雅噩兆": {
+      "基建": {
+        "file": "char_140_whitew_boc_1/build/build_char_140_whitew_boc_1"
+      },
+      "背面": {
+        "file": "char_140_whitew_boc_1/back/char_140_whitew_boc_1"
+      },
+      "正面": {
+        "file": "char_140_whitew_boc_1/front/char_140_whitew_boc_1"
+      }
+    }
+  }
+}

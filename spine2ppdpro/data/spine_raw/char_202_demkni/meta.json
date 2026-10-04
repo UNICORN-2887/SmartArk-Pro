@@ -1,0 +1,50 @@
+{
+  "prefix": "https://torappu.prts.wiki/assets/char_spine/char_202_demkni/",
+  "name": "塞雷娅",
+  "skin": {
+    "铁律": {
+      "基建": {
+        "file": "char_202_demkni_test_1/build/build_char_202_demkni_test_1"
+      },
+      "背面": {
+        "file": "char_202_demkni_test_1/back/char_202_demkni_test_1"
+      },
+      "正面": {
+        "file": "char_202_demkni_test_1/front/char_202_demkni_test_1"
+      }
+    },
+    "坚城": {
+      "正面": {
+        "file": "char_202_demkni_boc_1/front/char_202_demkni_boc_1"
+      },
+      "背面": {
+        "file": "char_202_demkni_boc_1/back/char_202_demkni_boc_1"
+      },
+      "基建": {
+        "file": "char_202_demkni_boc_1/build/build_char_202_demkni_boc_1"
+      }
+    },
+    "默认": {
+      "基建": {
+        "file": "defaultskin/build/build_char_202_demkni"
+      },
+      "正面": {
+        "file": "defaultskin/front/char_202_demkni"
+      },
+      "背面": {
+        "file": "defaultskin/back/char_202_demkni"
+      }
+    },
+    "黑白冷峻": {
+      "基建": {
+        "file": "char_202_demkni_ambiencesynesthesia_7/build/build_char_202_demkni_ambienceSynesthesia_7"
+      },
+      "背面": {
+        "file": "char_202_demkni_ambiencesynesthesia_7/back/char_202_demkni_ambienceSynesthesia_7"
+      },
+      "正面": {
+        "file": "char_202_demkni_ambiencesynesthesia_7/front/char_202_demkni_ambienceSynesthesia_7"
+      }
+    }
+  }
+}

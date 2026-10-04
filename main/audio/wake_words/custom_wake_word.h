@@ -25,6 +25,12 @@
 
 class CustomWakeWord : public WakeWord {
 public:
+    // 一条唤醒词命令:拼音(pinyin)+ 唤醒后回调的显示名(角色名)
+    struct WakeWordCommand {
+        std::string pinyin;
+        std::string display;
+    };
+
     CustomWakeWord();
     ~CustomWakeWord();
 
@@ -37,6 +43,10 @@ public:
     void EncodeWakeWordData();
     bool GetWakeWordOpus(std::vector<uint8_t>& opus);
     const std::string& GetLastDetectedWakeWord() const { return last_detected_wake_word_; }
+
+    // 动态替换命令词表(服务器下发的用户自定义唤醒词)。
+    // 应用时机:未初始化→Initialize 时;检测中→下一次 Start() 前(避免并发改 multinet)
+    void SetWakeWordCommands(const std::vector<WakeWordCommand>& commands);
 
 private:
     esp_afe_sr_iface_t* afe_iface_ = nullptr;
@@ -56,9 +66,12 @@ private:
     std::string last_detected_wake_word_;
     int64_t last_detect_time_ = 0;  // 冷却时间戳（微秒）
 
+    std::vector<std::string> command_names_;                 // command_id(1-based)→显示名
+    std::vector<WakeWordCommand> pending_commands_;          // 待应用的动态命令词表
+    bool has_pending_commands_ = false;
+    void ApplyCommands(const std::vector<WakeWordCommand>& commands);
+
     TaskHandle_t wake_word_encode_task_ = nullptr;
-    StaticTask_t wake_word_encode_task_buffer_;
-    StackType_t* wake_word_encode_task_stack_ = nullptr;
     std::list<std::vector<int16_t>> wake_word_pcm_;
     std::list<std::vector<uint8_t>> wake_word_opus_;
     std::mutex wake_word_mutex_;

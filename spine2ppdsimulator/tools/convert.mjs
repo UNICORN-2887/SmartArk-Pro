@@ -16,6 +16,7 @@ import path from 'path';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 
 const W = 480, H = 800;
+const BIG_DEFORM = 2048;
 const FPS = 20;
 const HEAD_RE = /Head|Eye|Brow|Mouth|Nose|Sclera|Hair|Ear|Face/i;
 const LOOP_RE = /(Loop|Idle|Default)/i;
@@ -152,6 +153,35 @@ function applyCam(skeleton, cam) {
   skeleton.updateWorldTransform();
 }
 
+// Deform vis 检测：大画布渲染单槽，扫描区域基于当前帧骨骼世界位置动态定位
+//（骨骼已含相机变换=屏幕坐标，+1024 偏移落在 2048 画布内）
+function renderCount(bigCanvas, skeleton, slot, rr) {
+  const ctx = bigCanvas.getContext('2d');
+  ctx.clearRect(0, 0, BIG_DEFORM, BIG_DEFORM);
+  const saved = skeleton.drawOrder;
+  skeleton.drawOrder = [slot];
+  try {
+    const r = new spine.canvas.SkeletonRenderer(ctx);
+    r.triangleRendering = true;
+    r.draw(skeleton);
+  } finally {
+    skeleton.drawOrder = saved;
+  }
+  // 骨骼世界 = 屏幕坐标（相机已进骨骼根），直接作为画布坐标，无 translate 偏移
+  const cx = slot.bone.worldX, cy = slot.bone.worldY;
+  const hw = rr.bbox.w / 2 + 80, hh = rr.bbox.h / 2 + 80;
+  const x0 = Math.max(0, Math.floor(cx - hw));
+  const y0 = Math.max(0, Math.floor(cy - hh));
+  const x1 = Math.min(BIG_DEFORM, Math.ceil(cx + hw));
+  const y1 = Math.min(BIG_DEFORM, Math.ceil(cy + hh));
+  const w = x1 - x0, h = y1 - y0;
+  if (w <= 0 || h <= 0) return 0;
+  const d = ctx.getImageData(x0, y0, w, h).data;
+  let n = 0;
+  for (let i = 3; i < d.length; i += 4) if (d[i] > 0) n++;
+  return n;
+}
+
 function mkLayer(name, m, z, head, visible) {
   return {
     name, x: m.minX, y: m.minY, w: m.w, h: m.h,
@@ -255,6 +285,7 @@ async function convertGroup(setDir, outDir, group, skelData, makeSkeleton) {
   s0.slots.forEach(sl => slotOf0.set(sl.data.name, sl));
   const zOf = new Map();           // 槽名 -> z（drawOrder 顺序）
   drawOrderBase.forEach((name, i) => zOf.set(name, i));
+  const refPixels = new Map();       // 槽 -> 贴图姿势渲染像素数（Deform vis 判定用）
   for (let i = 0; i < drawOrderBase.length; i++) {
     const name = drawOrderBase[i];
     const slot = slotOf0.get(name);
@@ -267,6 +298,7 @@ async function convertGroup(setDir, outDir, group, skelData, makeSkeleton) {
       raws.set(name, cropRaw(canvas, m2.minX, m2.minY, m2.w, m2.h));
       layers.push(mkLayer(name, m2, i, head, true));
       ref.set(name, { bbox: m2, bone: boneWorld(slot), attName: att.name });
+      refPixels.set(name, m.count);
     } else {
       // 贴图姿势无附件或无内容：留待动画帧取贴图（visible=false）
     }
@@ -274,12 +306,18 @@ async function convertGroup(setDir, outDir, group, skelData, makeSkeleton) {
   console.log(`  贴图姿势有内容层 = ${layers.length}`);
 
   // 3. 动画轨道：直接读官方骨骼时间轴（无渲染）
+  const bigCanvas = createCanvas(BIG_DEFORM, BIG_DEFORM);   // Deform 内容量检测用大画布（防内容出画布）
   const anims = {};
   for (const ad of group.anims) {
     if (ad.duration <= 0.001) { console.log(`  跳过空动画 ${ad.name} (duration=0)`); continue; }
     const loop = LOOP_RE.test(ad.name);
     const n = clamp(Math.round(ad.duration * FPS), 8, 80);
     const tracks = {};
+    // 该动画有 DeformTimeline 的槽：内容量由 mesh 形变驱动（如闭眼线压没），须渲染检测 vis
+    const deformSlots = new Set();
+    for (const tl of ad.timelines) {
+      if (tl instanceof spine.DeformTimeline) deformSlots.add(skelData.slots[tl.slotIndex].name);
+    }
     const sA = makeSkeleton();
     applyCam(sA, cam);
     const slotOfA = new Map();
@@ -295,6 +333,12 @@ async function convertGroup(setDir, outDir, group, skelData, makeSkeleton) {
         const att = slot.getAttachment();
         const rr = ref.get(name);
         if (!att) { pushFrame(tracks, name, 0, 0, 0, 0); continue; }
+        // Deform 槽：渲染检测内容量（deform 可把内容压到近乎消失 → 该帧应隐藏）
+        if (deformSlots.has(name) && rr) {
+          const cnt = renderCount(bigCanvas, sA, slot, rr);
+          const base = refPixels.get(name) || 1;
+          if (cnt < Math.max(base * 0.1, 4)) { pushFrame(tracks, name, 0, 0, 0, 0); continue; }
+        }
         if (!rr) {
           // 贴图姿势无内容的槽：首个有附件帧 = 全局参考 + 贴图来源（渲染该帧该槽）
           renderSlots(canvas, sA, [slot]);

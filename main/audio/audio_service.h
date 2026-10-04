@@ -6,6 +6,9 @@
 #include <condition_variable>
 #include <chrono>
 #include <mutex>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -19,6 +22,7 @@
 #include "audio_codec.h"
 #include "audio_processor.h"
 #include "processors/audio_debugger.h"
+#include "forwarder/audio_forwarder.h"
 #include "wake_word.h"
 #include "protocol.h"
 
@@ -95,9 +99,24 @@ public:
     bool IsAudioProcessorRunning() const { return xEventGroupGetBits(event_group_) & AS_EVENT_AUDIO_PROCESSOR_RUNNING; }
 
     void EnableWakeWordDetection(bool enable);
+    // 动态替换唤醒词命令表(仅 CustomWakeWord 生效;pair=拼音/显示名)
+    void SetWakeWordCommands(const std::vector<std::pair<std::string, std::string>>& commands);
     void EnableVoiceProcessing(bool enable);
     void EnableAudioTesting(bool enable);
     void EnableDeviceAec(bool enable);
+
+    // 音频转发到手机 App（设置页调用，线程安全）
+    void SetForwarderEnabled(bool enable);
+    bool ForwarderEnabled() const;
+    void SetForwarderMuteLocal(bool mute);
+    bool ForwarderMuteLocal() const;
+    void SetForwarderMulticast(bool multicast);
+    bool ForwarderMulticast() const;
+    void ForwarderResetTarget();
+    bool ForwarderHasTarget() const;
+    std::string ForwarderTargetIp() const;
+    uint32_t ForwarderPacketsSent() const;
+    uint32_t ForwarderPacketsDropped() const;
 
     void SetCallbacks(AudioServiceCallbacks& callbacks);
 
@@ -116,6 +135,7 @@ private:
     std::unique_ptr<AudioProcessor> audio_processor_;
     std::unique_ptr<WakeWord> wake_word_;
     std::unique_ptr<AudioDebugger> audio_debugger_;
+    std::unique_ptr<AudioForwarder> audio_forwarder_;
     std::unique_ptr<OpusEncoderWrapper> opus_encoder_;
     std::unique_ptr<OpusDecoderWrapper> opus_decoder_;
     OpusResampler input_resampler_;

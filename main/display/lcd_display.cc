@@ -13,6 +13,10 @@
 
 #include "board.h"
 
+#if CONFIG_IDF_TARGET_ESP32P4
+#include "esp_lcd_mipi_dsi.h"   // esp_lcd_dpi_panel_get_frame_buffer（PPD 直写面板 fb 用）
+#endif
+
 #define TAG "LcdDisplay"
 
 // Color definitions for dark theme
@@ -52,16 +56,18 @@ const ThemeColors DARK_THEME = {
 };
 
 // Define light theme colors
+/* 2026-09-26 用户拍板:开机起全程黑底,浅色主题名存实亡——LIGHT_THEME 直接引用
+   深色系颜色(设备 NVS 存 "light" 也生效),白色底彻底消失 */
 const ThemeColors LIGHT_THEME = {
-    .background = LIGHT_BACKGROUND_COLOR,
-    .text = LIGHT_TEXT_COLOR,
-    .chat_background = LIGHT_CHAT_BACKGROUND_COLOR,
-    .user_bubble = LIGHT_USER_BUBBLE_COLOR,
-    .assistant_bubble = LIGHT_ASSISTANT_BUBBLE_COLOR,
-    .system_bubble = LIGHT_SYSTEM_BUBBLE_COLOR,
-    .system_text = LIGHT_SYSTEM_TEXT_COLOR,
-    .border = LIGHT_BORDER_COLOR,
-    .low_battery = LIGHT_LOW_BATTERY_COLOR
+    .background = DARK_BACKGROUND_COLOR,
+    .text = DARK_TEXT_COLOR,
+    .chat_background = DARK_CHAT_BACKGROUND_COLOR,
+    .user_bubble = DARK_USER_BUBBLE_COLOR,
+    .assistant_bubble = DARK_ASSISTANT_BUBBLE_COLOR,
+    .system_bubble = DARK_SYSTEM_BUBBLE_COLOR,
+    .system_text = DARK_SYSTEM_TEXT_COLOR,
+    .border = DARK_BORDER_COLOR,
+    .low_battery = DARK_LOW_BATTERY_COLOR
 };
 
 
@@ -226,6 +232,11 @@ MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel
 
     ESP_LOGI(TAG, "Initialize LVGL port");
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
+    /* prio 1→4：重绘不被 audio_detection(prio3) 抢断，快速完成即睡眠——
+       否则重绘被切碎持续忙碌，prio0 的 IDLE0 饿死触发 watchdog（PPD 交互高帧率重绘时暴露） */
+    port_cfg.task_priority = 4;
+    /* timer 5→30ms：LVGL 任务唤醒频率降 6 倍（空闲大增）；30ms 仍支持 MJPEG 33fps */
+    port_cfg.timer_period_ms = 30;
     lvgl_port_init(&port_cfg);
 
     ESP_LOGI(TAG, "Adding LCD display");
@@ -248,6 +259,11 @@ MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel
             .buff_dma = true,
             .buff_spiram =false,
             .sw_rotate = false,
+            /* 注意：勿开 full_refresh/avoid_tearing（PPD 崩溃第 9 轮试验结论）——
+               直绘模式把 draw buffer 换成 PSRAM 面板 fb，本 UI 大量半透明层
+               （聊天遮罩/loading 等）的逐像素混合（lv_color_16_16_mix 读改写）
+               在 PSRAM 上比内部 RAM 慢 5-10 倍 → 全屏重绘反而更慢 → MJPEG
+               对话模式也 watchdog。保持 partial（25 行内部 RAM 小缓冲） */
         },
     };
 
@@ -299,6 +315,28 @@ bool LcdDisplay::Lock(int timeout_ms) {
     return lvgl_port_lock(timeout_ms);
 }
 
+uint16_t* LcdDisplay::GetPanelFrameBuffer(void) {
+#if CONFIG_IDF_TARGET_ESP32P4
+    void* fb = nullptr;
+    if (panel_ == nullptr) return nullptr;
+    if (esp_lcd_dpi_panel_get_frame_buffer(panel_, 1, &fb, NULL) != ESP_OK) return nullptr;
+    return (uint16_t*)fb;
+#else
+    return nullptr;
+#endif
+}
+
+void LcdDisplay::SetStatusBarVisible(bool visible) {
+    if (status_bar_ == nullptr) return;
+    DisplayLockGuard lock(this);
+    if (visible) {
+        lv_obj_remove_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_invalidate(status_bar_);
+}
+
 void LcdDisplay::Unlock() {
     lvgl_port_unlock();
 }
@@ -311,6 +349,9 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_font(screen, fonts_.text_font, 0);
     lv_obj_set_style_text_color(screen, current_theme_.text, 0);
     lv_obj_set_style_bg_color(screen, current_theme_.background, 0);
+    /* 2026-09-26 开机全程黑底:LVGL 默认主题背景为白,页面切换(配网页→索引页等)
+       露底瞬间白闪如闪光弹;screen 强制黑底,所有页面都盖在黑底上 */
+    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
 
     /* Container */
     container_ = lv_obj_create(screen);
@@ -320,6 +361,9 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_border_width(container_, 0, 0);
     lv_obj_set_style_pad_row(container_, 0, 0);
     lv_obj_set_style_bg_color(container_, current_theme_.background, 0);
+    /* 2026-09-26 强制黑底:container 是全屏对象,浅色主题背景(白)会盖住 screen 黑底,
+       开机阶段(索引页出现前)露白+"正在初始化"状态栏如闪光弹;强制黑底 */
+    lv_obj_set_style_bg_color(container_, lv_color_black(), 0);
     lv_obj_set_style_border_color(container_, current_theme_.border, 0);
 
     /* Status bar */
@@ -327,6 +371,8 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_size(status_bar_, LV_HOR_RES, LV_SIZE_CONTENT);
     lv_obj_set_style_radius(status_bar_, 0, 0);
     lv_obj_set_style_bg_color(status_bar_, current_theme_.background, 0);
+    /* 2026-09-26 状态栏黑底白字(与 container 黑底一致,浅色主题文字在白底换黑底后不可见) */
+    lv_obj_set_style_bg_color(status_bar_, lv_color_black(), 0);
     lv_obj_set_style_text_color(status_bar_, current_theme_.text, 0);
     
     /* Content - Chat area */
@@ -366,14 +412,14 @@ void LcdDisplay::SetupUI() {
     // 创建emotion_label_在状态栏最左侧
     emotion_label_ = lv_label_create(status_bar_);
     lv_obj_set_style_text_font(emotion_label_, &font_awesome_30_4, 0);
-    lv_obj_set_style_text_color(emotion_label_, current_theme_.text, 0);
+    lv_obj_set_style_text_color(emotion_label_, lv_color_white(), 0);   /* 2026-09-26 状态栏黑底白字 */
     lv_label_set_text(emotion_label_, FONT_AWESOME_AI_CHIP);
     lv_obj_set_style_margin_right(emotion_label_, 5, 0); // 添加右边距，与后面的元素分隔
 
     notification_label_ = lv_label_create(status_bar_);
     lv_obj_set_flex_grow(notification_label_, 1);
     lv_obj_set_style_text_align(notification_label_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(notification_label_, current_theme_.text, 0);
+    lv_obj_set_style_text_color(notification_label_, lv_color_white(), 0);   /* 2026-09-26 状态栏黑底白字 */
     lv_label_set_text(notification_label_, "");
     lv_obj_add_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
 
@@ -381,25 +427,31 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_flex_grow(status_label_, 1);
     lv_label_set_long_mode(status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_set_style_text_align(status_label_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(status_label_, current_theme_.text, 0);
+    lv_obj_set_style_text_color(status_label_, lv_color_white(), 0);   /* 2026-09-26 状态栏黑底白字 */
     lv_label_set_text(status_label_, Lang::Strings::INITIALIZING);
     
     mute_label_ = lv_label_create(status_bar_);
     lv_label_set_text(mute_label_, "");
     lv_obj_set_style_text_font(mute_label_, fonts_.icon_font, 0);
-    lv_obj_set_style_text_color(mute_label_, current_theme_.text, 0);
+    lv_obj_set_style_text_color(mute_label_, lv_color_white(), 0);   /* 2026-09-26 状态栏黑底白字 */
 
     network_label_ = lv_label_create(status_bar_);
     lv_label_set_text(network_label_, "");
     lv_obj_set_style_text_font(network_label_, fonts_.icon_font, 0);
-    lv_obj_set_style_text_color(network_label_, current_theme_.text, 0);
+    lv_obj_set_style_text_color(network_label_, lv_color_white(), 0);   /* 2026-09-26 状态栏黑底白字 */
     lv_obj_set_style_margin_left(network_label_, 5, 0); // 添加左边距，与前面的元素分隔
 
     battery_label_ = lv_label_create(status_bar_);
     lv_label_set_text(battery_label_, "");
     lv_obj_set_style_text_font(battery_label_, fonts_.icon_font, 0);
-    lv_obj_set_style_text_color(battery_label_, current_theme_.text, 0);
+    lv_obj_set_style_text_color(battery_label_, lv_color_white(), 0);   /* 2026-09-26 状态栏黑底白字 */
     lv_obj_set_style_margin_left(battery_label_, 5, 0); // 添加左边距，与前面的元素分隔
+
+    battery_percent_label_ = lv_label_create(status_bar_);   /* 2026-10-02 电量百分比 */
+    lv_label_set_text(battery_percent_label_, "");
+    lv_obj_set_style_text_font(battery_percent_label_, fonts_.text_font, 0);
+    lv_obj_set_style_text_color(battery_percent_label_, lv_color_white(), 0);
+    lv_obj_set_style_margin_left(battery_percent_label_, 3, 0);
 
     low_battery_popup_ = lv_obj_create(screen);
     lv_obj_set_scrollbar_mode(low_battery_popup_, LV_SCROLLBAR_MODE_OFF);
@@ -710,6 +762,9 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_font(screen, fonts_.text_font, 0);
     lv_obj_set_style_text_color(screen, current_theme_.text, 0);
     lv_obj_set_style_bg_color(screen, current_theme_.background, 0);
+    /* 2026-09-26 开机全程黑底:LVGL 默认主题背景为白,页面切换(配网页→索引页等)
+       露底瞬间白闪如闪光弹;screen 强制黑底,所有页面都盖在黑底上 */
+    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
 
     /* Container */
     container_ = lv_obj_create(screen);
@@ -743,7 +798,7 @@ void LcdDisplay::SetupUI() {
 
     emotion_label_ = lv_label_create(content_);
     lv_obj_set_style_text_font(emotion_label_, &font_awesome_30_4, 0);
-    lv_obj_set_style_text_color(emotion_label_, current_theme_.text, 0);
+    lv_obj_set_style_text_color(emotion_label_, lv_color_white(), 0);   /* 2026-09-26 状态栏黑底白字 */
     lv_label_set_text(emotion_label_, FONT_AWESOME_AI_CHIP);
 
     preview_image_ = lv_image_create(content_);
@@ -769,12 +824,12 @@ void LcdDisplay::SetupUI() {
     network_label_ = lv_label_create(status_bar_);
     lv_label_set_text(network_label_, "");
     lv_obj_set_style_text_font(network_label_, fonts_.icon_font, 0);
-    lv_obj_set_style_text_color(network_label_, current_theme_.text, 0);
+    lv_obj_set_style_text_color(network_label_, lv_color_white(), 0);   /* 2026-09-26 状态栏黑底白字 */
 
     notification_label_ = lv_label_create(status_bar_);
     lv_obj_set_flex_grow(notification_label_, 1);
     lv_obj_set_style_text_align(notification_label_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(notification_label_, current_theme_.text, 0);
+    lv_obj_set_style_text_color(notification_label_, lv_color_white(), 0);   /* 2026-09-26 状态栏黑底白字 */
     lv_label_set_text(notification_label_, "");
     lv_obj_add_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
 
@@ -782,17 +837,17 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_flex_grow(status_label_, 1);
     lv_label_set_long_mode(status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_set_style_text_align(status_label_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(status_label_, current_theme_.text, 0);
+    lv_obj_set_style_text_color(status_label_, lv_color_white(), 0);   /* 2026-09-26 状态栏黑底白字 */
     lv_label_set_text(status_label_, Lang::Strings::INITIALIZING);
     mute_label_ = lv_label_create(status_bar_);
     lv_label_set_text(mute_label_, "");
     lv_obj_set_style_text_font(mute_label_, fonts_.icon_font, 0);
-    lv_obj_set_style_text_color(mute_label_, current_theme_.text, 0);
+    lv_obj_set_style_text_color(mute_label_, lv_color_white(), 0);   /* 2026-09-26 状态栏黑底白字 */
 
     battery_label_ = lv_label_create(status_bar_);
     lv_label_set_text(battery_label_, "");
     lv_obj_set_style_text_font(battery_label_, fonts_.icon_font, 0);
-    lv_obj_set_style_text_color(battery_label_, current_theme_.text, 0);
+    lv_obj_set_style_text_color(battery_label_, lv_color_white(), 0);   /* 2026-09-26 状态栏黑底白字 */
 
     low_battery_popup_ = lv_obj_create(screen);
     lv_obj_set_scrollbar_mode(low_battery_popup_, LV_SCROLLBAR_MODE_OFF);
@@ -940,22 +995,22 @@ void LcdDisplay::SetTheme(const std::string& theme_name) {
         
         // Update status bar elements
         if (network_label_ != nullptr) {
-            lv_obj_set_style_text_color(network_label_, current_theme_.text, 0);
+            lv_obj_set_style_text_color(network_label_, lv_color_white(), 0);   /* 2026-09-26 状态栏黑底白字 */
         }
         if (status_label_ != nullptr) {
-            lv_obj_set_style_text_color(status_label_, current_theme_.text, 0);
+            lv_obj_set_style_text_color(status_label_, lv_color_white(), 0);   /* 2026-09-26 状态栏黑底白字 */
         }
         if (notification_label_ != nullptr) {
-            lv_obj_set_style_text_color(notification_label_, current_theme_.text, 0);
+            lv_obj_set_style_text_color(notification_label_, lv_color_white(), 0);   /* 2026-09-26 状态栏黑底白字 */
         }
         if (mute_label_ != nullptr) {
-            lv_obj_set_style_text_color(mute_label_, current_theme_.text, 0);
+            lv_obj_set_style_text_color(mute_label_, lv_color_white(), 0);   /* 2026-09-26 状态栏黑底白字 */
         }
         if (battery_label_ != nullptr) {
-            lv_obj_set_style_text_color(battery_label_, current_theme_.text, 0);
+            lv_obj_set_style_text_color(battery_label_, lv_color_white(), 0);   /* 2026-09-26 状态栏黑底白字 */
         }
         if (emotion_label_ != nullptr) {
-            lv_obj_set_style_text_color(emotion_label_, current_theme_.text, 0);
+            lv_obj_set_style_text_color(emotion_label_, lv_color_white(), 0);   /* 2026-09-26 状态栏黑底白字 */
         }
     }
     
@@ -1088,7 +1143,7 @@ void LcdDisplay::SetTheme(const std::string& theme_name) {
         }
         
         if (emotion_label_ != nullptr) {
-            lv_obj_set_style_text_color(emotion_label_, current_theme_.text, 0);
+            lv_obj_set_style_text_color(emotion_label_, lv_color_white(), 0);   /* 2026-09-26 状态栏黑底白字 */
         }
 #endif
     }

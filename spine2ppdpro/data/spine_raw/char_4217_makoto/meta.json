@@ -1,0 +1,28 @@
+{
+  "prefix": "https://torappu.prts.wiki/assets/char_spine/char_4217_makoto/",
+  "name": "结城理",
+  "skin": {
+    "默认": {
+      "背面": {
+        "file": "defaultskin/back/char_4217_makoto"
+      },
+      "正面": {
+        "file": "defaultskin/front/char_4217_makoto"
+      },
+      "基建": {
+        "file": "defaultskin/build/build_char_4217_makoto"
+      }
+    },
+    "见证荣光": {
+      "正面": {
+        "file": "char_4217_makoto_p3r_1/front/char_4217_makoto_p3r_1"
+      },
+      "基建": {
+        "file": "char_4217_makoto_p3r_1/build/build_char_4217_makoto_p3r_1"
+      },
+      "背面": {
+        "file": "char_4217_makoto_p3r_1/back/char_4217_makoto_p3r_1"
+      }
+    }
+  }
+}

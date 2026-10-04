@@ -5,6 +5,7 @@
 #include "button.h"
 #include "config.h"
 #include "led/single_led.h"
+#include "p4_camera.h"
 
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_mipi_dsi.h"
@@ -19,6 +20,10 @@
 #include <esp_log.h>
 #include <driver/i2c_master.h>
 #include <driver/gpio.h>
+#include <esp_timer.h>
+#include <esp_adc/adc_oneshot.h>
+#include <esp_adc/adc_cali.h>
+#include <esp_adc/adc_cali_scheme.h>
 
 #define TAG "jc4880p443"
 
@@ -80,11 +85,38 @@ class jc4880p443 : public WifiBoard {
 private:
     i2c_master_bus_handle_t codec_i2c_bus_;
     Button boot_button_;
-    Button int_button_; 
+    Button int_button_;
     LcdDisplay *display__;
 
+    /* 2026-09-25 软开关机:电源键只接 CHIP_PU 的 RC 电路(长按 20s 硬件断电,
+       固件检测不到该键),故用外壳可达的 BOOT 键(GPIO35)做软开关:
+       短按 → 关屏+挂断+停唤醒词(等效关机);再短按 → 恢复。 */
+    bool soft_power_off_ = false;
+    uint8_t saved_brightness_ = 0;
+
+    void ToggleSoftPower() {
+        auto& app = Application::GetInstance();
+        auto& audio = app.GetAudioService();
+        if (!soft_power_off_) {
+            soft_power_off_ = true;
+            if (app.GetDeviceState() != kDeviceStateIdle) {
+                app.SetDeviceState(kDeviceStateIdle);   // 对话中挂断,停语音处理
+            }
+            audio.EnableWakeWordDetection(false);   // 软关机期间不再听唤醒词(省电+免误触发)
+            saved_brightness_ = GetBacklight()->brightness();
+            GetBacklight()->SetBrightness(0, true);
+            ESP_LOGI(TAG, "软关机(短按 BOOT 键恢复)");
+        } else {
+            soft_power_off_ = false;
+            audio.EnableWakeWordDetection(true);    // 恢复唤醒词检测
+            GetBacklight()->SetBrightness(saved_brightness_ ? saved_brightness_ : 60, true);
+            ESP_LOGI(TAG, "软开机");
+        }
+    }
+
     void InitializeCodecI2c() {
-        // Initialize I2C peripheral
+        // 板子自建 I2C 总线(音频 codec / 触摸 GT911 / 摄像头 SCCB 共享;
+        // 2026-10-01 弃 BSP 的 bsp_i2c:引入 BSP 组件导致堆损坏唤醒崩溃)
         i2c_master_bus_config_t i2c_bus_cfg = {
             .i2c_port = I2C_NUM_1,
             .sda_io_num = AUDIO_CODEC_I2C_SDA_PIN,
@@ -124,8 +156,16 @@ private:
         };
 
         esp_lcd_panel_io_handle_t tp_io_handle = NULL;
-        esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
-        tp_io_config.scl_speed_hz = 400 * 1000;  // 400kHz 匹配 Waveshare
+        // 2026-09-30 IDF 5.5.1 结构体字段顺序变化(scl_speed_hz 移到最后),
+        // gt911 组件 1.2.1 的宏顺序不匹配(C++ designator order 报错)→ 手动初始化
+        esp_lcd_panel_io_i2c_config_t tp_io_config = {
+            .dev_addr = ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS,
+            .control_phase_bytes = 1,
+            .dc_bit_offset = 0,
+            .lcd_cmd_bits = 16,
+            .flags = { .disable_control_phase = 1 },
+            .scl_speed_hz = 400 * 1000,  // 400kHz 匹配 Waveshare
+        };
         ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(codec_i2c_bus_, &tp_io_config, &tp_io_handle));
 
         esp_err_t ret = esp_lcd_touch_new_i2c_gt911(tp_io_handle, &tp_cfg, &tp);
@@ -242,7 +282,11 @@ static esp_err_t bsp_enable_dsi_phy_power(void)
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
                 ResetWifiConfiguration();
+                return;
             }
+            /* 2026-09-25 运行态:短按 BOOT 键 = 软开关机
+               (启动配网期仍是"重配网",两种功能互不冲突) */
+            ToggleSoftPower();
         });
 
         // 触屏已通过 LVGL 驱动正常工作，GPIO 21 中断不再触发监听
@@ -286,6 +330,122 @@ public:
     virtual Backlight* GetBacklight() override {
         static PwmBacklight backlight(PIN_NUM_BK_LIGHT, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
         return &backlight;
+    }
+
+    virtual Camera* GetCamera() override {
+        // 2026-10-01 P4 MIPI-CSI 摄像头(OV02C10):SCCB 与音频 codec 共享 I2C 总线
+        static P4Camera camera(codec_i2c_bus_);
+        return &camera;
+    }
+
+    // ── 电池电量(2026-10-02,Guition adc_test 标定) ──
+    // 板子电池经分压接 GPIO53 = ADC2_CHANNEL_4;满电检测值 2450mV、
+    // 空电 2250mV,线性映射百分比(与 phone 出厂固件同源)。
+    // 充电状态:IP5306 无状态引脚,用 30 秒电压趋势判断(升=充电,降=放电)。
+    adc_oneshot_unit_handle_t bat_adc_ = nullptr;
+    adc_cali_handle_t bat_cali_ = nullptr;
+    SemaphoreHandle_t bat_mutex_ = nullptr;   /* 2026-10-02 防两个显示层并发读 ADC(0% 跳变) */
+    int last_percent_ = -1;
+    float last_bat_mv_ = 0;
+    int64_t last_trend_ts_ = 0;
+    bool trend_charging_ = false;
+
+    void InitBatteryAdc() {
+        adc_oneshot_unit_init_cfg_t init = {
+            .unit_id = ADC_UNIT_2,
+            .ulp_mode = ADC_ULP_MODE_DISABLE,
+        };
+        if (adc_oneshot_new_unit(&init, &bat_adc_) != ESP_OK) {
+            ESP_LOGW(TAG, "battery ADC unit init failed");
+            return;
+        }
+        adc_oneshot_chan_cfg_t chan = {
+            .atten = ADC_ATTEN_DB_12,
+            .bitwidth = ADC_BITWIDTH_DEFAULT,
+        };
+        if (adc_oneshot_config_channel(bat_adc_, ADC_CHANNEL_4, &chan) != ESP_OK) {
+            ESP_LOGW(TAG, "battery ADC channel config failed");
+            return;
+        }
+        adc_cali_curve_fitting_config_t cali_cfg = {
+            .unit_id = ADC_UNIT_2,
+            .chan = ADC_CHANNEL_4,
+            .atten = ADC_ATTEN_DB_12,
+            .bitwidth = ADC_BITWIDTH_DEFAULT,
+        };
+        adc_cali_create_scheme_curve_fitting(&cali_cfg, &bat_cali_);
+    }
+
+    virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging) override {
+        if (bat_adc_ == nullptr) InitBatteryAdc();
+        if (bat_adc_ == nullptr) return false;
+        if (bat_mutex_ == nullptr) bat_mutex_ = xSemaphoreCreateMutex();
+        if (bat_mutex_ == nullptr ||
+            xSemaphoreTake(bat_mutex_, pdMS_TO_TICKS(200)) != pdTRUE) return false;
+        bool ok = false;
+        int raw = 0, mv = 0, pct = 0;   /* goto out 前声明(C++ 跨初始化限制) */
+        int64_t now = 0;
+        // 2026-10-02 采样 64 次取中位数:充电时 IP5306 开关噪声大,
+        // 均值会被尖峰拉偏(曾出现 99%↔12% 跳变)
+        int samples[64];
+        for (int i = 0; i < 64; i++) {
+            int r = 0;
+            if (adc_oneshot_read(bat_adc_, ADC_CHANNEL_4, &r) != ESP_OK) goto out;
+            samples[i] = r;
+        }
+        // 插入排序取中位(64 个值,简单排序)
+        for (int i = 1; i < 64; i++) {
+            int v = samples[i], j = i - 1;
+            while (j >= 0 && samples[j] > v) { samples[j + 1] = samples[j]; j--; }
+            samples[j + 1] = v;
+        }
+        raw = (samples[31] + samples[32]) / 2;
+        mv = 0;
+        if (bat_cali_ != nullptr) {
+            if (adc_cali_raw_to_voltage(bat_cali_, raw, &mv) != ESP_OK) goto out;
+        } else {
+            goto out;   // 无校准拿不到电压,不显示(与 Guition 行为一致)
+        }
+        // 线性映射:2450mV=100%,2250mV=0%
+        pct = (mv - 2250) * 100 / (2450 - 2250);
+        // 2026-10-02 诊断:每 30 秒打印原始电压(排查充电 0% 读数异常)
+        {
+            static int64_t dbg_ts = 0;
+            if (esp_timer_get_time() - dbg_ts > 30 * 1000 * 1000LL) {
+                dbg_ts = esp_timer_get_time();
+                ESP_LOGI(TAG, "batt: raw=%d mv=%d pct=%d trend_chg=%d",
+                         raw, mv, pct, (int)trend_charging_);
+            }
+        }
+        if (pct < 0) pct = 0;
+        if (pct > 100) pct = 100;
+        // 强平滑:上次 70% + 本次 30%,单次变化钳制 ±8%(防 UI 跳变)
+        if (last_percent_ >= 0) {
+            int delta = pct - last_percent_;
+            if (delta > 8) delta = 8;
+            if (delta < -8) delta = -8;
+            pct = last_percent_ + delta;
+        }
+        last_percent_ = pct;
+        // 60 秒电压趋势:>5mV 升=充电,< -5mV 降=放电
+        // (2026-10-02 阈值 25→5mV:充电后期电压爬升仅 4-7mV/分钟,25mV 判不出)
+        now = esp_timer_get_time();
+        if (last_trend_ts_ == 0) {
+            last_trend_ts_ = now;
+            last_bat_mv_ = mv;
+        } else if (now - last_trend_ts_ > 60 * 1000 * 1000LL) {
+            if (mv - last_bat_mv_ > 5) trend_charging_ = true;
+            else if (mv - last_bat_mv_ < -5) trend_charging_ = false;
+            last_trend_ts_ = now;
+            last_bat_mv_ = mv;
+        }
+        charging = trend_charging_;
+        discharging = !trend_charging_;
+        level = pct;
+        ok = true;
+    out:
+        xSemaphoreGive(bat_mutex_);
+        return ok;
     }
 
 };

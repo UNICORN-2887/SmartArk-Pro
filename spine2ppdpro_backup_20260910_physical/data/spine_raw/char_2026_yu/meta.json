@@ -1,0 +1,28 @@
+{
+  "prefix": "https://torappu.prts.wiki/assets/char_spine/char_2026_yu/",
+  "name": "余",
+  "skin": {
+    "默认": {
+      "正面": {
+        "file": "defaultskin/front/char_2026_yu"
+      },
+      "基建": {
+        "file": "defaultskin/build/build_char_2026_yu"
+      },
+      "背面": {
+        "file": "defaultskin/back/char_2026_yu"
+      }
+    },
+    "愿清晓": {
+      "基建": {
+        "file": "char_2026_yu_nian_12/build/build_char_2026_yu_nian_12"
+      },
+      "背面": {
+        "file": "char_2026_yu_nian_12/back/char_2026_yu_nian_12"
+      },
+      "正面": {
+        "file": "char_2026_yu_nian_12/front/char_2026_yu_nian_12"
+      }
+    }
+  }
+}

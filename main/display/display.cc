@@ -153,6 +153,17 @@ void Display::UpdateStatusBar(bool update_all) {
             battery_icon_ = icon;
             lv_label_set_text(battery_label_, battery_icon_);
         }
+        // 2026-10-02 电量百分比数字(低电量红色)
+        if (battery_percent_label_ != nullptr) {
+            char pct_str[8];
+            snprintf(pct_str, sizeof(pct_str), "%d%%", battery_level);
+            lv_label_set_text(battery_percent_label_, pct_str);
+            if (battery_level < 10) {
+                lv_obj_set_style_text_color(battery_percent_label_, lv_color_hex(0xFF4444), 0);
+            } else {
+                lv_obj_set_style_text_color(battery_percent_label_, lv_color_white(), 0);
+            }
+        }
 
         if (low_battery_popup_ != nullptr) {
             if (strcmp(icon, FONT_AWESOME_BATTERY_EMPTY) == 0 && discharging) {

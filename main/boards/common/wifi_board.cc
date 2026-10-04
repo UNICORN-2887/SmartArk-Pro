@@ -11,6 +11,7 @@
 #include <freertos/task.h>
 #include <esp_network.h>
 #include <esp_log.h>
+#include <esp_netif.h>
 
 #include <wifi_station.h>
 #include <wifi_configuration_ap.h>
@@ -91,17 +92,51 @@ void WifiBoard::EnterWifiConfigMode() {
 void WifiBoard::StartNetwork() {
     auto display = Board::GetInstance().GetDisplay();
 
-    // 如果没有保存的SSID，进入配网模式
     auto& ssid_manager = SsidManager::GetInstance();
-    if (ssid_manager.GetSsidList().empty() && !wifi_config_mode_) {
-        wifi_config_mode_ = true;
+
+    /* 2026-09-20 新配网主路径:屏幕 WiFi 列表(手机式)。
+       ① 有已存 SSID → 先自动尝试连接;
+       ② 无已存/连接失败 → 弹屏幕 WiFi 列表(选网+密码键盘);
+       ③ 用户在列表页跳过 → 旧 AP 热点配网兜底(保留)。 */
+    /* 2026-09-29 开机仪式(用户拍板):加载条 → 开始唤醒按钮 → 点击进下一阶段 */
+    extern void boot_ceremony_loading(const lv_font_t *font);
+    extern void boot_ceremony_ready(void);
+    extern int boot_ceremony_wait(int timeout_ms);
+    extern void boot_ceremony_hide(void);
+    extern void boot_cover_stop(void);
+    boot_ceremony_loading(display->GetTextFont());   // 中文字体(对话框同款,LV_FONT_DEFAULT 无中文)
+
+    bool auto_connected = false;
+    if (!ssid_manager.GetSsidList().empty()) {
+        auto& ws_try = WifiStation::GetInstance();
+        ws_try.Start();
+        /* 2026-09-21:窗口 60s→8s。LP 核 ~2.4s/轮持续扫描,已存 SSID 在范围内
+           第一轮即 Found AP→连接;8s(≈3 轮)未连上说明不在范围/密码错 */
+        auto_connected = ws_try.WaitForConnected(8 * 1000);
     }
 
-    // 配网模式（首次使用 或 用户长按进入）
-    if (wifi_config_mode_) {
-        EnterWifiConfigMode();  // 等待配网完成，返回后 wifi_config_mode_ 已清
-        // 配网完成后继续往下走，尝试连接
+    /* 2026-09-29 加载完成:显示开始唤醒按钮(背景继续轮播),等用户点击 */
+    boot_ceremony_ready();
+    boot_ceremony_wait(300000);   /* 5 分钟兜底(用户不点也继续) */
+    boot_ceremony_hide();
+    boot_cover_stop();   /* 用户点击进入下一阶段:才停轮播(定格当前图垫底) */
+
+    if (!auto_connected) {
+        /* 2026-09-21:不 Stop!P4 LP 核 Stop→Start 会永久卡死(扫描恒 12289
+           且 LP 自己的周期扫描也停)——保持活站点进列表页,其 LP 周期扫描
+           还在跑,ScanOnce 被动读取即可;跳过时由 wifi_ui_show 内部 Stop */
+        extern bool wifi_ui_show(void);
+        if (wifi_ui_show()) {
+            return;   /* 屏幕列表选好并连接成功 */
+        }
+        /* 2026-09-26 配网页「离线模式」:设标志+跳过,不进 AP 兜底直接继续 */
+        extern bool application_offline_mode(void);
+        if (application_offline_mode()) return;
     }
+
+    /* 列表页跳过(或没有可用 WiFi)→ 旧 AP 热点配网兜底 */
+    wifi_config_mode_ = true;
+    EnterWifiConfigMode();   // 等待配网完成，返回后 wifi_config_mode_ 已清
 
     // 尝试连接已保存的WiFi
     if (ssid_manager.GetSsidList().empty()) {
@@ -131,7 +166,11 @@ void WifiBoard::StartNetwork() {
         wifi_station.Stop();
         wifi_config_mode_ = true;
         EnterWifiConfigMode();
-        // 配网后又回到这里重试
+        // 配网后又回到这里重试。Stop() 不销毁 STA netif，重复 Start 会在
+        // esp_netif_create_default_wifi_sta 里重复创建同 key netif 直接断言（IDF 5.5）
+        if (esp_netif_get_handle_from_ifkey("WIFI_STA_DEF") != nullptr) {
+            esp_netif_destroy(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"));
+        }
         wifi_station.Start();
         if (!wifi_station.WaitForConnected(60 * 1000)) {
             wifi_station.Stop();

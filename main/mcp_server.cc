@@ -13,9 +13,12 @@
 #include "application.h"
 #include "display.h"
 #include "board.h"
+#include "settings.h"
 
 #define TAG "MCP"
 
+// 工具线程栈(pthread 静态栈池有限,保持 6KB;P4 摄像头初始化改在
+// 独立 FreeRTOS 动态栈任务中执行,见 p4_camera.cc init_lazy)
 #define DEFAULT_TOOLCALL_STACK_SIZE 6144
 
 McpServer::McpServer() {
@@ -45,17 +48,29 @@ void McpServer::AddCommonTools() {
             return board.GetDeviceStatusJson();
         });
 
-    AddTool("self.audio_speaker.set_volume", 
+    AddTool("self.audio_speaker.set_volume",
         "Set the volume of the audio speaker. If the current volume is unknown, you must call `self.get_device_status` tool first and then call this tool.",
         PropertyList({
             Property("volume", kPropertyTypeInteger, 0, 100)
-        }), 
+        }),
         [&board](const PropertyList& properties) -> ReturnValue {
             auto codec = board.GetAudioCodec();
             codec->SetOutputVolume(properties["volume"].value<int>());
             return true;
         });
-    
+
+    AddTool("self.voiceprint.set_enabled",
+        "Turn on/off the voiceprint filter. When enabled, the device only responds to the registered owner's voice (useful in noisy places); when disabled, it responds to everyone.",
+        PropertyList({
+            Property("enabled", kPropertyTypeBoolean)
+        }),
+        [](const PropertyList& properties) -> ReturnValue {
+            // 2026-09-30 声纹过滤开关:写 NVS,下次连接服务器随 hello 上报
+            bool on = properties["enabled"].value<bool>();
+            Settings("voiceprint", true).SetInt("enabled", on ? 1 : 0);
+            return true;
+        });
+
     auto backlight = board.GetBacklight();
     if (backlight) {
         AddTool("self.screen.set_brightness",
@@ -87,6 +102,8 @@ void McpServer::AddCommonTools() {
     if (camera) {
         AddTool("self.camera.take_photo",
             "Take a photo and explain it. Use this tool after the user asks you to see something.\n"
+            "触发词:拍照、拍张照、拍一张照片、给我拍照、帮我拍照、用相机拍、看看前面有什么、你能看到什么、看看这里、拍下来。\n"
+            "用户提到任何拍照/拍摄/看前面的意图时,不要反问澄清,直接调用本工具。\n"
             "Args:\n"
             "  `question`: The question that you want to ask about the photo.\n"
             "Return:\n"
@@ -306,11 +323,19 @@ void McpServer::GetToolsList(int id, const std::string& cursor) {
 }
 
 void McpServer::DoToolCall(int id, const std::string& tool_name, const cJSON* tool_arguments, int stack_size) {
-    auto tool_iter = std::find_if(tools_.begin(), tools_.end(), 
-                                 [&tool_name](const McpTool* tool) { 
-                                     return tool->name() == tool_name; 
+    // MCP 工具调用日志：LLM 每次调工具都在串口可见（验证链路的关键证据）
+    if (cJSON_IsObject(tool_arguments)) {
+        char* s = cJSON_PrintUnformatted(tool_arguments);
+        ESP_LOGI(TAG, "MCP tools/call: %s %s", tool_name.c_str(), s);
+        cJSON_free(s);
+    } else {
+        ESP_LOGI(TAG, "MCP tools/call: %s", tool_name.c_str());
+    }
+    auto tool_iter = std::find_if(tools_.begin(), tools_.end(),
+                                 [&tool_name](const McpTool* tool) {
+                                     return tool->name() == tool_name;
                                  });
-    
+
     if (tool_iter == tools_.end()) {
         ESP_LOGE(TAG, "tools/call: Unknown tool: %s", tool_name.c_str());
         ReplyError(id, "Unknown tool: " + tool_name);

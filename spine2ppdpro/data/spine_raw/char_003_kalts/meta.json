@@ -1,0 +1,39 @@
+{
+  "prefix": "https://torappu.prts.wiki/assets/char_spine/char_003_kalts/",
+  "name": "凯尔希",
+  "skin": {
+    "残余": {
+      "基建": {
+        "file": "char_003_kalts_boc_6/build/build_char_003_kalts_boc_6"
+      },
+      "正面": {
+        "file": "char_003_kalts_boc_6/front/char_003_kalts_boc_6"
+      },
+      "背面": {
+        "file": "char_003_kalts_boc_6/back/char_003_kalts_boc_6"
+      }
+    },
+    "默认": {
+      "基建": {
+        "file": "defaultskin/build/build_char_003_kalts"
+      },
+      "正面": {
+        "file": "defaultskin/front/char_003_kalts"
+      },
+      "背面": {
+        "file": "defaultskin/back/char_003_kalts"
+      }
+    },
+    "时遗": {
+      "背面": {
+        "file": "char_003_kalts_sale_14/back/char_003_kalts_sale_14"
+      },
+      "正面": {
+        "file": "char_003_kalts_sale_14/front/char_003_kalts_sale_14"
+      },
+      "基建": {
+        "file": "char_003_kalts_sale_14/build/build_char_003_kalts_sale_14"
+      }
+    }
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "prefix": "https://torappu.prts.wiki/assets/char_spine/char_002_amiya/",
+  "name": "阿米娅",
+  "skin": {
+    "报童": {
+      "正面": {
+        "file": "char_002_amiya_winter_1/front/char_002_amiya_winter_1"
+      },
+      "基建": {
+        "file": "char_002_amiya_winter_1/build/build_char_002_amiya_winter_1"
+      },
+      "背面": {
+        "file": "char_002_amiya_winter_1/back/char_002_amiya_winter_1"
+      }
+    },
+    "播种者": {
+      "正面": {
+        "file": "char_002_amiya_test_1/front/char_002_amiya_test_1"
+      },
+      "基建": {
+        "file": "char_002_amiya_test_1/build/build_char_002_amiya_test_1"
+      },
+      "背面": {
+        "file": "char_002_amiya_test_1/back/char_002_amiya_test_1"
+      }
+    },
+    "见习联结者": {
+      "背面": {
+        "file": "char_002_amiya_epoque_4/back/char_002_amiya_epoque_4"
+      },
+      "正面": {
+        "file": "char_002_amiya_epoque_4/front/char_002_amiya_epoque_4"
+      },
+      "基建": {
+        "file": "char_002_amiya_epoque_4/build/build_char_002_amiya_epoque_4"
+      }
+    },
+    "默认": {
+      "正面": {
+        "file": "defaultskin/front/char_002_amiya"
+      },
+      "背面": {
+        "file": "defaultskin/back/char_002_amiya"
+      },
+      "基建": {
+        "file": "defaultskin/build/build_char_002_amiya"
+      }
+    }
+  }
+}

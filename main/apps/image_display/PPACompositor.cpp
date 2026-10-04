@@ -113,12 +113,28 @@ bool ppa_load_background(const char *path) {
     }
 
     ESP_LOGI(TAG, "Background loaded: %s (%ux%u)", path, DISPLAY_W, DISPLAY_H);
+    /* 2026-10-03 移除 bg.raw 同步写:SDMMC DMA 大块写疑破坏 .bss(解锁背景崩溃)。
+       背景一致性暂由 bg_switch 的 PPA 缓冲同步保证;bg.raw 持久化方案待
+       DMA 问题定位后用小缓冲分块写重做 */
     ppa_prog("加载背景", 100);
     return true;
 }
 
-void ppa_unload_background(void) {
-    if (s_bg_buf) { free(s_bg_buf); s_bg_buf = NULL; }
+bool ppa_background_set_from_rgb565(const uint8_t* buf, int width, int stride, int offset_x) {
+    /* 2026-10-03 选背景全局持久化:从长背景槽裁剪 480×800 更新 PPA 背景缓冲,
+       使对话模式/拍照恢复的背景与用户选择一致(不再固定 background.jpg) */
+    if (!s_bg_buf || !buf) return false;
+    if (offset_x < 0) offset_x = 0;
+    if (offset_x + 480 > width) offset_x = width - 480;
+    if (offset_x < 0) offset_x = 0;
+    for (int y = 0; y < 800; y++) {
+        memcpy(s_bg_buf + y * 480 * 2, buf + ((size_t)y * stride + offset_x) * 2, 480 * 2);
+    }
+    ESP_LOGI(TAG, "Background updated from long bg slot (off=%d)", offset_x);
+    return true;
+}
+
+void ppa_unload_background(void) {    if (s_bg_buf) { free(s_bg_buf); s_bg_buf = NULL; }
     ESP_LOGI(TAG, "Background unloaded");
 }
 bool ppa_has_background(void) { return s_bg_buf != NULL; }
@@ -1068,7 +1084,123 @@ uint8_t* ppa_composite_standee_frame(int frame_index) {
     return comp;
 }
 
+// ─── 长背景（横屏长图竖屏切片，PPD 交互页用）───
+
+#define LONG_BG_MAX_W 1440
+#define LONG_BG_MAX_H 800
+
+typedef struct {
+    uint8_t *buf;   // NULL=空槽
+    int w, h;       // 可见宽高（JPEG 真实尺寸）
+    int stride;     // 行 stride（MCU pad 后宽度，像素）
+} LongBgSlot;
+
+static LongBgSlot s_long_bg[2];
+static uint8_t *s_long_bg_tx = NULL;
+static size_t s_long_bg_tx_cap = 0;
+
+int ppa_long_bg_alloc(void) {
+    if (s_long_bg[0].buf) return s_long_bg[1].buf ? 2 : 1;
+    jpeg_decode_memory_alloc_cfg_t rx_cfg = { .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER };
+    size_t out_size;
+    int slots = 0;
+    for (int i = 0; i < 2; i++) {
+        s_long_bg[i].buf = (uint8_t*)jpeg_alloc_decoder_mem(
+            LONG_BG_MAX_W * LONG_BG_MAX_H * 2, &rx_cfg, &out_size);
+        if (s_long_bg[i].buf) {
+            s_long_bg[i].w = s_long_bg[i].h = s_long_bg[i].stride = 0;
+            slots++;
+        } else {
+            break;
+        }
+    }
+    ESP_LOGI(TAG, "long bg alloc: %d slots (PSRAM free %u KB)", slots,
+             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+    return slots;
+}
+
+int ppa_long_bg_decode(const char *path, int slot) {
+    if (slot < 0 || slot > 1 || !s_long_bg[slot].buf) return -1;
+    FILE *fp = fopen(path, "rb");
+    if (!fp) { ESP_LOGE(TAG, "long bg open fail: %s", path); return -1; }
+    fseek(fp, 0, SEEK_END);
+    size_t size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    if (size == 0 || size > 512 * 1024) {
+        fclose(fp);
+        ESP_LOGE(TAG, "long bg bad size: %s (%u B)", path, (unsigned)size);
+        return -1;
+    }
+    uint8_t *jpg_data = (uint8_t*)heap_caps_malloc(size, MALLOC_CAP_SPIRAM);
+    if (!jpg_data) { fclose(fp); return -1; }
+    if (fread(jpg_data, 1, size, fp) != size) { fclose(fp); free(jpg_data); return -1; }
+    fclose(fp);
+
+    jpeg_decode_picture_info_t pic_info;
+    if (jpeg_decoder_get_info(jpg_data, size, &pic_info) != ESP_OK) {
+        free(jpg_data);
+        ESP_LOGE(TAG, "long bg info fail: %s", path);
+        return -1;
+    }
+    if (pic_info.width > LONG_BG_MAX_W || pic_info.height > LONG_BG_MAX_H) {
+        free(jpg_data);
+        ESP_LOGE(TAG, "long bg too big: %ux%u", (unsigned)pic_info.width, (unsigned)pic_info.height);
+        return -1;
+    }
+
+    // tx 缓冲一次分配复用（防 PSRAM 碎片化；最大 512KB 封顶）
+    size_t tx_need = (size + 63) & ~63;
+    if (!s_long_bg_tx || tx_need > s_long_bg_tx_cap) {
+        if (s_long_bg_tx) { free(s_long_bg_tx); s_long_bg_tx = NULL; s_long_bg_tx_cap = 0; }
+        s_long_bg_tx = (uint8_t*)heap_caps_malloc(tx_need, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
+        s_long_bg_tx_cap = tx_need;
+        if (!s_long_bg_tx) { free(jpg_data); return -1; }
+    }
+    memcpy(s_long_bg_tx, jpg_data, size);
+    free(jpg_data);
+
+    // 独立引擎 timeout 1000ms（480×800 需 30-55ms，1422×800 约 3 倍量，40ms 必超时）
+    jpeg_decoder_handle_t handle = NULL;
+    jpeg_decode_engine_cfg_t eng_cfg = { .timeout_ms = 1000 };
+    if (jpeg_new_decoder_engine(&eng_cfg, &handle) != ESP_OK) {
+        ESP_LOGE(TAG, "long bg engine create fail");
+        return -1;
+    }
+    uint32_t decoded;
+    esp_err_t ret = jpeg_decoder_process(handle, &s_jpg_cfg_rgb, s_long_bg_tx, tx_need,
+                                         s_long_bg[slot].buf,
+                                         LONG_BG_MAX_W * LONG_BG_MAX_H * 2, &decoded);
+    jpeg_del_decoder_engine(handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "long bg decode fail: %s (%s)", esp_err_to_name(ret), path);
+        return -1;
+    }
+
+    // 行 stride = MCU pad 后宽度（4:2:0 mcux=16；填充列在可见宽之外，渲染只看可见宽）
+    s_long_bg[slot].w = (int)pic_info.width;
+    s_long_bg[slot].h = (int)pic_info.height;
+    s_long_bg[slot].stride = (int)((pic_info.width + 15) & ~15);
+    ESP_LOGI(TAG, "long bg decoded: %s (%dx%d stride %d)", path,
+             s_long_bg[slot].w, s_long_bg[slot].h, s_long_bg[slot].stride);
+    return (int)pic_info.width;
+}
+
+uint8_t* ppa_long_bg_buffer(int slot) { return (slot >= 0 && slot <= 1) ? s_long_bg[slot].buf : NULL; }
+int ppa_long_bg_width(int slot) { return (slot >= 0 && slot <= 1) ? s_long_bg[slot].w : 0; }
+int ppa_long_bg_height(int slot) { return (slot >= 0 && slot <= 1) ? s_long_bg[slot].h : 0; }
+int ppa_long_bg_stride(int slot) { return (slot >= 0 && slot <= 1) ? s_long_bg[slot].stride : 0; }
+
+void ppa_long_bg_free(void) {
+    for (int i = 0; i < 2; i++) {
+        if (s_long_bg[i].buf) { free(s_long_bg[i].buf); s_long_bg[i].buf = NULL; }
+        s_long_bg[i].w = s_long_bg[i].h = s_long_bg[i].stride = 0;
+    }
+    if (s_long_bg_tx) { free(s_long_bg_tx); s_long_bg_tx = NULL; s_long_bg_tx_cap = 0; }
+    ESP_LOGI(TAG, "long bg freed");
+}
+
 void ppa_deinit(void) {
+    ppa_long_bg_free();
     ppa_free_standee_slot();
     mjpeg_close();
     s_use_mjpeg = false;

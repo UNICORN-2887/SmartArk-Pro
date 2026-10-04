@@ -1,6 +1,8 @@
 #include "application.h"
 #include "board.h"
 #include "display.h"
+#include "settings.h"
+#include "apps/role_download/role_downloader.h"   // 换绑清空 operator(2026-09-10)
 #include "system_info.h"
 #include "audio_codec.h"
 #include "mqtt_protocol.h"
@@ -20,6 +22,16 @@
 #define TAG "Application"
 
 extern void sdcard_init(void);
+
+// 离线模式（定义在文件底部 extern 函数区）
+void application_set_offline_mode(void);
+bool application_offline_mode(void);
+// 语音记录播放状态机（定义在文件底部 extern 函数区）
+void application_set_voice_playback(bool playing);
+bool application_device_idle(void);
+
+// SD 卡阿米娅提示语音播放(定义在 Alert 前;换绑/音量等早期路径也要用)
+static void prompt_sd_play(AudioService &audio, const char *sd_key, const std::string_view &fallback);
 
 static const char* const STATE_STRINGS[] = {
     "unknown",
@@ -70,13 +82,263 @@ Application::~Application() {
     vEventGroupDelete(event_group_);
 }
 
+void Application::FetchWakeWords(bool quiet) {
+    // 动态唤醒词:从服务器拉取本设备词表(按 mac 返回绑定用户自己的角色+公共角色),
+    // 注册到 MultiNet 拼音命令词——用户自定义角色加唤醒词无需训练、无需烧录。
+    // 规则:未绑定用户(或拉取失败无法确认)→ 禁止发起唤醒请求。
+    // quiet=true 为轮询重试(不弹提示),绑定成功后自动解锁(无需重启设备)。
+    // 地址推导:API 与 OTA 同端口(http://host:88/xiaozhi/ota/ → http://host:88/api/wakewords)。
+    // 不能用 websocket url 推导(它在 89 端口,GET 返回"Server is running"非 JSON)
+    extern void bind_code_overlay_show(const lv_font_t *font, const char *code);
+    extern void bind_code_overlay_hide(void);
+    auto display = Board::GetInstance().GetDisplay();
+
+    auto block_chat = [this, quiet, display](const char* title, const char* message,
+                                             bool show_code,
+                                             const std::string_view& prompt = Lang::Sounds::P3_EXCLAMATION,
+                                             const char* sd_key = nullptr) {
+        ESP_LOGW(TAG, "Wake words unavailable: chat disabled (%s)", message);
+        wake_words_state_ = 1;
+        if (!quiet) {
+            Alert(title, message, "sad", prompt, sd_key);   // 2026-09-29 SD 阿米娅语音优先,内置回退
+            if (show_code) {
+                bind_code_overlay_show(display ? display->GetTextFont() : nullptr,
+                                       SystemInfo::GetBindCode().c_str());
+            }
+        }
+        // 注意:不能调 SetWakeWordCommands({})——MultiNet 对空命令表不更新,
+        // 会保留模型内置的 313 条空调命令词(mn7_cn_ac 默认表)。保持默认 9 词,
+        // 唤醒由 wake_words_state_==1 在 OnWakeWordDetected 拦截。
+        StartWakeWordBindPoll();
+    };
+
+    Ota ota;
+    std::string base = ota.GetCheckVersionUrl();
+    auto scheme_end = base.find("://");
+    if (scheme_end != std::string::npos) {
+        auto slash = base.find('/', scheme_end + 3);
+        if (slash != std::string::npos) {
+            base.erase(slash);   // 去路径,保留 scheme://host:port
+        }
+    } else {
+        base.clear();
+    }
+    if (base.empty()) {
+        block_chat("服务器错误", "服务器地址不可用,对话禁用(自动重试中)", false,
+                   Lang::Sounds::P3_EXCLAMATION, "server_conn_failed");
+        return;
+    }
+    std::string http_url = base + "/api/wakewords?mac=" + SystemInfo::GetMacAddress();
+
+    auto http = Board::GetInstance().GetNetwork()->CreateHttp(0);
+    http->SetTimeout(8000);
+    if (!http->Open("GET", http_url)) {
+        block_chat("服务器连接失败", "唤醒词无法获取,对话禁用(自动重试中)", false,
+                   Lang::Sounds::P3_EXCLAMATION, "server_conn_failed");
+        return;
+    }
+    if (http->GetStatusCode() != 200) {
+        ESP_LOGW(TAG, "Wake words fetch status %d", http->GetStatusCode());
+        http->Close();
+        block_chat("服务器连接失败", "唤醒词无法获取,对话禁用(自动重试中)", false,
+                   Lang::Sounds::P3_EXCLAMATION, "server_conn_failed");
+        return;
+    }
+    std::string body = http->ReadAll();
+    http->Close();
+
+    cJSON *root = cJSON_Parse(body.c_str());
+    if (root == nullptr) {
+        block_chat("服务器响应异常", "唤醒词无法获取,对话禁用(自动重试中)", false,
+                   Lang::Sounds::P3_EXCLAMATION, "server_conn_failed");
+        return;
+    }
+    cJSON *data = cJSON_GetObjectItem(root, "data");
+    bool bound = false;
+    if (data != nullptr) {
+        cJSON *b = cJSON_GetObjectItem(data, "bound");
+        bound = (b != nullptr && cJSON_IsTrue(b));
+    }
+    if (!bound) {
+        // 未绑定用户:不允许对话(不知道用哪个 Agent)。弹绑定码,网页绑定后轮询自动解锁
+        cJSON_Delete(root);
+        block_chat("设备未绑定", "登录网页输入上方绑定码,绑定成功后自动解锁", true,
+                   Lang::Sounds::P3_EXCLAMATION, "device_unbound");
+        return;
+    }
+    std::vector<std::pair<std::string, std::string>> commands;
+    wake_word_agents_.clear();
+    wake_word_paths_.clear();
+    wake_word_names_cn_.clear();
+    bound_user_uid_ = 0;
+    /* 服务器显式下发 uid(2026-09-10 统一架构:resource_path 不再含 _users 前缀,
+       旧 strstr 解析失效;uid 字段由 get_wakewords_for_device 提供) */
+    cJSON *uid_item = cJSON_GetObjectItem(data, "uid");
+    if (uid_item != nullptr && cJSON_IsNumber(uid_item)) {
+        bound_user_uid_ = uid_item->valueint;
+    }
+    // 2026-09-28 绑定用户账号名(聊天框输入表头显示):服务器下发,NVS 持久化
+    cJSON *uname_item = cJSON_GetObjectItem(data, "username");
+    if (uname_item != nullptr && uname_item->valuestring != nullptr &&
+        uname_item->valuestring[0] != '\0') {
+        bound_username_ = uname_item->valuestring;
+        Settings("wakewords", true).SetString("bound_username", bound_username_);
+    } else {
+        bound_username_ = Settings("wakewords", false).GetString("bound_username", "");
+    }
+    // 换绑检测:与 NVS 持久化的上次 uid 对比,变化 → 主循环安全清空 operator
+    {
+        Settings s("wakewords", false);
+        int last_uid = s.GetInt("bound_uid", 0);
+        if (bound_user_uid_ > 0 && last_uid > 0 && bound_user_uid_ != last_uid) {
+            ESP_LOGI(TAG, "检测到绑定用户变更: u%d → u%d,待清空 operator", last_uid, bound_user_uid_);
+            pending_clear_operator_ = true;
+            int new_uid = bound_user_uid_;
+            Schedule([this, new_uid]() {
+                ClearOperatorAfterRebind(new_uid);
+            });
+        }
+    }
+    cJSON *list = cJSON_GetObjectItem(data, "wake_words");
+    cJSON *item = nullptr;
+    cJSON_ArrayForEach(item, list) {
+        cJSON *name_item = cJSON_GetObjectItem(item, "name");
+        cJSON *id_item = cJSON_GetObjectItem(item, "agent_id");
+        cJSON *path_item = cJSON_GetObjectItem(item, "resource_path");
+        cJSON *words = cJSON_GetObjectItem(item, "words");
+        if (name_item == nullptr || name_item->valuestring == nullptr) {
+            continue;
+        }
+        if (id_item != nullptr && id_item->valuestring != nullptr) {
+            wake_word_agents_[name_item->valuestring] = id_item->valuestring;
+        }
+        if (path_item != nullptr && path_item->valuestring != nullptr &&
+            path_item->valuestring[0] != '\0') {
+            wake_word_paths_[name_item->valuestring] = path_item->valuestring;
+        }
+        // 2026-09-28 干员中文名(聊天框回复表头显示;服务器下发,查不到用 name)
+        cJSON *cn_item = cJSON_GetObjectItem(item, "name_cn");
+        if (cn_item != nullptr && cn_item->valuestring != nullptr &&
+            cn_item->valuestring[0] != '\0') {
+            wake_word_names_cn_[name_item->valuestring] = cn_item->valuestring;
+        }
+        cJSON *w = nullptr;
+        cJSON_ArrayForEach(w, words) {
+            if (w != nullptr && w->valuestring != nullptr && w->valuestring[0] != '\0') {
+                commands.emplace_back(w->valuestring, name_item->valuestring);
+            }
+        }
+    }
+    cJSON_Delete(root);
+    if (commands.empty()) {
+        // 已绑定但无任何带拼音的角色 → 同样禁用(避免回退公共词表破坏隔离)
+        block_chat("暂无唤醒词", "账号下没有配置唤醒词拼音的角色,对话禁用", false,
+                   Lang::Sounds::P3_EXCLAMATION, "no_wakewords");
+        return;
+    }
+    wake_words_state_ = 2;
+    // 词表签名:与上次一致则静默跳过(轮询期间不改动不反复 Stop/Start)
+    std::string sig;
+    for (const auto &c : commands) {
+        sig += c.first;
+        sig += '|';
+        sig += c.second;
+        sig += ';';
+    }
+    if (sig == wake_words_sig_ && quiet) {
+        return;
+    }
+    wake_words_sig_ = sig;
+    // 绑定成功:应用词表(检测运行中需先停后启,SetWakeWordCommands 在 Start 时安全生效)
+    bool running = audio_service_.IsWakeWordRunning();
+    if (running) {
+        audio_service_.EnableWakeWordDetection(false);
+    }
+    audio_service_.SetWakeWordCommands(commands);
+    if (running) {
+        audio_service_.EnableWakeWordDetection(true);
+    }
+    bind_code_overlay_hide();
+    if (display != nullptr) {
+        display->SetStatus(Lang::Strings::STANDBY);
+    }
+    ESP_LOGI(TAG, "Wake words from server: %d commands, %d agents%s",
+             commands.size(), (int)wake_word_agents_.size(),
+             quiet ? " (轮询热更新)" : "");
+}
+
+void Application::ClearOperatorAfterRebind(int new_uid) {
+    /* 换绑清空(主循环上下文,2026-09-10):
+       ① SD 就绪(启动早期词表先于挂载完成,未就绪则留待下轮轮询再触发)
+       ② 关索引页/停视频(打开中的文件 unlink 会失败;下载弹窗随索引页关闭)
+       ③ 清 operator(保留 INDEX)+ 旧 uid 目录(OC 一并)
+       ④ 成功才写 NVS(失败下轮轮询 last≠new 会再次触发) */
+    extern bool sdcard_wait_ready(int timeout_ms);
+    if (!sdcard_wait_ready(5000)) {
+        ESP_LOGW(TAG, "rebind clear: SD 未就绪,留待下轮重试");
+        return;
+    }
+    extern void agent_index_hide_for_app(void);
+    agent_index_hide_for_app();
+    extern void video_playback_stop(void);
+    video_playback_stop();
+
+    int r = role_download_clear_operator();
+    int last_uid = Settings("wakewords", false).GetInt("bound_uid", 0);
+    if (last_uid > 0 && last_uid != new_uid) {
+        char olddir[40];
+        snprintf(olddir, sizeof(olddir), "/sdcard/_users/u%d", last_uid);
+        role_download_remove_dir(olddir);   // 旧 uid 目录(含 other/OC)
+    }
+    if (r == 0 || r == 1) {
+        Settings("wakewords", true).SetInt("bound_uid", new_uid);
+        pending_clear_operator_ = false;
+        ESP_LOGI(TAG, "rebind clear done: u%d", new_uid);
+        auto display = Board::GetInstance().GetDisplay();
+        if (display != nullptr) {
+            display->ShowNotification("检测到账号更换\n角色资源已清理,请重新下载");
+            prompt_sd_play(audio_service_, "account_changed", Lang::Sounds::P3_EXCLAMATION);   // 2026-09-29 SD 阿米娅语音
+        }
+    } else {
+        ESP_LOGW(TAG, "rebind clear 部分失败(-1),留待下轮重试");
+    }
+}
+
+void Application::StartWakeWordBindPoll() {
+    if (wakeword_poll_task_ != nullptr) {
+        return;   // 轮询任务已在运行
+    }
+    xTaskCreate([](void* arg) {
+        auto* self = (Application*)arg;
+        self->WakeWordBindPollTask();
+        vTaskDelete(NULL);
+    }, "wakeword_poll", 4096, this, 2, &wakeword_poll_task_);
+}
+
+void Application::WakeWordBindPollTask() {
+    // 未绑定:10 秒快速轮询(网页绑定后尽快自动解锁);
+    // 已绑定:5 分钟慢轮询(网页改角色/音色/唤醒词后自动热更新,无需重启设备)
+    while (true) {
+        vTaskDelay(pdMS_TO_TICKS(wake_words_state_ == 1 ? 10000 : 300000));
+        if (wake_words_state_ == 0) {
+            break;   // 离线模式等未进入拦截流程:任务无意义
+        }
+        FetchWakeWords(true);
+    }
+    wakeword_poll_task_ = nullptr;
+}
+
 void Application::CheckNewVersion(Ota& ota) {
-    const int MAX_RETRY = 10;
+    const int MAX_RETRY = 3;   // 2026-09-29 10→3:网络不通时 10+20+40=70s 后放弃继续启动,不再卡几分钟反复报错
     int retry_count = 0;
     int retry_delay = 10; // 初始重试延迟为10秒
 
     auto& board = Board::GetInstance();
     while (true) {
+        if (application_offline_mode()) {
+            ESP_LOGW(TAG, "Offline mode requested, skip version check/activation");
+            return;
+        }
         SetDeviceState(kDeviceStateActivating);
         auto display = board.GetDisplay();
         display->SetStatus(Lang::Strings::CHECKING_NEW_VERSION);
@@ -90,11 +352,14 @@ void Application::CheckNewVersion(Ota& ota) {
 
             char buffer[128];
             snprintf(buffer, sizeof(buffer), Lang::Strings::CHECK_NEW_VERSION_FAILED, retry_delay, ota.GetCheckVersionUrl().c_str());
-            Alert(Lang::Strings::ERROR, buffer, "sad", Lang::Sounds::P3_EXCLAMATION);
+            Alert(Lang::Strings::ERROR, buffer, "sad", Lang::Sounds::P3_EXCLAMATION, "check_version_failed");
 
             ESP_LOGW(TAG, "Check new version failed, retry in %d seconds (%d/%d)", retry_delay, retry_count, MAX_RETRY);
             for (int i = 0; i < retry_delay; i++) {
                 vTaskDelay(pdMS_TO_TICKS(1000));
+                if (application_offline_mode()) {
+                    break;   // 重试等待中点了离线模式
+                }
                 if (device_state_ == kDeviceStateIdle) {
                     break;
                 }
@@ -106,9 +371,23 @@ void Application::CheckNewVersion(Ota& ota) {
         retry_delay = 10; // 重置重试延迟时间
 
         if (ota.HasNewVersion()) {
+            // 2026-09-28 用户拍板:升级前弹窗询问,点「升级」后阻塞执行;「暂不」/超时则正常启动,下次开机再问
+            extern void ota_confirm_show(const char *version);
+            extern int ota_confirm_wait(int timeout_ms);
+            extern void ota_confirm_hide(void);
+            ota_confirm_show(ota.GetFirmwareVersion().c_str());
+            int choice = ota_confirm_wait(30000);
+            ota_confirm_hide();
+            if (choice != 1) {
+                ESP_LOGI(TAG, "OTA upgrade skipped by user (choice=%d), continuing startup", choice);
+                ota.MarkCurrentVersionValid();
+                xEventGroupSetBits(event_group_, MAIN_EVENT_CHECK_NEW_VERSION_DONE);
+                break;   // 跳过本次升级,正常启动
+            }
+
             Alert(Lang::Strings::OTA_UPGRADE, Lang::Strings::UPGRADING, "happy", Lang::Sounds::P3_UPGRADE);
 
-            vTaskDelay(pdMS_TO_TICKS(3000));
+            vTaskDelay(pdMS_TO_TICKS(1500));
 
             SetDeviceState(kDeviceStateUpgrading);
             
@@ -120,18 +399,28 @@ void Application::CheckNewVersion(Ota& ota) {
             audio_service_.Stop();
             vTaskDelay(pdMS_TO_TICKS(1000));
 
+            // 2026-09-28 图形进度条(用户要求):升级期间全屏进度面板
+            extern void ota_progress_show(const char *version);
+            extern void ota_progress_update(int percent);
+            extern void ota_progress_hide(void);
+            ota_progress_show(ota.GetFirmwareVersion().c_str());
+
             bool upgrade_success = ota.StartUpgrade([display](int progress, size_t speed) {
                 char buffer[64];
                 snprintf(buffer, sizeof(buffer), "%d%% %uKB/s", progress, speed / 1024);
                 display->SetChatMessage("system", buffer);
+                extern void ota_progress_update(int percent);
+                ota_progress_update(progress);
             });
+
+            ota_progress_hide();
 
             if (!upgrade_success) {
                 // Upgrade failed, restart audio service and continue running
                 ESP_LOGE(TAG, "Firmware upgrade failed, restarting audio service and continuing operation...");
                 audio_service_.Start(); // Restart audio service
                 board.SetPowerSaveMode(true); // Restore power save mode
-                Alert(Lang::Strings::ERROR, Lang::Strings::UPGRADE_FAILED, "sad", Lang::Sounds::P3_EXCLAMATION);
+                Alert(Lang::Strings::ERROR, Lang::Strings::UPGRADE_FAILED, "sad", Lang::Sounds::P3_EXCLAMATION, "upgrade_failed");
                 vTaskDelay(pdMS_TO_TICKS(3000));
                 // Continue to normal operation (don't break, just fall through)
             } else {
@@ -207,14 +496,40 @@ void Application::ShowActivationCode(const std::string& code, const std::string&
     }
 }
 
-void Application::Alert(const char* status, const char* message, const char* emotion, const std::string_view& sound) {
+static void prompt_sd_play(AudioService &audio, const char *sd_key, const std::string_view &fallback) {
+    /* 2026-09-29 阿米娅提示语音走 SD 卡(公共库 prompts,启动后台同步):
+       SD 有 <key>.p3 优先播,否则回退内置提示音。固件瘦身避开 P4 XIP 布局崩溃 */
+    if (sd_key && sd_key[0]) {
+        char path[112];
+        snprintf(path, sizeof(path), "/sdcard/Arknights/main/prompts/%.*s.p3",
+                 (int)strnlen(sd_key, 60), sd_key);
+        FILE *f = fopen(path, "rb");
+        if (f) {
+            fseek(f, 0, SEEK_END);
+            long sz = ftell(f);
+            fseek(f, 0, SEEK_SET);
+            if (sz > 0 && sz < 65536) {
+                std::string data((size_t)sz, (char)0);
+                if (fread(&data[0], 1, (size_t)sz, f) == (size_t)sz) {
+                    fclose(f);
+                    audio.PlaySound(data);
+                    return;
+                }
+            }
+            fclose(f);
+        }
+    }
+    audio.PlaySound(fallback);
+}
+
+void Application::Alert(const char* status, const char* message, const char* emotion, const std::string_view& sound, const char* sd_key) {
     ESP_LOGW(TAG, "Alert %s: %s [%s]", status, message, emotion);
     auto display = Board::GetInstance().GetDisplay();
     display->SetStatus(status);
     display->SetEmotion(emotion);
     display->SetChatMessage("system", message);
     if (!sound.empty()) {
-        audio_service_.PlaySound(sound);
+        prompt_sd_play(audio_service_, sd_key, sound);
     }
 }
 
@@ -331,6 +646,10 @@ void Application::Start() {
     auto& board = Board::GetInstance();
     SetDeviceState(kDeviceStateStarting);
 
+    /* 2026-09-17:静音 AFE 组件 WARN 刷屏("Ringbuffer of AFE(FEED) is full" 每 32ms 一条,
+       低波特率下 UART 输出阻塞任务 → 加剧调度饥饿 → 看门狗)。真错误仍可见。 */
+    esp_log_level_set("AFE", ESP_LOG_ERROR);
+
     /* Setup the display */
     auto display = board.GetDisplay();
 
@@ -368,15 +687,61 @@ void Application::Start() {
     /* Start the clock timer to update the status bar */
     esp_timer_start_periodic(clock_timer_handle_, 1000000);
 
+    /* 2026-09-27 显示系统+黑底 canvas 提前到 StartNetwork 之前:WiFi 配网页
+       (lv_layer_top)盖在黑底上,配网完成删页瞬间即是索引页框架——不再露
+       LcdDisplay 默认 UI(用户报"WiFi→角色选择中间闪过一个页面") */
+    extern bool image_display_init(void);
+    bool display_ok = image_display_init();
+
+    // 2026-09-29 开机背景保守版 v1:显示一张随机公共库 cover 图(无轮播)
+    extern void boot_cover_init(void);
+    boot_cover_init();
+
+
     /* Wait for the network to be ready */
     board.StartNetwork();
+
+    /* 2026-09-26 索引页提前:WiFi 连接成功立即显示角色选择页(黑底),
+       后续 OTA 检查/协议连接只更新顶部状态栏,不再出现"白屏→检查新版本→待命→
+       版本通知"的跳页过程(用户拍板:连 WiFi 后直接是角色选择页) */
+    extern void agent_index_show(void);
+    extern void chat_overlay_init(const lv_font_t *font);
+    extern void settings_ui_init(const lv_font_t *font);
+    extern void wifi_ui_init(const lv_font_t *font);
+    if (display_ok) {
+        chat_overlay_init(display->GetTextFont());
+        settings_ui_init(display->GetTextFont());
+        wifi_ui_init(display->GetTextFont());
+        agent_index_show();
+    }
 
     // Update the status bar immediately to show the network state
     display->UpdateStatusBar(true);
 
+    // 2026-09-26:离线模式按钮已移入配网页(wifi_ui 列表页),网络门期间不再单独弹
     // Check for new firmware version or get the MQTT broker address
     Ota ota;
     CheckNewVersion(ota);
+
+    // 2026-09-28 开机欢迎(用户要求):版本检查/升级流程结束后播阿米娅「欢迎回家,博士」
+    audio_service_.PlaySound(Lang::Sounds::P3_WELCOME);
+
+    bool offline = application_offline_mode();
+
+    if (offline) {
+        // 离线模式：跳过协议/服务器连接，展示页照常（唤醒词被 protocol_ 判空拦截）
+        ESP_LOGW(TAG, "Offline mode: skip server/protocol, conversation disabled");
+        display->SetStatus("离线模式");
+        display->SetChatMessage("system", "离线模式：展示可用，对话需联网");
+        SetDeviceState(kDeviceStateIdle);
+    } else {
+    // 唤醒词表动态加载(服务器按设备 mac 返回该用户角色+公共角色)
+    FetchWakeWords();
+
+    /* 2026-09-28 用户拍板:进入对话模式前不检测唤醒词。
+       开机默认关,立绘显示完成(cover_display_start/cover_restore)时开;
+       索引页打开时关。防"选角色/下载检查期间误唤醒抢流程"。 */
+    audio_service_.EnableWakeWordDetection(false);
 
     // Initialize the protocol
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
@@ -541,29 +906,18 @@ void Application::Start() {
 
     has_server_time_ = ota.HasServerTime();
     if (protocol_started) {
-        std::string message = std::string(Lang::Strings::VERSION) + ota.GetCurrentVersion();
-        display->ShowNotification(message.c_str());
+        /* 2026-09-26 版本通知去掉:索引页已提前显示,启动通知会盖在角色选择页上
+           打断体验(用户拍板"这部分不要");成功音保留(无 UI) */
         display->SetChatMessage("system", "");
         // Play the success sound to indicate the device is ready
         audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
     }
+    }   // !offline
 
     // Print heap stats
     SystemInfo::PrintHeapStats();
 
-    // Start image/video display now that conversation mode is active
-    extern bool image_display_init(void);
-    extern bool cover_display_start(const char *agent_sd_path);
-    extern void chat_overlay_init(const lv_font_t *font);
-    extern void chat_overlay_set_font(const lv_font_t *font);
-    extern void settings_ui_init(const lv_font_t *font);
-    if (image_display_init()) {
-        chat_overlay_init(display->GetTextFont());  // 直接传中文字体
-        settings_ui_init(display->GetTextFont());
-        // 默认启动凯尔希 cover（展示模式）
-        cover_display_start("/sdcard/main/operator/MEDIC/6STAR/Kaltsit");
-    }
-
+    // 2026-09-26:image_display_init + 索引页已提前到 StartNetwork 之后执行
     // Enter the main event loop
     MainEventLoop();
 }
@@ -622,7 +976,7 @@ void Application::MainEventLoop() {
 
         if (bits & MAIN_EVENT_SEND_AUDIO) {
             while (auto packet = audio_service_.PopPacketFromSendQueue()) {
-                if (!protocol_->SendAudio(std::move(packet))) {
+                if (!protocol_ || !protocol_->SendAudio(std::move(packet))) {
                     break;
                 }
             }
@@ -668,25 +1022,61 @@ void Application::OnWakeWordDetected() {
     if (device_state_ == kDeviceStateIdle) {
         auto wake_word = audio_service_.GetLastWakeWord();
         ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
+        /* 背景音乐与对话不共存(2026-09-11):任何唤醒词触发对话前先停音乐 */
+        extern void bg_music_stop(void);
+        bg_music_stop();
+
+        // 未绑定用户:不允许发起唤醒请求(不知道用哪个 Agent)
+        if (wake_words_state_ == 1) {
+            ESP_LOGW(TAG, "Wake word blocked: device not bound to a user");
+            // 检测任务在回调前已 Stop(),必须重启——否则 AFE FEED 环形缓冲无人消费而堆满
+            audio_service_.EnableWakeWordDetection(true);
+            return;
+        }
 
         // 唤醒词 → 智能体 agent_id + SD路径 映射
         static const std::string agent_kaltsit = "0a20483553fe4ff784a016d0fafabfff";
         static const std::string agent_amiya = "5838c85f30ab4b33a4341bf8b0736e26";
         static const std::string agent_civilight = "ef84ee6764ce44e78ec131aa9d5ebb1d";
         static const std::string agent_mon3tr = "27da698865dc4922a0654941626ae1f4";
-        static const std::string path_kaltsit = "/sdcard/main/operator/MEDIC/6STAR/Kaltsit";
-        static const std::string path_amiya = "/sdcard/main/operator/CASTER/5STAR/Amiya";
-        static const std::string path_civilight = "/sdcard/main/operator/SUPPORTER/6STAR/Civilight_Eterna";
-        static const std::string path_mon3tr = "/sdcard/main/operator/MEDIC/6STAR/Mon3tr";
+        static const std::string path_kaltsit = "/sdcard/Arknights/main/operator/MEDIC/6STAR/Kaltsit";
+        static const std::string path_amiya = "/sdcard/Arknights/main/operator/CASTER/5STAR/Amiya";
+        static const std::string path_civilight = "/sdcard/Arknights/main/operator/SUPPORTER/6STAR/Civilight_Eterna";
+        static const std::string path_mon3tr = "/sdcard/Arknights/main/operator/MEDIC/6STAR/Mon3tr";
         std::string target_agent, target_path;
-        if (wake_word.find("凯尔希") != std::string::npos) {
-            target_agent = agent_kaltsit; target_path = path_kaltsit;
-        } else if (wake_word.find("阿米娅") != std::string::npos) {
-            target_agent = agent_amiya; target_path = path_amiya;
-        } else if (wake_word.find("特蕾西亚") != std::string::npos) {
-            target_agent = agent_civilight; target_path = path_civilight;
-        } else if (wake_word.find("Mon3tr") != std::string::npos) {
-            target_agent = agent_mon3tr; target_path = path_mon3tr;
+        // 优先:服务器下发的词表(已绑定用户的角色,含自定义角色;显示名精确匹配)
+        auto it = wake_word_agents_.find(wake_word);
+        if (it != wake_word_agents_.end()) {
+            target_agent = it->second;
+        }
+        // 保底:公共角色硬编码映射(词表拉取失败时)
+        if (target_agent.empty()) {
+            if (wake_word.find("凯尔希") != std::string::npos) {
+                target_agent = agent_kaltsit;
+            } else if (wake_word.find("阿米娅") != std::string::npos) {
+                target_agent = agent_amiya;
+            } else if (wake_word.find("特蕾西亚") != std::string::npos) {
+                target_agent = agent_civilight;
+            } else if (wake_word.find("Mon3tr") != std::string::npos) {
+                target_agent = agent_mon3tr;
+            }
+        }
+        // 画面资源路径:优先服务器下发的 resource_path(用户自己的角色也走这里)
+        auto pit = wake_word_paths_.find(wake_word);
+        if (pit != wake_word_paths_.end() && !pit->second.empty()) {
+            target_path = "/sdcard/" + pit->second;
+        }
+        // 保底:公共角色硬编码路径(词表拉取失败时)
+        if (target_path.empty()) {
+            if (wake_word.find("凯尔希") != std::string::npos) {
+                target_path = path_kaltsit;
+            } else if (wake_word.find("阿米娅") != std::string::npos) {
+                target_path = path_amiya;
+            } else if (wake_word.find("特蕾西亚") != std::string::npos) {
+                target_path = path_civilight;
+            } else if (wake_word.find("Mon3tr") != std::string::npos) {
+                target_path = path_mon3tr;
+            }
         }
         // "你好小智" → target_agent 为空，不发 X-Agent-ID（默认智能体）
 
@@ -702,7 +1092,24 @@ void Application::OnWakeWordDetected() {
         // 切换到交互模式（表情）
         if (!target_path.empty()) {
             extern bool expression_display_start(const char *agent_sd_path, const char *emotion);
-            expression_display_start(target_path.c_str(), "neutral");
+            extern void expression_start_user_res(const char *sd_path);
+            if (target_path.rfind("/sdcard/_users/", 0) == 0) {
+                // 用户角色:后台检查资源,缺失弹窗下载,完成后再切画面
+                expression_start_user_res(target_path.c_str());
+            } else {
+                expression_display_start(target_path.c_str(), "neutral");
+            }
+        }
+
+        // 2026-09-28 聊天框表头:输入框=绑定用户账号名,回复框=干员中文名
+        {
+            std::string display_cn = wake_word;
+            auto cnit = wake_word_names_cn_.find(wake_word);
+            if (cnit != wake_word_names_cn_.end() && !cnit->second.empty()) {
+                display_cn = cnit->second;
+            }
+            extern void chat_overlay_set_identity(const char *username, const char *agent_cn);
+            chat_overlay_set_identity(bound_username_.c_str(), display_cn.c_str());
         }
 
         audio_service_.EncodeWakeWord();
@@ -732,6 +1139,26 @@ void Application::OnWakeWordDetected() {
     } else if (device_state_ == kDeviceStateActivating) {
         SetDeviceState(kDeviceStateIdle);
     }
+}
+
+void Application::SendUserText(const std::string& text) {
+    /* 2026-10-02 键盘文本直发 agent:复用唤醒对话链路(建通道+detect 文本),
+       服务器走 startToChat 不经声纹;idle 状态下键盘输入也能直接发起对话 */
+    if (!protocol_ || text.empty()) {
+        return;
+    }
+    if (device_state_ == kDeviceStateSpeaking) {
+        AbortSpeaking(kAbortReasonWakeWordDetected);
+    }
+    if (!protocol_->IsAudioChannelOpened()) {
+        SetDeviceState(kDeviceStateConnecting);
+        if (!protocol_->OpenAudioChannel()) {
+            audio_service_.EnableWakeWordDetection(true);
+            return;
+        }
+    }
+    protocol_->SendWakeWordDetected(text);
+    SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
 }
 
 void Application::AbortSpeaking(AbortReason reason) {
@@ -765,10 +1192,14 @@ void Application::SetDeviceState(DeviceState state) {
     switch (state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
-            display->SetStatus(Lang::Strings::STANDBY);
+            // 未绑定设备:状态栏持续显示提示(进入 idle 会重置状态,需重新挂上)
+            display->SetStatus(application_offline_mode() ? "离线模式"
+                               : (wake_words_state_ == 1 ? "未绑定设备" : Lang::Strings::STANDBY));
             display->SetEmotion("neutral");
             audio_service_.EnableVoiceProcessing(false);
-            audio_service_.EnableWakeWordDetection(true);
+            if (!application_offline_mode()) {
+                audio_service_.EnableWakeWordDetection(true);   // 离线模式不加载唤醒词模型（省数秒+无对话）
+            }
             break;
         case kDeviceStateConnecting:
             display->SetStatus(Lang::Strings::CONNECTING);
@@ -877,6 +1308,27 @@ void application_audio_notify_output(void) {
     Application::GetInstance().GetAudioService().NotifyOutputActive();
 }
 
+// 语音记录播放期间把状态机切到 speaking：唤醒回调只在 idle 状态处理
+// (OnWakeWordDetected)，播放的语音不会误触发唤醒；播完切回 idle 恢复检测。
+void application_set_voice_playback(bool playing) {
+    auto &app = Application::GetInstance();
+    app.SetDeviceState(playing ? kDeviceStateSpeaking : kDeviceStateIdle);
+}
+
+// 是否空闲(未在对话):语音记录入口的判定同音乐——只要没开始对话就可以播
+bool application_device_idle(void) {
+    return Application::GetInstance().GetDeviceState() == kDeviceStateIdle;
+}
+
+// ── 离线模式：开机网络门期间点"离线模式"按钮 → 跳过联网/激活，直接进展示页（对话不可用）──
+static volatile bool s_offline_mode = false;
+void application_set_offline_mode(void) {
+    s_offline_mode = true;
+}
+bool application_offline_mode(void) {
+    return s_offline_mode;
+}
+
 void Application::SendMcpMessage(const std::string& payload) {
     Schedule([this, payload]() {
         if (protocol_) {
@@ -894,14 +1346,17 @@ void Application::SetAecMode(AecMode mode) {
         case kAecOff:
             audio_service_.EnableDeviceAec(false);
             display->ShowNotification(Lang::Strings::RTC_MODE_OFF);
+            prompt_sd_play(audio_service_, "aec_off", Lang::Sounds::P3_EXCLAMATION);   // 2026-09-29 SD 阿米娅语音
             break;
         case kAecOnServerSide:
             audio_service_.EnableDeviceAec(false);
             display->ShowNotification(Lang::Strings::RTC_MODE_ON);
+            prompt_sd_play(audio_service_, "aec_on", Lang::Sounds::P3_EXCLAMATION);
             break;
         case kAecOnDeviceSide:
             audio_service_.EnableDeviceAec(true);
             display->ShowNotification(Lang::Strings::RTC_MODE_ON);
+            prompt_sd_play(audio_service_, "aec_on", Lang::Sounds::P3_EXCLAMATION);
             break;
         }
 

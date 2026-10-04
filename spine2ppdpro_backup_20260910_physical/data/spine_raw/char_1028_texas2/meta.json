@@ -1,0 +1,39 @@
+{
+  "prefix": "https://torappu.prts.wiki/assets/char_spine/char_1028_texas2/",
+  "name": "缄默德克萨斯",
+  "skin": {
+    "破翼者": {
+      "背面": {
+        "file": "char_1028_texas2_iteration_1/back/char_1028_texas2_iteration_1"
+      },
+      "基建": {
+        "file": "char_1028_texas2_iteration_1/build/build_char_1028_texas2_iteration_1"
+      },
+      "正面": {
+        "file": "char_1028_texas2_iteration_1/front/char_1028_texas2_iteration_1"
+      }
+    },
+    "幽兰秘辛": {
+      "基建": {
+        "file": "char_1028_texas2_epoque_36/build/build_char_1028_texas2_epoque_36"
+      },
+      "背面": {
+        "file": "char_1028_texas2_epoque_36/back/char_1028_texas2_epoque_36"
+      },
+      "正面": {
+        "file": "char_1028_texas2_epoque_36/front/char_1028_texas2_epoque_36"
+      }
+    },
+    "默认": {
+      "基建": {
+        "file": "defaultskin/build/build_char_1028_texas2"
+      },
+      "背面": {
+        "file": "defaultskin/back/char_1028_texas2"
+      },
+      "正面": {
+        "file": "defaultskin/front/char_1028_texas2"
+      }
+    }
+  }
+}

@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spine2PPD Pro</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <aside id="panel">
+      <h1>Spine2PPD Pro</h1>
+
+      <section>
+        <h2>PRTS 导入</h2>
+        <div class="row">
+          <input type="text" id="importInput" placeholder="PRTS 页面 / 角色名 / charid">
+        </div>
+        <div class="row">
+          <button id="btnImport" class="primary">下载并转换</button>
+          <button id="btnRefreshChars">刷新本地</button>
+        </div>
+        <div class="hint" id="importStatus">输入示例：https://prts.wiki/w/缄默德克萨斯</div>
+      </section>
+
+      <section>
+        <h2>本地角色</h2>
+        <div class="row">
+          <select id="characterSel"></select>
+          <button id="btnLoadLocalChar">加载</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>数据源</h2>
+        <div class="row">
+          <input type="text" id="urlInput" placeholder="角色目录 URL，例：/characters/缄默德克萨斯/">
+        </div>
+        <div class="row">
+          <button id="btnLoadUrl">加载 URL</button>
+          <button id="btnPickDir">选择本地文件夹</button>
+          <button id="btnDemo">演示数据</button>
+        </div>
+        <div class="hint" id="srcStatus">未加载角色</div>
+      </section>
+
+      <section>
+        <h2>形态</h2>
+        <select id="formSel"></select>
+      </section>
+
+      <section>
+        <h2>动画</h2>
+        <select id="animSel"></select>
+        <div class="row">
+          <button id="btnPlay">播放</button>
+          <button id="btnStop">停止</button>
+          <span class="hint" id="loopBadge"></span>
+        </div>
+        <div class="row">
+          <input type="range" id="seek" min="0" max="1000" value="0" disabled>
+        </div>
+        <div class="hint" id="timeLabel">0.00 / -</div>
+      </section>
+
+      <section>
+        <h2>画布</h2>
+        <div class="row">
+          <button data-rot="0" class="rot">0°</button>
+          <button data-rot="90" class="rot">90°</button>
+          <button data-rot="180" class="rot">180°</button>
+          <button data-rot="270" class="rot active">270°</button>
+        </div>
+        <div class="row">
+          <label>背景
+            <select id="bgSel">
+              <option value="white" selected>白</option>
+              <option value="grey">灰</option>
+              <option value="black">黑</option>
+              <option value="checker">棋盘格</option>
+            </select>
+          </label>
+          <label>缩放
+            <select id="zoomSel">
+              <option value="0.5">50%</option>
+              <option value="0.6">60%</option>
+              <option value="0.7">70%</option>
+              <option value="0.8" selected>80%</option>
+              <option value="1">100%</option>
+            </select>
+          </label>
+        </div>
+        <div class="row"><button id="btnExport">导出当前帧 PNG</button></div>
+      </section>
+
+      <section>
+        <h2>图层</h2>
+        <ul id="layerList"></ul>
+      </section>
+    </aside>
+
+    <main id="stageWrap">
+      <div id="stageHint">导入或加载角色后显示 480×800 画布</div>
+      <div id="stage"><div id="view"><canvas id="canvas" width="480" height="800"></canvas></div></div>
+    </main>
+  </div>
+  <script src="simulator.js"></script>
+</body>
+</html>

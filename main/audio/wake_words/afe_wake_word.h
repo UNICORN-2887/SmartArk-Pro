@@ -44,8 +44,7 @@ private:
     std::string last_detected_wake_word_;
 
     TaskHandle_t wake_word_encode_task_ = nullptr;
-    StaticTask_t wake_word_encode_task_buffer_;
-    StackType_t* wake_word_encode_task_stack_ = nullptr;
+    TaskHandle_t wake_word_encode_task_ = nullptr;
     std::list<std::vector<int16_t>> wake_word_pcm_;
     std::list<std::vector<uint8_t>> wake_word_opus_;
     std::mutex wake_word_mutex_;

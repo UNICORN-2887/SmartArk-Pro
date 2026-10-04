@@ -52,6 +52,10 @@ public:
     virtual const lv_font_t* GetTextFont() override { return fonts_.text_font; }
     virtual void SetIcon(const char* icon) override;
     virtual void SetPreviewImage(const lv_img_dsc_t* img_dsc) override;
+    // PPD 交互 PPA 直写上屏用：返回 DSI 面板 framebuffer 指针（仅 ESP32-P4 支持，其余返回 nullptr）
+    uint16_t* GetPanelFrameBuffer(void);
+    // PPD 直写期间隐藏状态栏：screen 层的时钟重绘会 flush 覆盖直写帧（绕过 LVGL 后无每帧重绘兜底）
+    void SetStatusBarVisible(bool visible);
 #if CONFIG_USE_WECHAT_MESSAGE_STYLE
     virtual void SetChatMessage(const char* role, const char* content) override; 
 #endif  

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>拼豆拆分工具</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<h1>拼豆拆分工具</h1>
+<p class="hint">上传图片 → 框选正方形 → 池化到 24/72/216 → 映射 36 色水彩笔色板 → 下载 .bead 成品包（设备端直接导入）</p>
+
+<section id="step-upload" class="card">
+  <div id="dropzone">点击选择或拖放图片到这里</div>
+  <input type="file" id="file-input" accept="image/*" hidden>
+</section>
+
+<section id="step-crop" class="card" hidden>
+  <h2>框选正方形区域 <span class="hint">（边长 = 最短边，可拖动位置）</span></h2>
+  <div class="crop-row">
+    <canvas id="crop-canvas"></canvas>
+    <div class="crop-side">
+      <div class="preview-label">裁剪预览</div>
+      <canvas id="crop-preview" width="200" height="200"></canvas>
+      <button id="crop-confirm" class="primary">确认裁剪</button>
+      <button id="crop-reset" class="ghost">重新选图</button>
+    </div>
+  </div>
+</section>
+
+<section id="step-params" class="card" hidden>
+  <h2>转换参数</h2>
+  <div class="param-row">
+    <label>目标尺寸
+      <select id="n-select">
+        <option value="24">24 × 24（1 张 B1）</option>
+        <option value="72">72 × 72（1 B2 + 9 B1）</option>
+        <option value="216" selected>216 × 216（1 B3 + 9 B2 + 81 B1）</option>
+      </select>
+    </label>
+    <label>作品名
+      <input id="name-input" maxlength="20" placeholder="ASCII 字母数字，如 pikachu">
+    </label>
+  </div>
+  <div class="hint" id="param-hint"></div>
+  <button id="convert-btn" class="primary">确认转换</button>
+  <button id="params-reset" class="ghost">重新选图</button>
+</section>
+
+<section id="step-result" class="card" hidden>
+  <h2>转换结果</h2>
+  <div id="result-links">
+    <a id="download-link" class="primary" href="#">下载 zip 成品包</a>
+  </div>
+  <div class="hint">zip 内 beads/ 目录拷到 SD 卡 /sdcard/User/Beads/ 即可在设备端「一起拼豆」读取；images/ 为对照拼图（每格标注设备 6×6 色卡坐标）。建议选色块对比度高的图，36 色水彩笔色板对照片类图色偏明显。</div>
+  <h3>总览</h3>
+  <img id="overview-img" alt="总览">
+  <h3>色卡说明（36 色 / 设备 6×6 色卡坐标）</h3>
+  <img id="palette-img" alt="色卡">
+  <h3 id="tiles-heading">24×24 对照块（B1）</h3>
+  <div id="tiles-grid" class="tiles-grid"></div>
+  <h3 id="b2-heading" hidden>72×72 辅助块（B2）</h3>
+  <div id="b2-grid" class="tiles-grid"></div>
+  <div class="param-row">
+    <button id="result-reset" class="ghost">再转一张</button>
+  </div>
+</section>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

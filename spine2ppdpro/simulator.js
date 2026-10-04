@@ -1,0 +1,846 @@
+'use strict';
+
+/* ============================================================
+ * Spine→PPD 仿真器（Q 版重写）
+ *
+ * 严格按《Spine 模型获取 + 仿真器需求（交接文档）》第三部分实现：
+ *  - 渲染公式：唯一正确语义（层中心平移 + 旋转，见 drawFrame）
+ *  - 动画插值：线性，无任何过渡包络
+ *  - vis 硬切换（插值后 >= 0.5 才渲染），不做淡入淡出
+ *  - 无 head/body 分组变换
+ *  - 层 z 升序绘制；无轨道的层用 scene.json 默认值，不参与动画
+ * ============================================================ */
+
+const CANVAS_W = 480;
+const CANVAS_H = 800;
+const decoder = new TextDecoder('utf-8');
+const encoder = new TextEncoder();
+
+/* ---------------- 虚拟文件系统（HTTP / 本地文件夹 / 内存统一抽象） ---------------- */
+
+class HTTPVFS {
+  constructor(base) {
+    this.base = base.replace(/\/+$/, '') + '/';
+  }
+  async get(rel) {
+    const url = this.base + rel.split('/').map(encodeURIComponent).join('/');
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${rel}`);
+    return resp.arrayBuffer();
+  }
+}
+
+class FileListVFS {
+  // input[webkitdirectory] 选择的文件：webkitRelativePath 首段为所选目录名，去掉后即角色目录内相对路径
+  constructor(files) {
+    this.map = new Map();
+    for (const f of files) {
+      const parts = f.webkitRelativePath.split('/');
+      if (parts.length < 2) continue;
+      this.map.set(parts.slice(1).join('/'), f);
+    }
+  }
+  async get(rel) {
+    const f = this.map.get(rel);
+    if (!f) throw new Error(`未找到文件: ${rel}`);
+    return f.arrayBuffer();
+  }
+}
+
+class MapVFS {
+  constructor(map) { this.map = map; }
+  async get(rel) {
+    const b = this.map.get(rel);
+    if (!b) throw new Error(`未找到文件: ${rel}`);
+    return b;
+  }
+}
+
+// 内置打包数据（data_tx.js 由 tools/pack.py 生成：{name, files:{相对路径: base64}}）
+function b64ToBuf(b64) {
+  const bin = atob(b64);
+  const buf = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+  return buf.buffer;
+}
+
+class B64VFS {
+  constructor(pkg) { this.map = new Map(Object.entries(pkg.files).map(([k, v]) => [k, b64ToBuf(v)])); }
+  async get(rel) {
+    const b = this.map.get(rel);
+    if (!b) throw new Error(`未找到文件: ${rel}`);
+    return b;
+  }
+}
+
+/* ---------------- .raw 贴图解码 ----------------
+ * 格式：u16 w + u16 h + RGBA8888（每像素 4 字节，byte0=R，byte2=B）
+ * 字节序自动检测：LE 尺寸不合文件长度时回退 BE。 */
+
+function decodeRaw(buf) {
+  const dv = new DataView(buf);
+  const len = buf.byteLength;
+  const sizeOk = (w, h) => w > 0 && h > 0 && w * h <= (len - 4) / 4;
+  let w = dv.getUint16(0, true), h = dv.getUint16(2, true);
+  if (!sizeOk(w, h)) {
+    const wb = dv.getUint16(0, false), hb = dv.getUint16(2, false);
+    if (sizeOk(wb, hb)) { w = wb; h = hb; }
+    else throw new Error(`raw 头尺寸非法: LE(${w},${h}) / BE(${wb},${hb}), 文件长度 ${len}`);
+  }
+  const img = new ImageData(w, h);
+  let o = 4;
+  for (let i = 0; i < w * h; i++, o += 4) {
+    img.data[i * 4]     = dv.getUint8(o);     // R
+    img.data[i * 4 + 1] = dv.getUint8(o + 1); // G
+    img.data[i * 4 + 2] = dv.getUint8(o + 2); // B
+    img.data[i * 4 + 3] = dv.getUint8(o + 3); // A
+  }
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  c.getContext('2d').putImageData(img, 0, 0);
+  return c;
+}
+
+async function decodeBitmap(buf, mime = 'image/png') {
+  const blob = new Blob([buf], { type: mime });
+  return createImageBitmap(blob);
+}
+
+/* ---------------- 角色加载 ----------------
+ * 角色目录结构（交接文档第二节）：
+ *   scene.json / <槽名>.raw / anims.json（可选）/ forms.json（可选）
+ *   forms/<形态>/ 下同构。 */
+
+async function loadCharacter(vfs, subPath) {
+  const base = subPath ? subPath.replace(/\/+$/, '') + '/' : '';
+  const getText = async (p) => decoder.decode(await vfs.get(base + p));
+  const getRootText = async (p) => decoder.decode(await vfs.get(p));
+
+  const scene = JSON.parse(await getText('scene.json'));
+
+  let anims = {};
+  try { anims = JSON.parse(await getText('anims.json')); } catch (e) { anims = {}; }
+  let forms = null;
+  try { forms = JSON.parse(await getText('forms.json')); } catch (e) { forms = null; }
+  if (!forms && base) {
+    try { forms = JSON.parse(await getRootText('forms.json')); } catch (e) { forms = null; }
+  }
+  let mesh = null;
+  try {
+    mesh = JSON.parse(await getText('mesh.json'));
+    mesh.texturesMap = new Map();
+    for (const tex of mesh.textures || []) {
+      const bmp = await decodeBitmap(await vfs.get(base + tex.file));
+      mesh.texturesMap.set(tex.id, bmp);
+    }
+  } catch (e) {
+    mesh = null;
+  }
+
+  const textures = new Map();
+  for (const L of scene.layers) {
+    try {
+      textures.set(L.name, decodeRaw(await vfs.get(base + L.name + '.raw')));
+    } catch (e) {
+      throw new Error(`加载贴图 ${base}${L.name}.raw 失败: ${e.message}`);
+    }
+  }
+  return { base, subPath: subPath || '', scene, anims, textures, forms, mesh };
+}
+
+/* ---------------- 动画轨道采样（线性插值，vis 硬切） ---------------- */
+
+function sampleTrack(track, duration, t) {
+  const n = track.length;
+  if (n < 2 || duration <= 0) {
+    const k0 = track[0];
+    return {
+      dx: k0[0], dy: k0[1], drot: k0[2], vis: k0[3] >= 0.5,
+      sx: k0[4] ?? 1, sy: k0[5] ?? 1,
+      a: k0[6], b: k0[7], c: k0[8], d: k0[9],
+    };
+  }
+  const pos = Math.min(Math.max(t / duration * (n - 1), 0), n - 1);
+  const i0 = Math.floor(pos);
+  const frac = pos - i0;
+  const k0 = track[i0];
+  const k1 = track[Math.min(i0 + 1, n - 1)];
+  return {
+    dx:   k0[0] + (k1[0] - k0[0]) * frac,
+    dy:   k0[1] + (k1[1] - k0[1]) * frac,
+    drot: k0[2] + (k1[2] - k0[2]) * frac,
+    vis:  k0[3] + (k1[3] - k0[3]) * frac >= 0.5,
+    sx:   (k0[4] ?? 1) + ((k1[4] ?? 1) - (k0[4] ?? 1)) * frac,
+    sy:   (k0[5] ?? 1) + ((k1[5] ?? 1) - (k0[5] ?? 1)) * frac,
+    a:    k0.length >= 10 && k1.length >= 10 ? k0[6] + (k1[6] - k0[6]) * frac : undefined,
+    b:    k0.length >= 10 && k1.length >= 10 ? k0[7] + (k1[7] - k0[7]) * frac : undefined,
+    c:    k0.length >= 10 && k1.length >= 10 ? k0[8] + (k1[8] - k0[8]) * frac : undefined,
+    d:    k0.length >= 10 && k1.length >= 10 ? k0[9] + (k1[9] - k0[9]) * frac : undefined,
+  };
+}
+
+function sampleOrder(anim, scene, t) {
+  if (!anim || !Array.isArray(anim.order) || anim.order.length === 0) {
+    return [...scene.layers].sort((a, b) => a.z - b.z);
+  }
+  const index = Math.min(
+    anim.order.length - 1,
+    Math.max(0, Math.floor(t / Math.max(anim.duration, 0.001) * anim.order.length))
+  );
+  const byName = new Map(scene.layers.map(L => [L.name, L]));
+  const out = [];
+  const used = new Set();
+  for (const name of anim.order[index]) {
+    const L = byName.get(name);
+    if (!L || used.has(name)) continue;
+    out.push(L);
+    used.add(name);
+  }
+  for (const L of [...scene.layers].sort((a, b) => a.z - b.z)) {
+    if (!used.has(L.name)) out.push(L);
+  }
+  return out;
+}
+
+function meshFrameFor(cur, layerName) {
+  const mesh = cur.mesh;
+  if (!mesh || !mesh.layers || !mesh.layers[layerName]) return null;
+  if (st.animName && mesh.animations && mesh.animations[st.animName]) {
+    const ma = mesh.animations[st.animName];
+    const idx = Math.min(
+      ma.frames.length - 1,
+      Math.max(0, Math.floor(st.t / Math.max(ma.duration, 0.001) * ma.frames.length))
+    );
+    return ma.frames[idx] && ma.frames[idx][layerName] ? ma.frames[idx][layerName] : null;
+  }
+  return mesh.base && mesh.base.layers ? mesh.base.layers[layerName] : null;
+}
+
+function meshDrawFrame(cur) {
+  const mesh = cur.mesh;
+  if (!mesh || mesh.version < 2) return null;
+  if (st.animName && mesh.animations && mesh.animations[st.animName]) {
+    const ma = mesh.animations[st.animName];
+    const idx = Math.min(
+      ma.frames.length - 1,
+      Math.max(0, Math.floor(st.t / Math.max(ma.duration, 0.001) * ma.frames.length))
+    );
+    return ma.frames[idx] || mesh.base || null;
+  }
+  return mesh.base || null;
+}
+
+function drawTexturedTriangle(ctx, img, sx0, sy0, sx1, sy1, sx2, sy2, dx0, dy0, dx1, dy1, dx2, dy2) {
+  const det = sx0 * (sy1 - sy2) + sx1 * (sy2 - sy0) + sx2 * (sy0 - sy1);
+  if (Math.abs(det) < 1e-6) return;
+  const a = (dx0 * (sy1 - sy2) + dx1 * (sy2 - sy0) + dx2 * (sy0 - sy1)) / det;
+  const c = (dx0 * (sx2 - sx1) + dx1 * (sx0 - sx2) + dx2 * (sx1 - sx0)) / det;
+  const e = (dx0 * (sx1 * sy2 - sx2 * sy1) + dx1 * (sx2 * sy0 - sx0 * sy2) + dx2 * (sx0 * sy1 - sx1 * sy0)) / det;
+  const b = (dy0 * (sy1 - sy2) + dy1 * (sy2 - sy0) + dy2 * (sy0 - sy1)) / det;
+  const d = (dy0 * (sx2 - sx1) + dy1 * (sx0 - sx2) + dy2 * (sx1 - sx0)) / det;
+  const f = (dy0 * (sx1 * sy2 - sx2 * sy1) + dy1 * (sx2 * sy0 - sx0 * sy2) + dy2 * (sx0 * sy1 - sx1 * sy0)) / det;
+  ctx.save();
+  const cx = (dx0 + dx1 + dx2) / 3;
+  const cy = (dy0 + dy1 + dy2) / 3;
+  const grow = (x, y) => {
+    const vx = x - cx, vy = y - cy;
+    const len = Math.hypot(vx, vy) || 1;
+    return [x + vx / len * 0.75, y + vy / len * 0.75];
+  };
+  const p0 = grow(dx0, dy0), p1 = grow(dx1, dy1), p2 = grow(dx2, dy2);
+  ctx.beginPath();
+  ctx.moveTo(p0[0], p0[1]);
+  ctx.lineTo(p1[0], p1[1]);
+  ctx.lineTo(p2[0], p2[1]);
+  ctx.closePath();
+  ctx.clip();
+  ctx.transform(a, b, c, d, e, f);
+  ctx.drawImage(img, 0, 0);
+  ctx.restore();
+}
+
+function drawMeshLayer(ctx, cur, layerName, verts) {
+  const specMap = cur.mesh && (cur.mesh.attachments || cur.mesh.layers);
+  const spec = specMap && specMap[layerName];
+  if (!spec || !verts) return false;
+  const img = cur.mesh.texturesMap.get(spec.texture);
+  if (!img) return false;
+  const tri = spec.triangles || [];
+  const uv = spec.uvs || [];
+  const prevAlpha = ctx.globalAlpha;
+  const prevBlend = ctx.globalCompositeOperation;
+  if (spec.alpha != null) ctx.globalAlpha = prevAlpha * spec.alpha;
+  if (spec.blend === 'additive') ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < tri.length; i += 3) {
+    const i0 = tri[i], i1 = tri[i + 1], i2 = tri[i + 2];
+    drawTexturedTriangle(ctx, img,
+      uv[i0 * 2], uv[i0 * 2 + 1], uv[i1 * 2], uv[i1 * 2 + 1], uv[i2 * 2], uv[i2 * 2 + 1],
+      verts[i0 * 2], verts[i0 * 2 + 1], verts[i1 * 2], verts[i1 * 2 + 1], verts[i2 * 2], verts[i2 * 2 + 1]);
+  }
+  ctx.globalAlpha = prevAlpha;
+  ctx.globalCompositeOperation = prevBlend;
+  return true;
+}
+
+function drawMeshScene(ctx, cur) {
+  const frame = meshDrawFrame(cur);
+  if (!frame) return false;
+  for (const item of frame.draw || []) {
+    if (st.hidden.has(item.key)) continue;
+    drawMeshLayer(ctx, cur, item.key, item.vertices);
+  }
+  return true;
+}
+
+/* ---------------- 渲染 ----------------
+ * 交接文档唯一正确语义：
+ *   const px = L.bone_px ?? L.w/2, py = L.bone_py ?? L.h/2;
+ *   ctx.translate(L.x + px + dx, L.y + py + dy);
+ *   ctx.rotate(drot * PI / 180);
+ *   ctx.translate(-px, -py);
+ *   ctx.drawImage(tex, 0, 0, L.w, L.h);
+ * 层按 z 升序；无轨道的层 dx/dy/drot=0、vis=scene.visible。 */
+
+function drawFrame() {
+  const cur = st.current;
+  if (!cur) return;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+  if (st.useMesh && cur.mesh && cur.mesh.version >= 2) {
+    drawMeshScene(ctx, cur);
+    return;
+  }
+  const sorted = sampleOrder(st.anim, cur.scene, st.t);
+  for (const L of sorted) {
+    if (st.hidden.has(L.name)) continue;
+    const meshVerts = meshFrameFor(cur, L.name);
+    if (st.useMesh && cur.mesh && cur.mesh.layers && cur.mesh.layers[L.name]) {
+      if (meshVerts) drawMeshLayer(ctx, cur, L.name, meshVerts);
+      continue;
+    }
+    let dx = 0, dy = 0, drot = 0, vis = !!L.visible, sx = 1, sy = 1, ma, mb, mc, md;
+    const anim = st.anim;
+    if (anim) {
+      const track = anim.layers && anim.layers[L.name];
+      if (track) {
+        const s = sampleTrack(track, anim.duration, st.t);
+        dx = s.dx; dy = s.dy; drot = s.drot; vis = s.vis; sx = s.sx; sy = s.sy;
+        ma = s.a; mb = s.b; mc = s.c; md = s.d;
+      }
+    }
+    if (!vis) continue;
+    const tex = cur.textures.get(L.name);
+    if (!tex) continue;
+    ctx.save();
+    const px = L.bone_px ?? L.w / 2;
+    const py = L.bone_py ?? L.h / 2;
+    ctx.translate(L.x + px + dx, L.y + py + dy);
+    if (ma !== undefined) ctx.transform(ma, mb, mc, md, 0, 0);
+    else {
+      ctx.rotate(drot * Math.PI / 180);
+      ctx.scale(sx, sy);
+    }
+    ctx.translate(-px, -py);
+    ctx.drawImage(tex, 0, 0, L.w, L.h);
+    ctx.restore();
+  }
+}
+
+/* ---------------- UI 元素与全局状态 ---------------- */
+
+const el = {};
+for (const id of ['canvas', 'stage', 'view', 'urlInput', 'srcStatus', 'formSel', 'animSel',
+  'btnPlay', 'btnStop', 'seek', 'timeLabel', 'loopBadge', 'bgSel', 'zoomSel',
+  'btnExport', 'layerList', 'btnLoadUrl', 'btnPickDir', 'btnDemo', 'stageHint',
+  'importInput', 'btnImport', 'importStatus', 'characterSel', 'btnRefreshChars',
+  'btnLoadLocalChar']) {
+  el[id] = document.getElementById(id);
+}
+const canvas = el.canvas;
+
+const st = {
+  vfs: null,
+  sourceName: '',     // 数据源名（URL / 文件夹名 / 演示数据）
+  current: null,      // loadCharacter 结果（当前形态）
+  anim: null,         // 当前选中动画对象；null = 默认姿势
+  animName: '',
+  t: 0,               // 当前动画时间（秒）
+  playing: false,
+  rot: 270,           // 画布旋转 0/90/180/270
+  zoom: 0.8,
+  useMesh: new URLSearchParams(location.search).get('mesh') !== '0',
+  hidden: new Set(),  // 调试用：手动隐藏的层
+};
+
+/* ---------------- 画布视图（旋转 + 缩放） ---------------- */
+
+function applyView() {
+  let sw = CANVAS_W, sh = CANVAS_H;
+  switch (st.rot) {
+    case 90:  el.view.style.transform = 'rotate(90deg) translateY(-100%)';    sw = CANVAS_H; sh = CANVAS_W; break;
+    case 180: el.view.style.transform = 'rotate(180deg) translate(-100%, -100%)'; break;
+    case 270: el.view.style.transform = 'rotate(-90deg) translateX(-100%)';   sw = CANVAS_H; sh = CANVAS_W; break;
+    default:  el.view.style.transform = ''; st.rot = 0; break;
+  }
+  el.stage.style.width = (sw * st.zoom) + 'px';
+  el.stage.style.height = (sh * st.zoom) + 'px';
+  el.stage.style.transform = 'scale(' + st.zoom + ')';
+}
+
+/* ---------------- 面板重建 ---------------- */
+
+function applyLoaded(cur, label) {
+  st.current = cur;
+  st.anim = null;
+  st.animName = '';
+  st.t = 0;
+  st.playing = false;
+  st.hidden.clear();
+  el.stageHint.style.display = 'none';
+
+  // 形态下拉
+  el.formSel.innerHTML = '';
+  el.formSel.add(new Option('主场景', ''));
+  if (cur.forms) for (const f of cur.forms.forms) el.formSel.add(new Option(f.name, f.dir));
+  el.formSel.value = cur.subPath || '';
+
+  // 动画下拉
+  el.animSel.innerHTML = '';
+  el.animSel.add(new Option('（默认姿势）', ''));
+  const animNames = new Set(Object.keys(cur.anims));
+  if (cur.mesh && cur.mesh.animations) for (const name of Object.keys(cur.mesh.animations)) animNames.add(name);
+  for (const name of animNames) el.animSel.add(new Option(name, name));
+  const firstAnim = animNames.values().next().value || '';
+  if (firstAnim) {
+    el.animSel.value = firstAnim;
+    st.anim = cur.anims[firstAnim] || null;
+    st.animName = firstAnim;
+    st.playing = true;
+  }
+
+  rebuildLayerList();
+  updatePlayBtn();
+  updateTimeUI();
+  drawFrame();
+  el.srcStatus.textContent = label;
+  el.srcStatus.classList.remove('error');
+}
+
+function rebuildLayerList() {
+  el.layerList.innerHTML = '';
+  if (!st.current) return;
+  const sorted = [...st.current.scene.layers].sort((a, b) => a.z - b.z);
+  for (const L of sorted) {
+    const li = document.createElement('li');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !st.hidden.has(L.name);
+    cb.onchange = () => {
+      if (cb.checked) st.hidden.delete(L.name); else st.hidden.add(L.name);
+      drawFrame();
+    };
+    const span = document.createElement('span');
+    span.textContent = L.name;
+    const z = document.createElement('span');
+    z.className = 'z';
+    z.textContent = `z=${L.z} · ${L.group}`;
+    li.append(cb, span, z);
+    el.layerList.appendChild(li);
+  }
+}
+
+function updatePlayBtn() {
+  el.btnPlay.textContent = st.playing ? '暂停' : '播放';
+  const curAnim = currentAnimMeta();
+  el.loopBadge.textContent = curAnim ? (curAnim.loop ? '循环' : '单次') : '';
+}
+
+function currentAnimMeta() {
+  if (st.anim) return st.anim;
+  const meshAnim = st.current && st.current.mesh && st.animName && st.current.mesh.animations
+    ? st.current.mesh.animations[st.animName]
+    : null;
+  return meshAnim || null;
+}
+
+function updateTimeUI() {
+  const curAnim = currentAnimMeta();
+  if (curAnim) {
+    el.seek.disabled = false;
+    el.seek.value = Math.round(st.t / curAnim.duration * 1000);
+    el.timeLabel.textContent = `${st.t.toFixed(2)} / ${curAnim.duration.toFixed(2)}s`;
+  } else {
+    el.seek.disabled = true;
+    el.seek.value = 0;
+    el.timeLabel.textContent = '0.00 / -';
+  }
+}
+
+/* ---------------- 数据源入口 ---------------- */
+
+async function loadFrom(vfs, subPath, sourceName) {
+  try {
+    el.srcStatus.textContent = '加载中…';
+    el.srcStatus.classList.remove('error');
+    const cur = await loadCharacter(vfs, subPath);
+    st.vfs = vfs;
+    st.sourceName = sourceName;
+    applyLoaded(cur, `${sourceName} · ${subPath || '主场景'}`);
+  } catch (e) {
+    el.srcStatus.textContent = '加载失败: ' + e.message;
+    el.srcStatus.classList.add('error');
+  }
+}
+
+el.btnLoadUrl.onclick = () => {
+  const u = el.urlInput.value.trim();
+  if (!u) { el.srcStatus.textContent = '请输入角色目录 URL'; return; }
+  loadFrom(new HTTPVFS(u), '', u);
+};
+
+el.btnPickDir.onclick = () => {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.webkitdirectory = true;
+  inp.onchange = () => {
+    if (!inp.files || !inp.files.length) return;
+    const root = inp.files[0].webkitRelativePath.split('/')[0];
+    loadFrom(new FileListVFS(inp.files), '', `本地文件夹（${root}）`);
+  };
+  inp.click();
+};
+
+el.btnDemo.onclick = () => loadFrom(new MapVFS(makeDemoFiles()), '', '内置演示数据（合成，经真实 .raw 解码路径）');
+
+async function apiGet(path) {
+  const resp = await fetch(path);
+  const data = await resp.json();
+  if (!resp.ok || !data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+  return data;
+}
+
+async function apiPost(path, body) {
+  const resp = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await resp.json();
+  if (!resp.ok || !data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+  return data;
+}
+
+async function refreshCharacters() {
+  if (!el.characterSel) return;
+  try {
+    const data = await apiGet('/api/characters');
+    el.characterSel.innerHTML = '';
+    for (const c of data.characters) el.characterSel.add(new Option(c.name, c.url));
+    if (!data.characters.length) el.characterSel.add(new Option('暂无本地角色', ''));
+  } catch (e) {
+    el.characterSel.innerHTML = '';
+    el.characterSel.add(new Option('本地列表读取失败', ''));
+  }
+}
+
+if (el.btnRefreshChars) {
+  el.btnRefreshChars.onclick = refreshCharacters;
+}
+
+function loadSelectedLocalCharacter() {
+  const u = el.characterSel.value;
+  if (!u) return;
+  el.urlInput.value = u;
+  loadFrom(new HTTPVFS(u), '', u);
+}
+
+if (el.btnLoadLocalChar) {
+  el.btnLoadLocalChar.onclick = loadSelectedLocalCharacter;
+}
+
+if (el.characterSel) {
+  el.characterSel.onchange = loadSelectedLocalCharacter;
+}
+
+if (el.btnImport) {
+  el.btnImport.onclick = async () => {
+    const query = el.importInput.value.trim();
+    if (!query) {
+      el.importStatus.textContent = '请输入 PRTS 页面、角色名或 charid';
+      el.importStatus.classList.add('error');
+      return;
+    }
+    el.btnImport.disabled = true;
+    el.importStatus.textContent = '下载并转换中，基建形态可能需要一两分钟...';
+    el.importStatus.classList.remove('error');
+    try {
+      const data = await apiPost('/api/import', { query });
+      el.importStatus.textContent = `${data.name} (${data.charid}) 已导入：${data.forms.join(' / ')}`;
+      el.urlInput.value = data.url;
+      await refreshCharacters();
+      await loadFrom(new HTTPVFS(data.url), '', data.url);
+    } catch (e) {
+      el.importStatus.textContent = '导入失败: ' + e.message;
+      el.importStatus.classList.add('error');
+    } finally {
+      el.btnImport.disabled = false;
+    }
+  };
+}
+
+el.formSel.onchange = () => {
+  if (!st.vfs) return;
+  loadFrom(st.vfs, el.formSel.value, st.sourceName);
+};
+
+el.animSel.onchange = () => {
+  const name = el.animSel.value;
+  st.anim = name ? st.current.anims[name] : null;
+  st.animName = name || '';
+  st.t = 0;
+  st.playing = !!name;
+  updatePlayBtn();
+  updateTimeUI();
+  drawFrame();
+};
+
+el.btnPlay.onclick = () => {
+  const curAnim = currentAnimMeta();
+  if (!st.current || !curAnim) { el.srcStatus.textContent = '请先选择动画'; return; }
+  if (st.playing) {
+    st.playing = false;
+  } else {
+    if (st.t >= curAnim.duration && !curAnim.loop) st.t = 0; // 单次动画播完后再点播放：从头
+    st.playing = true;
+  }
+  updatePlayBtn();
+};
+
+el.btnStop.onclick = () => {
+  st.t = 0;
+  st.playing = false;
+  updatePlayBtn();
+  updateTimeUI();
+  drawFrame();
+};
+
+el.seek.oninput = () => {
+  const curAnim = currentAnimMeta();
+  if (!curAnim) return;
+  st.t = el.seek.value / 1000 * curAnim.duration;
+  drawFrame();
+};
+
+document.querySelectorAll('.rot').forEach(b => {
+  b.onclick = () => {
+    st.rot = +b.dataset.rot;
+    document.querySelectorAll('.rot').forEach(x => x.classList.toggle('active', x === b));
+    applyView();
+  };
+});
+
+el.bgSel.onchange = () => {
+  canvas.classList.remove('bg-grey', 'bg-black', 'bg-checker');
+  if (el.bgSel.value !== 'white') canvas.classList.add('bg-' + el.bgSel.value);
+};
+
+el.zoomSel.onchange = () => {
+  st.zoom = parseFloat(el.zoomSel.value);
+  applyView();
+};
+
+el.btnExport.onclick = () => {
+  if (!st.current) return;
+  const c = document.createElement('canvas');
+  c.width = CANVAS_W; c.height = CANVAS_H;
+  const g = c.getContext('2d');
+  g.fillStyle = '#ffffff';
+  g.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  g.drawImage(canvas, 0, 0);
+  c.toBlob(b => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(b);
+    a.download = 'frame.png';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+};
+
+/* ---------------- 主循环 ---------------- */
+
+let lastTs = null;
+function frame(ts) {
+  const curAnim = currentAnimMeta();
+  if (st.playing && curAnim && st.current) {
+    if (lastTs != null) st.t += (ts - lastTs) / 1000;
+    if (st.t >= curAnim.duration) {
+      if (curAnim.loop) st.t %= curAnim.duration;
+      else { st.t = curAnim.duration; st.playing = false; updatePlayBtn(); }
+    }
+  }
+  lastTs = ts;
+  if (st.current) drawFrame();
+  updateTimeUI();
+  requestAnimationFrame(frame);
+}
+
+window.onerror = (msg, src, line) => {
+  el.srcStatus.textContent = `JS 错误: ${msg} @${line}`;
+  el.srcStatus.classList.add('error');
+};
+
+applyView();
+refreshCharacters();
+requestAnimationFrame(frame);
+
+const bootParams = new URLSearchParams(location.search);
+const bootSrc = bootParams.get('src');
+if (bootSrc) {
+  const bootForm = bootParams.get('form') || '';
+  const bootAnim = bootParams.get('anim') || '';
+  el.urlInput.value = bootSrc;
+  loadFrom(new HTTPVFS(bootSrc), bootForm, bootSrc).then(() => {
+    if (bootAnim && st.current && st.current.anims[bootAnim]) {
+      el.animSel.value = bootAnim;
+      el.animSel.onchange();
+    }
+  });
+}
+
+// 内置数据（data_tx.js）：打开页面即自动加载
+if (!bootSrc && window.SPINE_PPD) {
+  loadFrom(new B64VFS(window.SPINE_PPD), '', `内置·${window.SPINE_PPD.name}`);
+}
+
+/* ============================================================
+ * 内置演示数据：合成一个 Q 版小人（Body/Head/EyeL/EyeR/Hair），
+ * 以真实 PPD 文件格式（scene.json / .raw / anims.json / forms.json）
+ * 编码进内存 VFS，走与真实数据完全相同的加载与解码路径。
+ * ============================================================ */
+
+function makeDemoFiles() {
+  const files = new Map();
+  const enc = (s) => encoder.encode(s).buffer;
+
+  const mkLayer = (name, x, y, w, h, z, group = 'body') => ({
+    name, x, y, w, h,
+    cx: Math.round(x + w / 2), cy: Math.round(y + h / 2),
+    bbox: [x, y, x + w, y + h], z, group, special: '', visible: true,
+  });
+
+  const rootLayers = [
+    mkLayer('Body', 180, 430, 120, 220, 0),
+    mkLayer('Head', 190, 330, 100, 100, 1),
+    mkLayer('EyeL', 212, 370, 16, 10, 2),
+    mkLayer('EyeR', 252, 370, 16, 10, 3),
+    mkLayer('Hair', 185, 320, 110, 60, 4),
+  ];
+
+  // 把 canvas 编码为 .raw（u16 LE w + u16 LE h + RGBA8888），演示数据也覆盖真实解码路径
+  const tex = (path, w, h, fn) => {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    fn(c.getContext('2d'), w, h);
+    const id = c.getContext('2d').getImageData(0, 0, w, h);
+    const buf = new ArrayBuffer(4 + w * h * 4);
+    const dv = new DataView(buf);
+    dv.setUint16(0, w, true);
+    dv.setUint16(2, h, true);
+    new Uint8Array(buf).set(id.data, 4);
+    files.set(path, buf);
+  };
+
+  const bodyDraw = (color) => (g) => {
+    g.fillStyle = color; g.fillRect(0, 0, 120, 220);
+    g.fillStyle = '#e8e8e8'; g.fillRect(42, 0, 36, 10); // 领口
+  };
+  const headDraw = (g) => {
+    g.fillStyle = '#f5d3b3'; g.beginPath(); g.arc(50, 50, 48, 0, Math.PI * 2); g.fill();
+  };
+  const eyeDraw = (g) => {
+    g.fillStyle = '#1c1c1c'; g.beginPath(); g.ellipse(8, 5, 6.7, 4.2, 0, 0, Math.PI * 2); g.fill();
+  };
+  const hairDraw = (g) => {
+    g.fillStyle = '#6b4423';
+    g.fillRect(0, 0, 110, 30);
+    g.beginPath(); g.arc(55, 30, 55, Math.PI, 0); g.fill();
+  };
+  const toolDraw = (g) => {
+    g.strokeStyle = '#9aa0ac'; g.lineWidth = 8;
+    g.beginPath(); g.moveTo(4, 8); g.lineTo(76, 4); g.stroke();
+  };
+
+  tex('Body.raw', 120, 220, bodyDraw('#3a5a9f'));
+  tex('Head.raw', 100, 100, headDraw);
+  tex('EyeL.raw', 16, 10, eyeDraw);
+  tex('EyeR.raw', 16, 10, eyeDraw);
+  tex('Hair.raw', 110, 60, hairDraw);
+
+  // ---- 动画 ----
+  // Idle：头部轻浮。轨道值为正弦采样（合法：插值本身仍是线性的，无包络）
+  const nIdle = 40;
+  const idleLayers = { Head: [], Hair: [], EyeL: [], EyeR: [] };
+  for (let i = 0; i < nIdle; i++) {
+    const dy = Math.round(4 * Math.sin(2 * Math.PI * i / (nIdle - 1)) * 100) / 100;
+    for (const name of Object.keys(idleLayers)) idleLayers[name].push([0, dy, 0, 1]);
+  }
+
+  // Blink：眼睛 vis 硬切（帧 7..11 闭眼），验证 vis 阈值语义
+  const nBlink = 30;
+  const blink = { duration: 1.5, loop: true, layers: { EyeL: [], EyeR: [] } };
+  for (let i = 0; i < nBlink; i++) {
+    const vis = (i >= 7 && i <= 11) ? 0 : 1;
+    blink.layers.EyeL.push([0, 0, 0, vis]);
+    blink.layers.EyeR.push([0, 0, 0, vis]);
+  }
+
+  // Sleep / Die：整体绕 pivot 旋转——每层绕各自中心转同一角度 + 相应平移差 = 整体躺平/倒下
+  const rotateAnim = (layers, thetaMax, px, py, n, duration) => {
+    const out = {};
+    for (const L of layers) {
+      const cx = L.x + L.w / 2, cy = L.y + L.h / 2;
+      const arr = [];
+      for (let i = 0; i < n; i++) {
+        const deg = thetaMax * i / (n - 1);
+        const th = deg * Math.PI / 180;
+        const dx = (cx - px) * (Math.cos(th) - 1) - (cy - py) * Math.sin(th);
+        const dy = (cx - px) * Math.sin(th) + (cy - py) * (Math.cos(th) - 1);
+        const r2 = (v) => Math.round(v * 100) / 100;
+        arr.push([r2(dx), r2(dy), r2(deg), 1]);
+      }
+      out[L.name] = arr;
+    }
+    return { duration, loop: false, layers: out };
+  };
+
+  files.set('scene.json', enc(JSON.stringify({ landscape: true, landscape_rot: 1, layers: rootLayers })));
+  files.set('anims.json', enc(JSON.stringify({
+    Idle: { duration: 2.0, loop: true, layers: idleLayers },
+    Blink: blink,
+    Sleep: rotateAnim(rootLayers, 90, 240, 540, 40, 2.0),
+    Die: rotateAnim(rootLayers, -90, 240, 650, 50, 2.5),
+  })));
+  files.set('forms.json', enc(JSON.stringify({ forms: [{ name: '基建', dir: 'forms/基建' }] })));
+
+  // ---- 基建形态：换装 + 多一个道具层 ----
+  const dormLayers = [
+    mkLayer('Body', 180, 430, 120, 220, 0),
+    mkLayer('Head', 190, 330, 100, 100, 1),
+    mkLayer('EyeL', 212, 370, 16, 10, 2),
+    mkLayer('EyeR', 252, 370, 16, 10, 3),
+    mkLayer('Hair', 185, 320, 110, 60, 4),
+    mkLayer('Tool', 300, 500, 80, 12, 5),
+  ];
+  tex('forms/基建/Body.raw', 120, 220, bodyDraw('#3f7d54'));
+  tex('forms/基建/Head.raw', 100, 100, headDraw);
+  tex('forms/基建/EyeL.raw', 16, 10, eyeDraw);
+  tex('forms/基建/EyeR.raw', 16, 10, eyeDraw);
+  tex('forms/基建/Hair.raw', 110, 60, hairDraw);
+  tex('forms/基建/Tool.raw', 80, 12, toolDraw);
+  files.set('forms/基建/scene.json', enc(JSON.stringify({ landscape: true, landscape_rot: 1, layers: dormLayers })));
+  files.set('forms/基建/anims.json', enc(JSON.stringify({
+    Sleep: rotateAnim(dormLayers, 90, 240, 540, 40, 2.0),
+  })));
+
+  return files;
+}

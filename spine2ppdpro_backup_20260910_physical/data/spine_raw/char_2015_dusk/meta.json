@@ -1,0 +1,39 @@
+{
+  "prefix": "https://torappu.prts.wiki/assets/char_spine/char_2015_dusk/",
+  "name": "夕",
+  "skin": {
+    "默认": {
+      "背面": {
+        "file": "defaultskin/back/char_2015_dusk"
+      },
+      "基建": {
+        "file": "defaultskin/build/build_char_2015_dusk"
+      },
+      "正面": {
+        "file": "defaultskin/front/char_2015_dusk"
+      }
+    },
+    "染尘烟": {
+      "背面": {
+        "file": "char_2015_dusk_nian_7/back/char_2015_dusk_nian_7"
+      },
+      "正面": {
+        "file": "char_2015_dusk_nian_7/front/char_2015_dusk_nian_7"
+      },
+      "基建": {
+        "file": "char_2015_dusk_nian_7/build/build_char_2015_dusk_nian_7"
+      }
+    },
+    "青玉砚": {
+      "正面": {
+        "file": "char_2015_dusk_nian_12/front/char_2015_dusk_nian_12"
+      },
+      "背面": {
+        "file": "char_2015_dusk_nian_12/back/char_2015_dusk_nian_12"
+      },
+      "基建": {
+        "file": "char_2015_dusk_nian_12/build/build_char_2015_dusk_nian_12"
+      }
+    }
+  }
+}

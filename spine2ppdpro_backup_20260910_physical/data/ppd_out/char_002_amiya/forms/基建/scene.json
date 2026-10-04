@@ -1,0 +1,805 @@
+{
+ "name": "阿米娅_基建",
+ "landscape": true,
+ "eye_bar": [
+  291,
+  379
+ ],
+ "head_pivot": [
+  323,
+  390
+ ],
+ "mouth_pivot": [
+  240,
+  400
+ ],
+ "face_tilt": 5,
+ "no_cavity": true,
+ "mouth_compress": true,
+ "mouth_gain": 2.5,
+ "mouth_floor": 0.45,
+ "mouth_width_open": 0.3,
+ "mouth_open_gain": 0.55,
+ "hair_factor": 0.7,
+ "layers": [
+  {
+   "name": "F_Ponytail",
+   "x": 104,
+   "y": 414,
+   "w": 198,
+   "h": 110,
+   "cx": 205,
+   "cy": 489,
+   "bbox": [
+    104,
+    414,
+    301,
+    523
+   ],
+   "z": 0,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Arm",
+   "x": 192,
+   "y": 345,
+   "w": 59,
+   "h": 43,
+   "cx": 220,
+   "cy": 367,
+   "bbox": [
+    192,
+    345,
+    250,
+    387
+   ],
+   "z": 1,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Hand",
+   "x": 133,
+   "y": 313,
+   "w": 53,
+   "h": 46,
+   "cx": 159,
+   "cy": 337,
+   "bbox": [
+    133,
+    313,
+    185,
+    358
+   ],
+   "z": 2,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Forearm",
+   "x": 166,
+   "y": 329,
+   "w": 47,
+   "h": 53,
+   "cx": 191,
+   "cy": 356,
+   "bbox": [
+    166,
+    329,
+    212,
+    381
+   ],
+   "z": 3,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Hood",
+   "x": 213,
+   "y": 368,
+   "w": 62,
+   "h": 116,
+   "cx": 243,
+   "cy": 418,
+   "bbox": [
+    213,
+    368,
+    274,
+    483
+   ],
+   "z": 4,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Coat_Back",
+   "x": 131,
+   "y": 322,
+   "w": 133,
+   "h": 119,
+   "cx": 190,
+   "cy": 385,
+   "bbox": [
+    131,
+    322,
+    263,
+    440
+   ],
+   "z": 5,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Dress_Back",
+   "x": 150,
+   "y": 343,
+   "w": 21,
+   "h": 93,
+   "cx": 159,
+   "cy": 389,
+   "bbox": [
+    150,
+    343,
+    170,
+    435
+   ],
+   "z": 6,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Calf",
+   "x": 19,
+   "y": 345,
+   "w": 110,
+   "h": 41,
+   "cx": 72,
+   "cy": 365,
+   "bbox": [
+    19,
+    345,
+    128,
+    385
+   ],
+   "z": 7,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Foot",
+   "x": 13,
+   "y": 330,
+   "w": 31,
+   "h": 58,
+   "cx": 25,
+   "cy": 359,
+   "bbox": [
+    13,
+    330,
+    43,
+    387
+   ],
+   "z": 8,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Leg",
+   "x": 104,
+   "y": 353,
+   "w": 70,
+   "h": 40,
+   "cx": 140,
+   "cy": 372,
+   "bbox": [
+    104,
+    353,
+    173,
+    392
+   ],
+   "z": 9,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_R_Calf",
+   "x": 26,
+   "y": 393,
+   "w": 108,
+   "h": 56,
+   "cx": 76,
+   "cy": 419,
+   "bbox": [
+    26,
+    393,
+    133,
+    448
+   ],
+   "z": 10,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_R_Foot",
+   "x": 12,
+   "y": 395,
+   "w": 30,
+   "h": 58,
+   "cx": 24,
+   "cy": 424,
+   "bbox": [
+    12,
+    395,
+    41,
+    452
+   ],
+   "z": 11,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_R_Leg",
+   "x": 105,
+   "y": 393,
+   "w": 82,
+   "h": 33,
+   "cx": 146,
+   "cy": 409,
+   "bbox": [
+    105,
+    393,
+    186,
+    425
+   ],
+   "z": 12,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Waist",
+   "x": 148,
+   "y": 341,
+   "w": 127,
+   "h": 94,
+   "cx": 201,
+   "cy": 389,
+   "bbox": [
+    148,
+    341,
+    274,
+    434
+   ],
+   "z": 13,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Coat",
+   "x": 125,
+   "y": 306,
+   "w": 129,
+   "h": 60,
+   "cx": 181,
+   "cy": 339,
+   "bbox": [
+    125,
+    306,
+    253,
+    365
+   ],
+   "z": 14,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Scarf",
+   "x": 211,
+   "y": 355,
+   "w": 48,
+   "h": 53,
+   "cx": 236,
+   "cy": 380,
+   "bbox": [
+    211,
+    355,
+    258,
+    407
+   ],
+   "z": 15,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_R_Coat",
+   "x": 111,
+   "y": 383,
+   "w": 141,
+   "h": 93,
+   "cx": 174,
+   "cy": 423,
+   "bbox": [
+    111,
+    383,
+    251,
+    475
+   ],
+   "z": 16,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_R_Arm",
+   "x": 204,
+   "y": 400,
+   "w": 54,
+   "h": 41,
+   "cx": 231,
+   "cy": 420,
+   "bbox": [
+    204,
+    400,
+    257,
+    440
+   ],
+   "z": 17,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_R_Hand",
+   "x": 144,
+   "y": 432,
+   "w": 50,
+   "h": 51,
+   "cx": 167,
+   "cy": 455,
+   "bbox": [
+    144,
+    432,
+    193,
+    482
+   ],
+   "z": 18,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_R_Forearm",
+   "x": 175,
+   "y": 416,
+   "w": 51,
+   "h": 44,
+   "cx": 200,
+   "cy": 436,
+   "bbox": [
+    175,
+    416,
+    225,
+    459
+   ],
+   "z": 19,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Belt",
+   "x": 159,
+   "y": 404,
+   "w": 77,
+   "h": 13,
+   "cx": 198,
+   "cy": 412,
+   "bbox": [
+    159,
+    404,
+    235,
+    416
+   ],
+   "z": 20,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_R_Collar",
+   "x": 174,
+   "y": 385,
+   "w": 93,
+   "h": 54,
+   "cx": 228,
+   "cy": 404,
+   "bbox": [
+    174,
+    385,
+    266,
+    438
+   ],
+   "z": 21,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Ear",
+   "x": 364,
+   "y": 281,
+   "w": 94,
+   "h": 81,
+   "cx": 406,
+   "cy": 313,
+   "bbox": [
+    364,
+    281,
+    457,
+    361
+   ],
+   "z": 22,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_L_Hair",
+   "x": 203,
+   "y": 291,
+   "w": 112,
+   "h": 55,
+   "cx": 265,
+   "cy": 318,
+   "bbox": [
+    203,
+    291,
+    314,
+    345
+   ],
+   "z": 23,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Head",
+   "x": 254,
+   "y": 321,
+   "w": 135,
+   "h": 140,
+   "cx": 323,
+   "cy": 390,
+   "bbox": [
+    254,
+    321,
+    388,
+    460
+   ],
+   "z": 24,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Emoticon",
+   "x": 273,
+   "y": 312,
+   "w": 65,
+   "h": 106,
+   "cx": 306,
+   "cy": 365,
+   "bbox": [
+    273,
+    312,
+    337,
+    417
+   ],
+   "z": 25,
+   "group": "head",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "F_R_Hair",
+   "x": 192,
+   "y": 359,
+   "w": 188,
+   "h": 108,
+   "cx": 303,
+   "cy": 427,
+   "bbox": [
+    192,
+    359,
+    379,
+    466
+   ],
+   "z": 26,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Front_Hair_C",
+   "x": 259,
+   "y": 310,
+   "w": 114,
+   "h": 48,
+   "cx": 320,
+   "cy": 330,
+   "bbox": [
+    259,
+    310,
+    372,
+    357
+   ],
+   "z": 27,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Front_Hair_A",
+   "x": 290,
+   "y": 338,
+   "w": 85,
+   "h": 95,
+   "cx": 335,
+   "cy": 383,
+   "bbox": [
+    290,
+    338,
+    374,
+    432
+   ],
+   "z": 28,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Eye_L",
+   "x": 276,
+   "y": 336,
+   "w": 28,
+   "h": 21,
+   "cx": 290,
+   "cy": 347,
+   "bbox": [
+    276,
+    336,
+    303,
+    356
+   ],
+   "z": 30,
+   "group": "head",
+   "special": "eye-l",
+   "visible": true
+  },
+  {
+   "name": "F_Eye_R",
+   "x": 277,
+   "y": 368,
+   "w": 29,
+   "h": 48,
+   "cx": 291,
+   "cy": 395,
+   "bbox": [
+    277,
+    368,
+    305,
+    415
+   ],
+   "z": 30,
+   "group": "head",
+   "special": "eye-r",
+   "visible": true
+  },
+  {
+   "name": "F_Emoticon_2",
+   "x": 249,
+   "y": 384,
+   "w": 5,
+   "h": 6,
+   "cx": 251,
+   "cy": 387,
+   "bbox": [
+    249,
+    384,
+    253,
+    389
+   ],
+   "z": 31,
+   "group": "head",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "F_Eyebrow",
+   "x": 312,
+   "y": 341,
+   "w": 6,
+   "h": 56,
+   "cx": 314,
+   "cy": 370,
+   "bbox": [
+    312,
+    341,
+    317,
+    396
+   ],
+   "z": 32,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Front_Hair_B",
+   "x": 270,
+   "y": 398,
+   "w": 99,
+   "h": 51,
+   "cx": 321,
+   "cy": 428,
+   "bbox": [
+    270,
+    398,
+    368,
+    448
+   ],
+   "z": 33,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_R_Ear",
+   "x": 369,
+   "y": 418,
+   "w": 98,
+   "h": 71,
+   "cx": 414,
+   "cy": 460,
+   "bbox": [
+    369,
+    418,
+    466,
+    488
+   ],
+   "z": 34,
+   "group": "head",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "F_Face_v",
+   "x": 260,
+   "y": 340,
+   "w": 51,
+   "h": 67,
+   "cx": 280,
+   "cy": 375,
+   "bbox": [
+    260,
+    340,
+    310,
+    406
+   ],
+   "z": 30,
+   "group": "head",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "F_Eye_3_v",
+   "x": 276,
+   "y": 335,
+   "w": 11,
+   "h": 77,
+   "cx": 281,
+   "cy": 376,
+   "bbox": [
+    276,
+    335,
+    286,
+    411
+   ],
+   "z": 30,
+   "group": "head",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "F_Eye_2_v",
+   "x": 276,
+   "y": 337,
+   "w": 23,
+   "h": 80,
+   "cx": 287,
+   "cy": 380,
+   "bbox": [
+    276,
+    337,
+    298,
+    416
+   ],
+   "z": 30,
+   "group": "head",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "F_Eye_4_v",
+   "x": 277,
+   "y": 336,
+   "w": 30,
+   "h": 80,
+   "cx": 292,
+   "cy": 379,
+   "bbox": [
+    277,
+    336,
+    306,
+    415
+   ],
+   "z": 30,
+   "group": "head",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "F_Eyebrow_4_v",
+   "x": 318,
+   "y": 342,
+   "w": 3,
+   "h": 55,
+   "cx": 319,
+   "cy": 377,
+   "bbox": [
+    318,
+    342,
+    320,
+    396
+   ],
+   "z": 32,
+   "group": "head",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "F_R_Hand_2_v",
+   "x": 143,
+   "y": 432,
+   "w": 50,
+   "h": 47,
+   "cx": 170,
+   "cy": 453,
+   "bbox": [
+    143,
+    432,
+    192,
+    478
+   ],
+   "z": 18,
+   "group": "body",
+   "special": "",
+   "visible": false
+  }
+ ]
+}

@@ -1,0 +1,662 @@
+{
+  "id": "364c8fc0-c139-4d10-9816-0ec63d021da0",
+  "revision": 0,
+  "last_node_id": 9,
+  "last_link_id": 9,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "CR Text",
+      "pos": [
+        9785.2041015625,
+        -2607.513671875
+      ],
+      "size": [
+        421.8307800292969,
+        569.3616333007812
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "text",
+          "type": "STRING",
+          "widget": {
+            "name": "text"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "label": "文本",
+          "name": "text",
+          "type": "*",
+          "links": [
+            3
+          ]
+        },
+        {
+          "label": "显示帮助",
+          "name": "show_help",
+          "type": "STRING"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CR Text",
+        "cnr_id": "ComfyUI_Comfyroll_CustomNodes",
+        "ver": "d78b780ae43fcf8c6b7c6505e6ffb4584281ceca",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        },
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "人"
+      ]
+    },
+    {
+      "id": 6,
+      "type": "easy sam3ModelLoader",
+      "pos": [
+        10904.3779296875,
+        -2624.54443359375
+      ],
+      "size": [
+        314.7045593261719,
+        132.1029052734375
+      ],
+      "flags": {
+        "collapsed": false
+      },
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "model",
+          "name": "model",
+          "type": "COMBO",
+          "widget": {
+            "name": "model"
+          }
+        },
+        {
+          "label": "segmentor",
+          "name": "segmentor",
+          "type": "COMBO",
+          "widget": {
+            "name": "segmentor"
+          }
+        },
+        {
+          "label": "device",
+          "name": "device",
+          "type": "COMBO",
+          "widget": {
+            "name": "device"
+          }
+        },
+        {
+          "label": "precision",
+          "name": "precision",
+          "type": "COMBO",
+          "widget": {
+            "name": "precision"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "label": "sam3_model",
+          "name": "sam3_model",
+          "type": "EASY_SAM3_MODEL",
+          "links": [
+            4
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "easy sam3ModelLoader",
+        "cnr_id": "comfyui-easy-sam3",
+        "ver": "88fe578a1a5e03d95281197303d5d3a73fd5a089",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.5.2"
+        },
+        "widget_ue_connectable": {
+          "precision": true,
+          "model": true,
+          "device": true,
+          "segmentor": true
+        },
+        "aux_id": "yolain/ComfyUI-Easy-Sam3"
+      },
+      "widgets_values": [
+        "sam3.pt",
+        "image",
+        "cuda",
+        "fp16"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 5,
+      "type": "LoadImage",
+      "pos": [
+        10551.8564453125,
+        -2628.4306640625
+      ],
+      "size": [
+        342.2813720703125,
+        596.9635009765625
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "COMBO",
+          "widget": {
+            "name": "image"
+          }
+        },
+        {
+          "name": "upload",
+          "type": "IMAGEUPLOAD",
+          "widget": {
+            "name": "upload"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "label": "图像",
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [
+            5
+          ]
+        },
+        {
+          "label": "遮罩",
+          "name": "MASK",
+          "type": "MASK",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage",
+        "cnr_id": "comfy-core",
+        "#sdppp_simple_content": "canvas",
+        "image": "clipspace/clipspace-painted-masked-1765035711470.png [input]",
+        "#sdppp_label": "",
+        "ver": "0.3.19",
+        "#sdppp_variant": "default",
+        "#sdppp_simple_boundary": "canvas",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "image": true,
+            "upload": true
+          },
+          "input_ue_unconnectable": {},
+          "version": "7.0.1"
+        },
+        "widget_ue_connectable": {},
+        "#sdppp_simple_mask": "canvas"
+      },
+      "widgets_values": [
+        "ea964744ecccff773047ebb6a798b6dbbfd8dd1dddcef2278f67c78b1ae8bea9.jpg",
+        "image"
+      ]
+    },
+    {
+      "id": 4,
+      "type": "DeepTranslatorTextNode",
+      "pos": [
+        10233.98046875,
+        -2611.67431640625
+      ],
+      "size": [
+        302.1234130859375,
+        396.5463562011719
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "源翻译",
+          "name": "from_translate",
+          "type": "COMBO",
+          "widget": {
+            "name": "from_translate"
+          }
+        },
+        {
+          "label": "目标语言",
+          "name": "to_translate",
+          "type": "COMBO",
+          "widget": {
+            "name": "to_translate"
+          }
+        },
+        {
+          "label": "启用代理",
+          "name": "add_proxies",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "add_proxies"
+          }
+        },
+        {
+          "label": "代理地址",
+          "name": "proxies",
+          "type": "STRING",
+          "widget": {
+            "name": "proxies"
+          }
+        },
+        {
+          "label": "认证密钥",
+          "name": "auth_data",
+          "type": "STRING",
+          "widget": {
+            "name": "auth_data"
+          }
+        },
+        {
+          "label": "服务",
+          "name": "service",
+          "type": "COMBO",
+          "widget": {
+            "name": "service"
+          }
+        },
+        {
+          "label": "文本",
+          "name": "text",
+          "type": "STRING",
+          "widget": {
+            "name": "text"
+          },
+          "link": 3
+        }
+      ],
+      "outputs": [
+        {
+          "label": "文本",
+          "name": "text",
+          "type": "STRING",
+          "links": [
+            1
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "DeepTranslatorTextNode",
+        "cnr_id": "comfyui_custom_nodes_alekpet",
+        "ver": "e9763014daaf24987cbaba916122f23e6d85ef44",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        },
+        "widget_ue_connectable": {
+          "to_translate": true,
+          "from_translate": true,
+          "service": true,
+          "add_proxies": true,
+          "proxies": true,
+          "text": true,
+          "auth_data": true
+        },
+        "aux_id": "AlekPet/ComfyUI_Custom_Nodes_AlekPet"
+      },
+      "widgets_values": [
+        "auto",
+        "english",
+        false,
+        "",
+        "",
+        "GoogleTranslator",
+        "",
+        "proxy_hide",
+        "authorization_hide"
+      ],
+      "color": "#232",
+      "bgcolor": "#353"
+    },
+    {
+      "id": 2,
+      "type": "easy showAnything",
+      "pos": [
+        9962.9150390625,
+        -1901.490478515625
+      ],
+      "size": [
+        302.8190612792969,
+        119.02739715576172
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "输入任何",
+          "name": "anything",
+          "shape": 7,
+          "type": "*",
+          "link": 1
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output",
+          "type": "*",
+          "links": [
+            8
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "easy showAnything",
+        "cnr_id": "comfyui-easy-use",
+        "ver": "ec4ca6717f539a8b8c48fa88645045846ca47669",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        },
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "people"
+      ]
+    },
+    {
+      "id": 7,
+      "type": "easy sam3ImageSegmentation",
+      "pos": [
+        10906.6845703125,
+        -2449.763671875
+      ],
+      "size": [
+        314.9393615722656,
+        420.998046875
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "sam3_model",
+          "name": "sam3_model",
+          "type": "*",
+          "link": 4
+        },
+        {
+          "label": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "link": 5
+        },
+        {
+          "label": "coordinates_positive",
+          "name": "coordinates_positive",
+          "shape": 7,
+          "type": "STRING"
+        },
+        {
+          "label": "coordinates_negative",
+          "name": "coordinates_negative",
+          "shape": 7,
+          "type": "STRING"
+        },
+        {
+          "label": "bboxes",
+          "name": "bboxes",
+          "shape": 7,
+          "type": "BBOX"
+        },
+        {
+          "label": "mask",
+          "name": "mask",
+          "shape": 7,
+          "type": "MASK"
+        },
+        {
+          "label": "prompt",
+          "name": "prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "prompt"
+          },
+          "link": 8
+        },
+        {
+          "label": "threshold",
+          "name": "threshold",
+          "type": "FLOAT",
+          "widget": {
+            "name": "threshold"
+          }
+        },
+        {
+          "label": "keep_model_loaded",
+          "name": "keep_model_loaded",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "keep_model_loaded"
+          }
+        },
+        {
+          "label": "add_background",
+          "name": "add_background",
+          "type": "COMBO",
+          "widget": {
+            "name": "add_background"
+          }
+        },
+        {
+          "label": "detection_limit",
+          "name": "detection_limit",
+          "type": "INT",
+          "widget": {
+            "name": "detection_limit"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "label": "masks",
+          "name": "masks",
+          "type": "MASK",
+          "links": []
+        },
+        {
+          "label": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "links": [
+            9
+          ]
+        },
+        {
+          "label": "obj_masks",
+          "name": "obj_masks",
+          "type": "MASK",
+          "links": []
+        },
+        {
+          "label": "boxes",
+          "name": "boxes",
+          "type": "BBOX",
+          "links": []
+        },
+        {
+          "label": "scores",
+          "name": "scores",
+          "type": "FLOAT",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "easy sam3ImageSegmentation",
+        "cnr_id": "comfyui-easy-sam3",
+        "ver": "851a5be3c01d6fbd3ef45dbb55092916cfc466af",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.5.2"
+        },
+        "widget_ue_connectable": {
+          "keep_model_loaded": true,
+          "detection_limit": true,
+          "threshold": true,
+          "prompt": true,
+          "add_background": true
+        },
+        "aux_id": "yolain/ComfyUI-Easy-Sam3"
+      },
+      "widgets_values": [
+        "",
+        0.4,
+        false,
+        "none",
+        -1
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 8,
+      "type": "SaveImage",
+      "pos": [
+        11238.0048828125,
+        -2596.5595703125
+      ],
+      "size": [
+        459.8046569824219,
+        563.9752197265625
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "图像",
+          "name": "images",
+          "type": "IMAGE",
+          "link": 9
+        },
+        {
+          "name": "filename_prefix",
+          "type": "STRING",
+          "widget": {
+            "name": "filename_prefix"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image_urls",
+          "type": "STRING"
+        },
+        {
+          "name": "images",
+          "type": "IMAGE"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "SaveImage",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "ComfyUI"
+      ]
+    }
+  ],
+  "links": [
+    [
+      1,
+      4,
+      0,
+      2,
+      0,
+      "STRING"
+    ],
+    [
+      3,
+      1,
+      0,
+      4,
+      6,
+      "STRING"
+    ],
+    [
+      4,
+      6,
+      0,
+      7,
+      0,
+      "EASY_SAM3_MODEL"
+    ],
+    [
+      5,
+      5,
+      0,
+      7,
+      1,
+      "IMAGE"
+    ],
+    [
+      8,
+      2,
+      0,
+      7,
+      6,
+      "STRING"
+    ],
+    [
+      9,
+      7,
+      1,
+      8,
+      0,
+      "IMAGE"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "VHS_KeepIntermediate": true,
+    "links_added_by_ue": [],
+    "ue_links": [],
+    "VHS_MetadataImage": true,
+    "0246.VERSION": [
+      0,
+      0,
+      4
+    ],
+    "VHS_latentpreviewrate": 0,
+    "frontendVersion": "1.23.0",
+    "VHS_latentpreview": false,
+    "ds": {
+      "scale": 0.8769226950000005,
+      "offset": [
+        -9585.98671304372,
+        2793.217241428122
+      ]
+    },
+    "pixaromaGroups": [],
+    "KKvideo_latentpreview": false,
+    "KKvideo_latentpreviewrate": 0
+  },
+  "version": 0.4
+}

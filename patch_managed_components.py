@@ -97,8 +97,33 @@ def patch_wifi_cc():
     else:
         print('[OK] wifi_ap.cc — already patched')
 
+# ── Patch 4: wifi_station.h/.cc 屏幕列表扩展(2026-09-20/21,文件级恢复) ──
+# ScanOnce/ConnectTo/PauseScanTimer/IsStarted/SetManualConfig/rssi
+# 2026-09-27:原先是手改未固化,fullclean 后丢失——从 tools/patches/ 恢复
+def patch_wifi_station():
+    import shutil
+    targets = {
+        'tools/patches/wifi_station.h':
+            'managed_components/78__esp-wifi-connect/include/wifi_station.h',
+        'tools/patches/wifi_station.cc':
+            'managed_components/78__esp-wifi-connect/wifi_station.cc',
+    }
+    for src, dst in targets.items():
+        sp = os.path.join(BASE, src)
+        dp = os.path.join(BASE, dst)
+        need = True
+        if os.path.exists(dp):
+            with open(sp, 'rb') as f1, open(dp, 'rb') as f2:
+                need = f1.read() != f2.read()
+        if need:
+            shutil.copyfile(sp, dp)
+            print('[✓] wifi_station: ' + os.path.basename(src) + ' 已恢复补丁')
+        else:
+            print('[OK] wifi_station: ' + os.path.basename(src) + ' — already patched')
+
 if __name__ == '__main__':
     patch_lvgl()
     patch_wifi_h()
     patch_wifi_cc()
+    patch_wifi_station()
     print('\nAll patches applied.')

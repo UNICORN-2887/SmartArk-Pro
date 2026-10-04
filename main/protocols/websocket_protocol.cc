@@ -212,6 +212,10 @@ std::string WebsocketProtocol::GetHelloMessage() {
     cJSON_AddBoolToObject(features, "aec", true);
 #endif
     cJSON_AddBoolToObject(features, "mcp", true);
+    // 2026-09-30 声纹过滤开关(设置页「声纹过滤(只听我)」控制,默认关闭;
+    // 服务器按此字段决定是否为该设备启用声纹过滤)
+    cJSON_AddBoolToObject(features, "voiceprint",
+                          Settings("voiceprint", false).GetInt("enabled", 0) != 0);
     cJSON_AddItemToObject(root, "features", features);
     cJSON_AddStringToObject(root, "transport", "websocket");
     cJSON* audio_params = cJSON_CreateObject();

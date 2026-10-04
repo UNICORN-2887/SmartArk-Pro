@@ -1,0 +1,536 @@
+{
+ "name": "拉普兰德_背面",
+ "landscape": true,
+ "eye_bar": null,
+ "head_pivot": [
+  240,
+  400
+ ],
+ "mouth_pivot": [
+  240,
+  400
+ ],
+ "face_tilt": 5,
+ "no_cavity": true,
+ "mouth_compress": true,
+ "mouth_gain": 2.5,
+ "mouth_floor": 0.45,
+ "mouth_width_open": 0.3,
+ "mouth_open_gain": 0.55,
+ "hair_factor": 0.7,
+ "layers": [
+  {
+   "name": "B_B_Coat",
+   "x": 137,
+   "y": 347,
+   "w": 110,
+   "h": 94,
+   "cx": 192,
+   "cy": 388,
+   "bbox": [
+    137,
+    347,
+    246,
+    440
+   ],
+   "z": 0,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_Streamer",
+   "x": 138,
+   "y": 334,
+   "w": 128,
+   "h": 23,
+   "cx": 201,
+   "cy": 344,
+   "bbox": [
+    138,
+    334,
+    265,
+    356
+   ],
+   "z": 1,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_L_Calf",
+   "x": 45,
+   "y": 380,
+   "w": 118,
+   "h": 75,
+   "cx": 100,
+   "cy": 415,
+   "bbox": [
+    45,
+    380,
+    162,
+    454
+   ],
+   "z": 2,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_L_Foot",
+   "x": 24,
+   "y": 395,
+   "w": 72,
+   "h": 72,
+   "cx": 53,
+   "cy": 432,
+   "bbox": [
+    24,
+    395,
+    95,
+    466
+   ],
+   "z": 3,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_L_Leg",
+   "x": 132,
+   "y": 364,
+   "w": 79,
+   "h": 48,
+   "cx": 172,
+   "cy": 388,
+   "bbox": [
+    132,
+    364,
+    210,
+    411
+   ],
+   "z": 4,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_Waist",
+   "x": 199,
+   "y": 335,
+   "w": 69,
+   "h": 58,
+   "cx": 231,
+   "cy": 362,
+   "bbox": [
+    199,
+    335,
+    267,
+    392
+   ],
+   "z": 5,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_Chest",
+   "x": 242,
+   "y": 332,
+   "w": 53,
+   "h": 64,
+   "cx": 267,
+   "cy": 365,
+   "bbox": [
+    242,
+    332,
+    294,
+    395
+   ],
+   "z": 6,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_Hip",
+   "x": 180,
+   "y": 323,
+   "w": 44,
+   "h": 82,
+   "cx": 204,
+   "cy": 365,
+   "bbox": [
+    180,
+    323,
+    223,
+    404
+   ],
+   "z": 7,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_R_Calf",
+   "x": 47,
+   "y": 279,
+   "w": 112,
+   "h": 55,
+   "cx": 99,
+   "cy": 309,
+   "bbox": [
+    47,
+    279,
+    158,
+    333
+   ],
+   "z": 8,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_R_Foot",
+   "x": 23,
+   "y": 259,
+   "w": 60,
+   "h": 76,
+   "cx": 48,
+   "cy": 297,
+   "bbox": [
+    23,
+    259,
+    82,
+    334
+   ],
+   "z": 9,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_R_Leg",
+   "x": 129,
+   "y": 302,
+   "w": 88,
+   "h": 60,
+   "cx": 173,
+   "cy": 331,
+   "bbox": [
+    129,
+    302,
+    216,
+    361
+   ],
+   "z": 10,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_L_Hand_B",
+   "x": 177,
+   "y": 434,
+   "w": 60,
+   "h": 66,
+   "cx": 205,
+   "cy": 463,
+   "bbox": [
+    177,
+    434,
+    236,
+    499
+   ],
+   "z": 11,
+   "group": "body",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "B_L_Hand",
+   "x": 173,
+   "y": 424,
+   "w": 62,
+   "h": 62,
+   "cx": 204,
+   "cy": 453,
+   "bbox": [
+    173,
+    424,
+    234,
+    485
+   ],
+   "z": 12,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_Weapon_2",
+   "x": 23,
+   "y": 225,
+   "w": 228,
+   "h": 279,
+   "cx": 137,
+   "cy": 382,
+   "bbox": [
+    23,
+    225,
+    250,
+    503
+   ],
+   "z": 13,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_L_Arm",
+   "x": 230,
+   "y": 375,
+   "w": 59,
+   "h": 62,
+   "cx": 259,
+   "cy": 405,
+   "bbox": [
+    230,
+    375,
+    288,
+    436
+   ],
+   "z": 14,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_L_Shoulder",
+   "x": 193,
+   "y": 408,
+   "w": 63,
+   "h": 60,
+   "cx": 226,
+   "cy": 433,
+   "bbox": [
+    193,
+    408,
+    255,
+    467
+   ],
+   "z": 15,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_Tail",
+   "x": 102,
+   "y": 385,
+   "w": 105,
+   "h": 134,
+   "cx": 150,
+   "cy": 453,
+   "bbox": [
+    102,
+    385,
+    206,
+    518
+   ],
+   "z": 16,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_Coat",
+   "x": 158,
+   "y": 287,
+   "w": 150,
+   "h": 154,
+   "cx": 227,
+   "cy": 364,
+   "bbox": [
+    158,
+    287,
+    307,
+    440
+   ],
+   "z": 17,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_R_Arm",
+   "x": 240,
+   "y": 342,
+   "w": 50,
+   "h": 41,
+   "cx": 266,
+   "cy": 360,
+   "bbox": [
+    240,
+    342,
+    289,
+    382
+   ],
+   "z": 18,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_Weapon_1",
+   "x": 17,
+   "y": 146,
+   "w": 215,
+   "h": 290,
+   "cx": 125,
+   "cy": 310,
+   "bbox": [
+    17,
+    146,
+    231,
+    435
+   ],
+   "z": 19,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_R_Hand",
+   "x": 161,
+   "y": 361,
+   "w": 68,
+   "h": 55,
+   "cx": 194,
+   "cy": 385,
+   "bbox": [
+    161,
+    361,
+    228,
+    415
+   ],
+   "z": 20,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_R_Hand_B",
+   "x": 159,
+   "y": 250,
+   "w": 71,
+   "h": 66,
+   "cx": 193,
+   "cy": 284,
+   "bbox": [
+    159,
+    250,
+    229,
+    315
+   ],
+   "z": 21,
+   "group": "body",
+   "special": "",
+   "visible": false
+  },
+  {
+   "name": "B_R_Shoulder",
+   "x": 199,
+   "y": 355,
+   "w": 51,
+   "h": 51,
+   "cx": 223,
+   "cy": 376,
+   "bbox": [
+    199,
+    355,
+    249,
+    405
+   ],
+   "z": 22,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_L_Ear",
+   "x": 384,
+   "y": 399,
+   "w": 85,
+   "h": 92,
+   "cx": 426,
+   "cy": 440,
+   "bbox": [
+    384,
+    399,
+    468,
+    490
+   ],
+   "z": 23,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_Head",
+   "x": 176,
+   "y": 257,
+   "w": 284,
+   "h": 303,
+   "cx": 314,
+   "cy": 398,
+   "bbox": [
+    176,
+    257,
+    459,
+    559
+   ],
+   "z": 24,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_R_Ear",
+   "x": 374,
+   "y": 251,
+   "w": 93,
+   "h": 110,
+   "cx": 414,
+   "cy": 304,
+   "bbox": [
+    374,
+    251,
+    466,
+    360
+   ],
+   "z": 25,
+   "group": "body",
+   "special": "",
+   "visible": true
+  },
+  {
+   "name": "B_C_Hair",
+   "x": 443,
+   "y": 305,
+   "w": 37,
+   "h": 94,
+   "cx": 459,
+   "cy": 345,
+   "bbox": [
+    443,
+    305,
+    479,
+    398
+   ],
+   "z": 26,
+   "group": "body",
+   "special": "",
+   "visible": true
+  }
+ ]
+}

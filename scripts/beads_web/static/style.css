@@ -1,0 +1,106 @@
+/* 拼豆拆分工具 — 样式 */
+* { box-sizing: border-box; }
+
+body {
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  background: #f4f5f7;
+  color: #222;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+h1 { margin: 4px 0; }
+h2 { margin: 8px 0; }
+h3 { margin: 16px 0 8px; }
+
+.hint { color: #777; font-size: 13px; }
+
+.card {
+  background: #fff;
+  border-radius: 10px;
+  padding: 16px;
+  margin: 12px 0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+/* 上传 */
+#dropzone {
+  border: 2px dashed #aaa;
+  border-radius: 10px;
+  padding: 48px 16px;
+  text-align: center;
+  color: #666;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+#dropzone:hover { background: #f0f4ff; border-color: #4a7bff; }
+
+/* 裁剪 */
+.crop-row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+#crop-canvas { cursor: grab; border: 1px solid #ccc; border-radius: 6px; touch-action: none; }
+#crop-canvas:active { cursor: grabbing; }
+.crop-side { display: flex; flex-direction: column; gap: 8px; }
+.preview-label { font-size: 13px; color: #777; }
+#crop-preview { border: 1px solid #ccc; border-radius: 6px; }
+
+/* 参数 */
+.param-row { display: flex; gap: 24px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+select, input {
+  padding: 8px 10px;
+  font-size: 15px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  min-width: 220px;
+}
+
+button, a.primary {
+  display: inline-block;
+  padding: 10px 22px;
+  font-size: 15px;
+  border-radius: 6px;
+  cursor: pointer;
+  text-decoration: none;
+  text-align: center;
+}
+button.primary, a.primary {
+  background: #4a7bff;
+  color: #fff;
+  border: none;
+}
+button.primary:hover, a.primary:hover { background: #3a66e0; }
+button.ghost {
+  background: #fff;
+  color: #555;
+  border: 1px solid #ccc;
+}
+button.ghost:hover { background: #f0f0f0; }
+button:disabled { background: #99b3e8; cursor: not-allowed; }
+
+/* 结果 */
+#result-links { margin: 8px 0; }
+#overview-img, #palette-img {
+  image-rendering: pixelated;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fff;
+  max-width: 100%;
+}
+.tiles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+.tile {
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fff;
+  padding: 4px;
+}
+.tile img {
+  width: 100%;
+  display: block;
+  image-rendering: pixelated;
+}
+.tile-cap { font-size: 11px; color: #666; word-break: break-all; margin-top: 3px; }

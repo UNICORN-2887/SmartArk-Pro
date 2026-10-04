@@ -9,6 +9,8 @@ set(SOURCES "audio/audio_codec.cc"
             "audio/codecs/dummy_audio_codec.cc"
             "audio/tts_engine.cc"
             "audio/processors/audio_debugger.cc"
+            "audio/forwarder/audio_forwarder.cc"
+            "agent_tools.cc"
             "led/single_led.cc"
             "led/circular_strip.cc"
             "led/gpio_led.cc"
@@ -29,11 +31,22 @@ set(SOURCES "audio/audio_codec.cc"
             "apps/image_display/ImageDisplay.cpp"
             "apps/image_display/MjpegPlayer.cpp"
             "apps/image_display/PPACompositor.cpp"
+            "apps/image_display/boot_cover.cc"
+            "apps/image_display/boot_ceremony.cc"
             "apps/live2d/moc3_parser.c"
             "apps/live2d/lv2_render.c"
+            "apps/live2d/lv2_paperdoll.c"
+            "apps/live2d/pdq_render.c"
+            "apps/beads/beads_storage.cc"
+            "apps/beads/beads_ui.cc"
+            "apps/loading/loading_ui.cc"
+            "apps/settings/settings_ui.cc"
+            "apps/menu/menu_ui.cc"
+            "apps/role_download/role_downloader.cc"
+            "apps/wifi_ui/wifi_ui.cc"
             )
 
-set(INCLUDE_DIRS "." "display" "audio" "protocols" "apps/image_display" "apps/live2d")
+set(INCLUDE_DIRS "." "display" "audio" "protocols" "apps/image_display" "apps/live2d" "apps/beads" "apps/loading" "apps/settings" "apps/menu" "apps/role_download" "apps/wifi_ui")
 
 # 添加板级公共文件
 file(GLOB BOARD_COMMON_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/boards/common/*.cc)
@@ -279,6 +292,16 @@ idf_component_register(SRCS ${SOURCES}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
                     WHOLE_ARCHIVE
                     )
+
+# 纸偶渲染引擎单独 -O2（渲染热循环全在此文件；全局 -O2 会撑爆 OTA 分区）
+set_source_files_properties("apps/live2d/lv2_paperdoll.c" "apps/live2d/pdq_render.c"
+    PROPERTIES COMPILE_OPTIONS "-O2")
+
+# 2026-10-03 s11 崩溃根因:GCC -Os 的 section-anchor 优化把 .bss 锚基址缓存在
+# s11 等 s 寄存器,巨型函数+插桩 asm 导致锚活区间错误 → 主路径用陈旧 s11 值
+# (-544(s11) 访问崩,0x6e=循环临时量)。本文件禁用锚优化,改用绝对寻址。
+set_source_files_properties("apps/image_display/ImageDisplay.cpp"
+    PROPERTIES COMPILE_OPTIONS "-fno-section-anchors")
 
 # 使用 target_compile_definitions 来定义 BOARD_TYPE, BOARD_NAME
 # 如果 BOARD_NAME 为空，则使用 BOARD_TYPE

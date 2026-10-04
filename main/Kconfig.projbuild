@@ -520,6 +520,13 @@ config AGENT_BRIDGE_URL
         电脑 Agent 桥地址（语音遥控电脑 Claude 用）。
         电脑上运行 agent_bridge.py 后，填电脑的局域网 IP，如 http://192.168.1.100:7863
 
+config RESOURCE_SERVER
+    string "资源服务器地址（角色下载）"
+    default "http://124.221.186.33"
+    help
+        设备"角色下载"页的云端服务器地址（角色包清单/文件下载）。
+        云端部署的资源服务: http://<IP>/api/roles
+
 config AGENT_BRIDGE_TOKEN
     string "Agent Bridge Token"
     default ""

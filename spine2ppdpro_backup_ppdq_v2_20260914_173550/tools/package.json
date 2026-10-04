@@ -1,0 +1,9 @@
+{
+  "name": "spine2ppd",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Spine 3.8.99 → 纸偶(PPD) 转换器：官方 spine-canvas 逐层渲染导出",
+  "dependencies": {
+    "canvas": "^3.2.3"
+  }
+}

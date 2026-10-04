@@ -1,0 +1,39 @@
+{
+  "prefix": "https://torappu.prts.wiki/assets/char_spine/char_1035_wisdel/",
+  "name": "维什戴尔",
+  "skin": {
+    "默认": {
+      "正面": {
+        "file": "defaultskin/front/char_1035_wisdel"
+      },
+      "背面": {
+        "file": "defaultskin/back/char_1035_wisdel"
+      },
+      "基建": {
+        "file": "defaultskin/build/build_char_1035_wisdel"
+      }
+    },
+    "超新星": {
+      "基建": {
+        "file": "char_1035_wisdel_sale_14/build/build_char_1035_wisdel_sale_14"
+      },
+      "正面": {
+        "file": "char_1035_wisdel_sale_14/front/char_1035_wisdel_sale_14"
+      },
+      "背面": {
+        "file": "char_1035_wisdel_sale_14/back/char_1035_wisdel_sale_14"
+      }
+    },
+    "绝对主角": {
+      "基建": {
+        "file": "char_1035_wisdel_game_9/build/build_char_1035_wisdel_game_9"
+      },
+      "背面": {
+        "file": "char_1035_wisdel_game_9/back/char_1035_wisdel_game_9"
+      },
+      "正面": {
+        "file": "char_1035_wisdel_game_9/front/char_1035_wisdel_game_9"
+      }
+    }
+  }
+}

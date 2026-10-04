@@ -314,16 +314,11 @@ void Ota::MarkCurrentVersionValid() {
 
 bool Ota::Upgrade(const std::string& firmware_url) {
     ESP_LOGI(TAG, "Upgrading firmware from %s", firmware_url.c_str());
-    esp_ota_handle_t update_handle = 0;
     auto update_partition = esp_ota_get_next_update_partition(NULL);
     if (update_partition == NULL) {
         ESP_LOGE(TAG, "Failed to get update partition");
         return false;
     }
-
-    ESP_LOGI(TAG, "Writing to partition %s at offset 0x%lx", update_partition->label, update_partition->address);
-    bool image_header_checked = false;
-    std::string image_header;
 
     auto network = Board::GetInstance().GetNetwork();
     auto http = network->CreateHttp(0);
@@ -342,20 +337,39 @@ bool Ota::Upgrade(const std::string& firmware_url) {
         ESP_LOGE(TAG, "Failed to get content length");
         return false;
     }
+    if (content_length > 24 * 1024 * 1024) {
+        ESP_LOGE(TAG, "Firmware too large: %u", content_length);
+        return false;
+    }
+
+    // 2026-09-28 两阶段升级(修复下载 10KB 即断):
+    // 旧实现收到镜像头立即 esp_ota_begin(擦除 8MB 分区阻塞数秒),期间不读 TCP
+    // → esp-hosted SDIO 接收积压 → 服务器侧连接断开。改为先完整下载到 PSRAM,
+    // 下载结束才擦除刷写(设备 32MB PSRAM,固件 ~5.6MB)。
+    ESP_LOGI(TAG, "Downloading %u bytes to PSRAM...", content_length);
+    char *fw_buf = (char *)heap_caps_malloc(content_length, MALLOC_CAP_SPIRAM);
+    if (fw_buf == nullptr) {
+        ESP_LOGE(TAG, "Failed to allocate PSRAM buffer for firmware (%u bytes)", content_length);
+        return false;
+    }
 
     char buffer[512];
     size_t total_read = 0, recent_read = 0;
     auto last_calc_time = esp_timer_get_time();
-    while (true) {
+    while (total_read < content_length) {
         int ret = http->Read(buffer, sizeof(buffer));
         if (ret < 0) {
             ESP_LOGE(TAG, "Failed to read HTTP data: %s", esp_err_to_name(ret));
+            free(fw_buf);
             return false;
         }
-
-        recent_read += ret;
+        if (ret == 0) {
+            break;
+        }
+        memcpy(fw_buf + total_read, buffer, ret);
         total_read += ret;
-        if (esp_timer_get_time() - last_calc_time >= 1000000 || ret == 0) {
+        recent_read += ret;
+        if (esp_timer_get_time() - last_calc_time >= 1000000) {
             size_t progress = total_read * 100 / content_length;
             ESP_LOGI(TAG, "Progress: %u%% (%u/%u), Speed: %uB/s", progress, total_read, content_length, recent_read);
             if (upgrade_callback_) {
@@ -364,44 +378,46 @@ bool Ota::Upgrade(const std::string& firmware_url) {
             last_calc_time = esp_timer_get_time();
             recent_read = 0;
         }
-
-        if (ret == 0) {
-            break;
-        }
-
-        if (!image_header_checked) {
-            image_header.append(buffer, ret);
-            if (image_header.size() >= sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t)) {
-                esp_app_desc_t new_app_info;
-                memcpy(&new_app_info, image_header.data() + sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t), sizeof(esp_app_desc_t));
-                ESP_LOGI(TAG, "New firmware version: %s", new_app_info.version);
-
-                auto current_version = esp_app_get_description()->version;
-                if (memcmp(new_app_info.version, current_version, sizeof(new_app_info.version)) == 0) {
-                    ESP_LOGE(TAG, "Firmware version is the same, skipping upgrade");
-                    return false;
-                }
-
-                if (esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &update_handle) != ESP_OK) {
-                    esp_ota_abort(update_handle);
-                    ESP_LOGE(TAG, "Failed to begin OTA");
-                    return false;
-                }
-
-                image_header_checked = true;
-                std::string().swap(image_header);
-            }
-        }
-        auto err = esp_ota_write(update_handle, buffer, ret);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to write OTA data: %s", esp_err_to_name(err));
-            esp_ota_abort(update_handle);
-            return false;
-        }
     }
     http->Close();
 
-    esp_err_t err = esp_ota_end(update_handle);
+    if (total_read < content_length) {
+        ESP_LOGE(TAG, "Download incomplete: %u/%u bytes", total_read, content_length);
+        free(fw_buf);
+        return false;
+    }
+    ESP_LOGI(TAG, "Download complete: %u bytes", total_read);
+
+    // 版本校验(镜像头 + app_desc)
+    if (content_length >= sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t)) {
+        esp_app_desc_t new_app_info;
+        memcpy(&new_app_info, fw_buf + sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t), sizeof(esp_app_desc_t));
+        ESP_LOGI(TAG, "New firmware version: %s", new_app_info.version);
+        auto current_version = esp_app_get_description()->version;
+        if (memcmp(new_app_info.version, current_version, sizeof(new_app_info.version)) == 0) {
+            ESP_LOGE(TAG, "Firmware version is the same, skipping upgrade");
+            free(fw_buf);
+            return false;
+        }
+    }
+
+    // 刷写阶段:擦除+写入+校验(此时网络已断开,擦除阻塞不影响下载)
+    ESP_LOGI(TAG, "Writing to partition %s at offset 0x%lx", update_partition->label, update_partition->address);
+    esp_ota_handle_t update_handle = 0;
+    esp_err_t err = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &update_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to begin OTA: %s", esp_err_to_name(err));
+        free(fw_buf);
+        return false;
+    }
+    err = esp_ota_write(update_handle, fw_buf, total_read);
+    free(fw_buf);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to write OTA data: %s", esp_err_to_name(err));
+        esp_ota_abort(update_handle);
+        return false;
+    }
+    err = esp_ota_end(update_handle);
     if (err != ESP_OK) {
         if (err == ESP_ERR_OTA_VALIDATE_FAILED) {
             ESP_LOGE(TAG, "Image validation failed, image is corrupted");

@@ -1,6 +1,8 @@
 #include "audio_service.h"
 #include <esp_log.h>
 
+#include "settings.h"
+
 #if CONFIG_USE_AUDIO_PROCESSOR
 #include "processors/afe_audio_processor.h"
 #else
@@ -89,6 +91,14 @@ void AudioService::Initialize(AudioCodec* codec) {
         .skip_unhandled_events = true,
     };
     esp_timer_create(&audio_power_timer_args, &audio_power_timer_);
+
+    /* Audio forwarder: LLM 回复 PCM 旁路转发到手机 App */
+    audio_forwarder_ = std::make_unique<AudioForwarder>();
+    audio_forwarder_->EnsureStarted();  // 未联网时惰性跳过，Feed/SetEnabled 时重试
+    Settings settings("forward", false);
+    audio_forwarder_->SetEnabled(settings.GetInt("enabled", 0) != 0);
+    audio_forwarder_->SetMuteLocal(settings.GetInt("mute_local", 0) != 0);
+    audio_forwarder_->SetMulticast(settings.GetInt("multicast", 0) != 0);
 }
 
 void AudioService::Start() {
@@ -140,6 +150,10 @@ void AudioService::Stop() {
     audio_playback_queue_.clear();
     audio_testing_queue_.clear();
     audio_queue_cv_.notify_all();
+
+    if (audio_forwarder_) {
+        audio_forwarder_->Stop();
+    }
 }
 
 bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples) {
@@ -282,7 +296,12 @@ void AudioService::AudioOutputTask() {
             codec_->EnableOutput(true);
             esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
         }
-        codec_->OutputData(task->pcm);
+        /* 转发旁路：Feed 返回 true 时抑制本地扬声器（转发+本地静音模式） */
+        bool suppress_local = audio_forwarder_ &&
+                              audio_forwarder_->Feed(task->pcm, task->timestamp, codec_->output_sample_rate());
+        if (!suppress_local) {
+            codec_->OutputData(task->pcm);
+        }
 
         /* Update the last output time */
         last_output_time_ = std::chrono::steady_clock::now();
@@ -482,6 +501,21 @@ void AudioService::EnableWakeWordDetection(bool enable) {
     }
 }
 
+void AudioService::SetWakeWordCommands(const std::vector<std::pair<std::string, std::string>>& commands) {
+#if CONFIG_USE_CUSTOM_WAKE_WORD
+    auto* custom = static_cast<CustomWakeWord*>(wake_word_.get());
+    if (custom == nullptr) {
+        return;
+    }
+    std::vector<CustomWakeWord::WakeWordCommand> cmds;
+    cmds.reserve(commands.size());
+    for (const auto& c : commands) {
+        cmds.push_back({c.first, c.second});
+    }
+    custom->SetWakeWordCommands(cmds);
+#endif
+}
+
 void AudioService::EnableVoiceProcessing(bool enable) {
     ESP_LOGD(TAG, "%s voice processing", enable ? "Enabling" : "Disabling");
     if (enable) {
@@ -585,4 +619,57 @@ void AudioService::CheckAndUpdateAudioPowerState() {
     if (!codec_->input_enabled() && !codec_->output_enabled()) {
         esp_timer_stop(audio_power_timer_);
     }
+}
+
+void AudioService::SetForwarderEnabled(bool enable) {
+    if (!audio_forwarder_) return;
+    audio_forwarder_->SetEnabled(enable);
+    Settings settings("forward", true);
+    settings.SetInt("enabled", enable ? 1 : 0);
+}
+
+bool AudioService::ForwarderEnabled() const {
+    return audio_forwarder_ && audio_forwarder_->enabled();
+}
+
+void AudioService::SetForwarderMuteLocal(bool mute) {
+    if (!audio_forwarder_) return;
+    audio_forwarder_->SetMuteLocal(mute);
+    Settings settings("forward", true);
+    settings.SetInt("mute_local", mute ? 1 : 0);
+}
+
+bool AudioService::ForwarderMuteLocal() const {
+    return audio_forwarder_ && audio_forwarder_->mute_local();
+}
+
+void AudioService::SetForwarderMulticast(bool multicast) {
+    if (!audio_forwarder_) return;
+    audio_forwarder_->SetMulticast(multicast);
+    Settings settings("forward", true);
+    settings.SetInt("multicast", multicast ? 1 : 0);
+}
+
+bool AudioService::ForwarderMulticast() const {
+    return audio_forwarder_ && audio_forwarder_->multicast();
+}
+
+void AudioService::ForwarderResetTarget() {
+    if (audio_forwarder_) audio_forwarder_->ResetTarget();
+}
+
+bool AudioService::ForwarderHasTarget() const {
+    return audio_forwarder_ && audio_forwarder_->has_target();
+}
+
+std::string AudioService::ForwarderTargetIp() const {
+    return audio_forwarder_ ? audio_forwarder_->target_ip() : "";
+}
+
+uint32_t AudioService::ForwarderPacketsSent() const {
+    return audio_forwarder_ ? audio_forwarder_->packets_sent() : 0;
+}
+
+uint32_t AudioService::ForwarderPacketsDropped() const {
+    return audio_forwarder_ ? audio_forwarder_->packets_dropped() : 0;
 }

@@ -2,9 +2,32 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **⚠️ 重要**：本仓库承载《数智方舟》Live2D 项目（自动生成 300+ 干员 Live2D 模型跑在 ESP32-P4 设备上）。**任何与该子项目相关的会话，必须先读 `LIVE2D_MASTER_PLAN.md`（项目唯一事实源：架构决策、实现路径、进度快照、用户红线）**，以及 `LIVE2D_WORKFLOW.md`（设备端角色导入流程）和 `auto_live2d_log.md`（技术决策日志）。
+
 ## Project Overview
 
 xiaozhi-esp32 (小智 AI 聊天机器人) — an ESP32-based AI voice chatbot that uses MCP (Model Context Protocol) for device control. It connects to a cloud server via WebSocket or MQTT+UDP, streams audio with OPUS codec, performs wake-word detection (ESP-SR), and drives OLED/LCD displays with LVGL for emotion表情表达. Licensed under MIT, supporting 70+ open-source hardware boards.
+
+## 云端服务器(腾讯云 124.221.186.33)
+
+- SSH:`ssh -i ~/.ssh/id_ed25519 ubuntu@124.221.186.33`(root 公钥被拒;/opt/szfz 属主 ubuntu 免密 sudo)
+- 端口:88 xiaozhi-server(aiohttp,agents.db 用户/角色/配额/词表)、80 app_cloud.py(仅挂 device_api)、7861 paperdoll_sim(挂 device_api 副本+workflow/cloud_repo)、7862 dynamic_art、8088 spine2ppdpro
+- **device_api 两份必须同步**:/opt/szfz/device_api.py(80)与 /opt/szfz/paperdoll_sim/device_api.py(7861)内容一致
+- 设备资源接口:/api/user_repo/manifest?mac=&rel=(os.walk 实时遍历,任意 rel 通用)/file;公共库角色 /api/roles/<voc>/<star>/<name>/manifest|file;缩略图 /api/roles/thumbs
+
+## 设备端 SD 卡资源路径
+
+- 统一根 `/sdcard/Arknights/main/{operator,background,music}`:角色下载源=绑定用户仓库(user_repo 三件套),背景/音乐/INDEX 缩略图=云端公共库(public 三件套);OC(other/)保留 `/sdcard/_users/u<uid>/other/` 隔离
+- 换绑用户 → 清空 operator(跳过 INDEX)+旧 uid 的 other 目录(NVS Settings("wakewords").bound_uid 对比,pending+主循环执行)
+- 索引页 428 全量列表:启动后台任务 role_download_thumbs → 逐张 role_download_thumb 补缺缩略图
+- 一键克隆:POST /api/user_repo/clone(mac 定位,公共库 copytree → 用户仓库,同时 upsert 用户 agent 行否则无唤醒词);设备端 role_download_clone + 索引页克隆弹窗
+
+## PPD 直写模式 UI 机制(ImageDisplay.cpp)
+
+- `pd_ppa_present` 的 PROTECT_PORTRAIT 是硬编码 UI 保护区列表——**新增任何按钮/弹窗必须加保护矩形或并入 ui_open 冻结判断,否则被 PPA 每帧覆盖(黑块/闪现)**
+- 直写下 UI 区(对话框/按钮)像素只在 LVGL flush 时从 fb[2](canvas 底图)自拷;底图变化(切背景/形态)后必须**先持锁 pd_render 同步新帧到 fb[2] 再 lv_obj_invalidate_area 刷新 UI 区**,否则 UI 区显示旧帧
+- 背景弹窗/面板只暂停直写(freeze),不走 ui_open 恢复序列(video_playback_stop+150ms 会闪屏并破坏保护区像素)
+- 编译 -Werror=format-truncation:snprintf 长中文文件名用 `%.*s` 精度 + 缓冲加大到 GCC 可证上限
 
 ## Build & Flash
 

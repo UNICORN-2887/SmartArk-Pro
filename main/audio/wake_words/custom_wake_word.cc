@@ -38,8 +38,9 @@ CustomWakeWord::~CustomWakeWord() {
         multinet_model_data_ = nullptr;
     }
 
-    if (wake_word_encode_task_stack_ != nullptr) {
-        heap_caps_free(wake_word_encode_task_stack_);
+    if (wake_word_encode_task_ != nullptr) {
+        vTaskDelete(wake_word_encode_task_);
+        wake_word_encode_task_ = nullptr;
     }
 
     vEventGroupDelete(event_group_);
@@ -67,20 +68,24 @@ bool CustomWakeWord::Initialize(AudioCodec* codec) {
     multinet_model_data_ = multinet_->create(mn_name_, 2000);  // 2秒超时
     multinet_->set_det_threshold(multinet_model_data_, 0.10); // 过滤噪声误触发（正常唤醒~0.12）
     esp_mn_commands_clear();
-    // 注册多唤醒词（不同智能体）
-    esp_mn_commands_add(1, "ni hao kai er xi");          // 凯尔希
-    esp_mn_commands_add(2, "kai er xi");                 // 凯尔希(短)
-    esp_mn_commands_add(3, "ni hao xiao zhi");           // 小智(保底)
-    esp_mn_commands_add(4, "ni hao a mi ya");            // 阿米娅
-    esp_mn_commands_add(5, "a mi ya");                   // 阿米娅(短)
-    esp_mn_commands_add(6, "ni hao te lei xi ya");       // 特蕾西亚
-    esp_mn_commands_add(7, "te lei xi ya");              // 特蕾西亚(短)
-    esp_mn_commands_add(8, "ni hao meng si te");         // Mon3tr
-    esp_mn_commands_add(9, "meng si te");                // Mon3tr(短)
-    esp_mn_commands_update();
-    
-    // 打印所有的命令词
-    multinet_->print_active_speech_commands(multinet_model_data_);
+    // 默认命令词表(服务器唤醒词表拉取失败时的保底)
+    static const std::vector<WakeWordCommand> kDefaultCommands = {
+        {"ni hao kai er xi", "你好凯尔希"},          // 凯尔希
+        {"kai er xi", "凯尔希"},                     // 凯尔希(短)
+        {"ni hao xiao zhi", "你好小智"},             // 小智(保底)
+        {"ni hao a mi ya", "你好阿米娅"},            // 阿米娅
+        {"a mi ya", "阿米娅"},                       // 阿米娅(短)
+        {"ni hao te lei xi ya", "你好特蕾西亚"},     // 特蕾西亚
+        {"te lei xi ya", "特蕾西亚"},                // 特蕾西亚(短)
+        {"ni hao meng si te", "你好Mon3tr"},         // Mon3tr
+        {"meng si te", "Mon3tr"},                    // Mon3tr(短)
+    };
+    if (has_pending_commands_) {
+        ApplyCommands(pending_commands_);   // 服务器词表先于 Initialize 到达
+        has_pending_commands_ = false;
+    } else {
+        ApplyCommands(kDefaultCommands);
+    }
     ESP_LOGI(TAG, "Custom wake word: %s", CONFIG_CUSTOM_WAKE_WORD);
 
     // 初始化 afe
@@ -116,7 +121,40 @@ void CustomWakeWord::OnWakeWordDetected(std::function<void(const std::string& wa
     wake_word_detected_callback_ = callback;
 }
 
+void CustomWakeWord::ApplyCommands(const std::vector<WakeWordCommand>& commands) {
+    // 必须只在检测任务阻塞时调用(事件组未置位/Start 之前),否则与 detect() 并发改命令表
+    command_names_.clear();
+    esp_mn_commands_clear();
+    int id = 1;
+    for (const auto& c : commands) {
+        esp_mn_commands_add(id, c.pinyin.c_str());
+        command_names_.push_back(c.display);
+        id++;
+    }
+    esp_mn_commands_update();
+    multinet_->print_active_speech_commands(multinet_model_data_);
+    ESP_LOGI(TAG, "Wake words applied: %d commands", id - 1);
+}
+
+void CustomWakeWord::SetWakeWordCommands(const std::vector<WakeWordCommand>& commands) {
+    pending_commands_ = commands;
+    has_pending_commands_ = true;
+    if (multinet_ == nullptr || multinet_model_data_ == nullptr) {
+        return;   // 尚未 Initialize → 由 Initialize 应用
+    }
+    if (!(xEventGroupGetBits(event_group_) & DETECTION_RUNNING_EVENT)) {
+        ApplyCommands(pending_commands_);   // 检测已停止 → 立即安全应用
+        has_pending_commands_ = false;
+    }
+    // 检测运行中 → 保留 pending,下一次 Start() 应用
+}
+
 void CustomWakeWord::Start() {
+    // 应用未生效的动态命令词表(检测任务此刻阻塞在事件组上,安全)
+    if (has_pending_commands_ && multinet_ != nullptr && multinet_model_data_ != nullptr) {
+        ApplyCommands(pending_commands_);
+        has_pending_commands_ = false;
+    }
     // 清除对话期间 AFE 积累的残留音频，防止误触发
     if (afe_data_ != nullptr) {
         afe_iface_->reset_buffer(afe_data_);
@@ -184,7 +222,8 @@ void CustomWakeWord::AudioDetectionTask() {
         esp_mn_results_t *mn_result = multinet_->get_results(multinet_model_data_);
 
         // 必须检查 DETECTED 状态，否则 get_results() 返回残留旧数据
-        if (mn_state == ESP_MN_STATE_DETECTED && mn_result && mn_result->command_id[0] >= 1 && mn_result->command_id[0] <= 5) {
+        if (mn_state == ESP_MN_STATE_DETECTED && mn_result && mn_result->command_id[0] >= 1 &&
+            (size_t)mn_result->command_id[0] <= command_names_.size()) {
             int id = mn_result->command_id[0];
 
             // 冷却检查：5秒内不重复触发，防止对话结束后环境噪声误唤醒
@@ -197,12 +236,8 @@ void CustomWakeWord::AudioDetectionTask() {
             }
             last_detect_time_ = now;
 
-            // 多唤醒词 → 不同显示名（为智能体切换做准备）
-            static const char *names[] = {
-                "", "你好凯尔希", "凯尔希", "你好小智", "你好阿米娅", "阿米娅",
-                "你好特蕾西亚", "特蕾西亚", "你好Mon3tr", "Mon3tr"
-            };
-            const char *display = (id >= 1 && id <= 9) ? names[id] : CONFIG_CUSTOM_WAKE_WORD_DISPLAY;
+            // 动态命令词表:command_id → 角色显示名
+            const char *display = command_names_[id - 1].c_str();
             ESP_LOGI(TAG, "Wake word #%d: '%s' prob=%.2f → %s",
                     id, mn_result->string, mn_result->prob[0], display);
 
@@ -232,10 +267,10 @@ void CustomWakeWord::StoreWakeWordData(const int16_t* data, size_t samples) {
 
 void CustomWakeWord::EncodeWakeWordData() {
     wake_word_opus_.clear();
-    if (wake_word_encode_task_stack_ == nullptr) {
-        wake_word_encode_task_stack_ = (StackType_t*)heap_caps_malloc(4096 * 12, MALLOC_CAP_SPIRAM);
-    }
-    wake_word_encode_task_ = xTaskCreateStatic([](void* arg) {
+    // 2026-10-02 唤醒崩溃修复:静态任务栈(PSRAM)与 TCB(PPD 恢复后对象落到
+    // PSRAM)触发 xPortcheckValidStackMem assert;改动态任务——栈由内核从
+    // 内部 RAM 堆分配,失败优雅降级(丢唤醒音频,不崩)
+    BaseType_t ret = xTaskCreate([](void* arg) {
         auto this_ = (CustomWakeWord*)arg;
         {
             auto start_time = esp_timer_get_time();
@@ -261,7 +296,15 @@ void CustomWakeWord::EncodeWakeWordData() {
             this_->wake_word_cv_.notify_all();
         }
         vTaskDelete(NULL);
-    }, "encode_detect_packets", 4096 * 12, this, 2, wake_word_encode_task_stack_, &wake_word_encode_task_buffer_);
+    }, "encode_detect_packets", 4096 * 8, this, 2, &wake_word_encode_task_);
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Encode task create failed, wake word audio dropped");
+        // 2026-10-02 不能阻塞音频流程:放空包让 GetWakeWordOpus 继续
+        // (否则对话"听不到"——曾因 48KB 内部 RAM 栈分配失败卡死整个音频链路)
+        std::lock_guard<std::mutex> lock(wake_word_mutex_);
+        wake_word_opus_.push_back(std::vector<uint8_t>());
+        wake_word_cv_.notify_all();
+    }
 }
 
 bool CustomWakeWord::GetWakeWordOpus(std::vector<uint8_t>& opus) {

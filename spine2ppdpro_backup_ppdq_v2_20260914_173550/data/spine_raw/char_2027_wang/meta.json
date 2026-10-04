@@ -1,0 +1,17 @@
+{
+  "prefix": "https://torappu.prts.wiki/assets/char_spine/char_2027_wang/",
+  "name": "望",
+  "skin": {
+    "默认": {
+      "背面": {
+        "file": "defaultskin/back/char_2027_wang"
+      },
+      "正面": {
+        "file": "defaultskin/front/char_2027_wang"
+      },
+      "基建": {
+        "file": "defaultskin/build/build_char_2027_wang"
+      }
+    }
+  }
+}

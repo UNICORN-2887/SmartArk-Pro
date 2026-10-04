@@ -23,8 +23,9 @@ AfeWakeWord::~AfeWakeWord() {
         afe_iface_->destroy(afe_data_);
     }
 
-    if (wake_word_encode_task_stack_ != nullptr) {
-        heap_caps_free(wake_word_encode_task_stack_);
+    if (wake_word_encode_task_ != nullptr) {
+        vTaskDelete(wake_word_encode_task_);
+        wake_word_encode_task_ = nullptr;
     }
 
     vEventGroupDelete(event_group_);
@@ -63,18 +64,31 @@ bool AfeWakeWord::Initialize(AudioCodec* codec) {
     afe_config_t* afe_config = afe_config_init(input_format.c_str(), models, AFE_TYPE_SR, AFE_MODE_HIGH_PERF);
     afe_config->aec_init = codec_->input_reference();
     afe_config->aec_mode = AEC_MODE_SR_HIGH_PERF;
-    afe_config->afe_perferred_core = 1;
-    afe_config->afe_perferred_priority = 1;
+    /* 原值 1（CPU 1）：纸偶交互的双渲染任务（pin CPU 1）会把它饿死（prio 1 抢不过渲染）→
+       AFE 管线停摆 → feed ringbuffer full → watchdog。改到 CPU 0（诊断模式实测正常）。
+       prio 保持 1：AFE 全链（feed 消费→算法→fetch 输出被 audio_detection prio3 取走）
+       需要 taskLVGL 留出连续空闲窗口；重绘忙度降下来（PPD 上屏 5fps）后 prio 1 足够。 */
+    /* 2026-09-17:prio 1→6。PPD 帧率提至 ~16fps 后 LVGL 每 60ms 重绘,
+       prio 1 的 AFE 算法在 CPU 0 抢不到连续空闲窗口 → 算法停摆 → fetch 阻塞
+       → feed ringbuffer full 刷屏 → UART 阻塞 → 看门狗(LVGL 饿死 IDLE)。
+       提 6(高于 LVGL):音频管线实时优先,UI 微卡可接受;渲染在 CPU 1 不受影响。 */
+    afe_config->afe_perferred_core = 0;
+    afe_config->afe_perferred_priority = 6;
     afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
     
     afe_iface_ = esp_afe_handle_from_config(afe_config);
     afe_data_ = afe_iface_->create_from_config(afe_config);
 
+    /* 不 pin（教训：pin CPU 0 时，MJPEG 模式 taskLVGL 全屏重绘 ~100ms 会饿死
+       audio_detection 的 fetch 消费 → AFE 输出缓冲堵 → feed full 刷屏。
+       不 pin 时 FreeRTOS 选空闲核：MJPEG 模式漂到 CPU 1（空闲），
+       PPD 直写模式留 CPU 0（空闲），两场景都顺。IDLE1 的 5ms 帧间隙由
+       pd_anim 的 vTaskDelay(5) 保证（见 ImageDisplay.cpp pd_anim_task） */
     xTaskCreate([](void* arg) {
         auto this_ = (AfeWakeWord*)arg;
         this_->AudioDetectionTask();
         vTaskDelete(NULL);
-    }, "audio_detection", 4096, this, 3, nullptr);
+    }, "audio_detection", 4096, this, 6, nullptr);   /* 2026-09-17:3→6 与 AFE 算法同级,确保及时 fetch */
 
     return true;
 }
@@ -147,10 +161,9 @@ void AfeWakeWord::StoreWakeWordData(const int16_t* data, size_t samples) {
 
 void AfeWakeWord::EncodeWakeWordData() {
     wake_word_opus_.clear();
-    if (wake_word_encode_task_stack_ == nullptr) {
-        wake_word_encode_task_stack_ = (StackType_t*)heap_caps_malloc(4096 * 8, MALLOC_CAP_SPIRAM);
-    }
-    wake_word_encode_task_ = xTaskCreateStatic([](void* arg) {
+    // 2026-10-02 唤醒崩溃修复:静态任务栈/TCB 落 PSRAM 触发
+    // xPortcheckValidStackMem assert;改动态任务(内核从内部 RAM 分配栈,失败不崩)
+    BaseType_t ret = xTaskCreate([](void* arg) {
         auto this_ = (AfeWakeWord*)arg;
         {
             auto start_time = esp_timer_get_time();
@@ -176,7 +189,14 @@ void AfeWakeWord::EncodeWakeWordData() {
             this_->wake_word_cv_.notify_all();
         }
         vTaskDelete(NULL);
-    }, "encode_detect_packets", 4096 * 8, this, 2, wake_word_encode_task_stack_, &wake_word_encode_task_buffer_);
+    }, "encode_detect_packets", 4096 * 8, this, 2, &wake_word_encode_task_);
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Encode task create failed, wake word audio dropped");
+        // 2026-10-02 失败放行:空包让 GetWakeWordOpus 继续,不卡音频链路
+        std::lock_guard<std::mutex> lock(wake_word_mutex_);
+        wake_word_opus_.push_back(std::vector<uint8_t>());
+        wake_word_cv_.notify_all();
+    }
 }
 
 bool AfeWakeWord::GetWakeWordOpus(std::vector<uint8_t>& opus) {

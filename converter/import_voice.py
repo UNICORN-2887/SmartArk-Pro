@@ -59,7 +59,7 @@ CN2EN = {
 }
 
 API_URL = "https://prts.wiki/api.php"
-AUDIO_BASE = "https://torappu.prts.wiki/assets/audio/voice"
+AUDIO_BASE = "https://torappu.prts.wiki/assets/audio"
 
 # ═══════════════════════════════════════════
 
@@ -82,13 +82,21 @@ def parse_voice_data(html):
     voice_key = re.search(r'data-voice-key="([^"]+)"', attrs).group(1)
     voice_base_raw = re.search(r'data-voice-base="([^"]+)"', attrs).group(1)
     # voice_base_raw: "日语:voice/char_xxx,中文-普通话:voice_cn/char_xxx,..."
-    cn_base = None
+    # 设备端只播 16kHz 语音,统一下载日语(voice/ 路径)
+    jp_base = None
     for part in voice_base_raw.split(","):
-        if "中文-普通话" in part:
-            cn_base = part.split(":", 1)[1].strip()
+        if "日语" in part:
+            jp_base = part.split(":", 1)[1].strip()
             break
-    if not cn_base:
-        raise ValueError("No 中文-普通话 voice base found")
+    if not jp_base:
+        # 2026-09-26 联动角色(迷宫饭/R6/邦邦)无日语语音 → 回退任意可用语音
+        # (data-voice-base 条目形如 "中文-普通话:voice_cn/char_xxx")
+        for part in voice_base_raw.split(","):
+            if ":" in part:
+                jp_base = part.split(":", 1)[1].strip()
+                break
+    if not jp_base:
+        raise ValueError("No voice base found")
 
     # Parse voice-data-item divs
     item_divs = re.findall(r'<div\s+class="voice-data-item"([^>]*)>', html)
@@ -101,7 +109,7 @@ def parse_voice_data(html):
                 "title": title.group(1),
                 "filename": fn.group(1),
                 "voice_key": voice_key,
-                "cn_base": cn_base,
+                "jp_base": jp_base,
             })
 
     # Parse voice-item-detail for Chinese text
@@ -126,11 +134,11 @@ def parse_voice_data(html):
         else:
             item["text"] = ""
 
-    return items, voice_key, cn_base
+    return items, voice_key, jp_base
 
 def download_wav(item, dest_dir, dry_run=False):
     """Download single WAV to dest_dir/filename. Returns True on success."""
-    url = f"{AUDIO_BASE}/{item['voice_key']}/{item['filename'].lower()}"
+    url = f"{AUDIO_BASE}/{item['jp_base']}/{item['filename'].lower()}"
     dest = os.path.join(dest_dir, item["filename"])
     if os.path.exists(dest):
         print(f"  [SKIP] {item['filename']} (exists)")
@@ -186,7 +194,7 @@ def main():
     # 1. Fetch & parse
     print(f"Fetching page: {args.page}")
     html = fetch_page(args.page)
-    items, voice_key, cn_base = parse_voice_data(html)
+    items, voice_key, jp_base = parse_voice_data(html)
     print(f"Parsed: {len(items)} voice items (voice_key={voice_key})\n")
 
     # 2. Download WAVs

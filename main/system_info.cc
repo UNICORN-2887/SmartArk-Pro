@@ -43,6 +43,23 @@ std::string SystemInfo::GetMacAddress() {
     return std::string(mac_str);
 }
 
+std::string SystemInfo::GetBindCode() {
+    // 标准 CRC-32(IEEE,zlib 同款多项式),对 mac 字符串取 %1000000 补零。
+    // 服务器 zlib.crc32 同算法 → 网页输入此码即可定位设备
+    std::string mac = GetMacAddress();
+    uint32_t crc = 0xFFFFFFFF;
+    for (unsigned char c : mac) {
+        crc ^= c;
+        for (int i = 0; i < 8; i++) {
+            crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+        }
+    }
+    uint32_t v = (~crc) % 1000000u;
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%06u", (unsigned)v);
+    return std::string(buf);
+}
+
 std::string SystemInfo::GetChipModelName() {
     return std::string(CONFIG_IDF_TARGET);
 }
