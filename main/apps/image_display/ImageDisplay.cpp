@@ -485,7 +485,7 @@ static int scan_bound_user_uid(void);
 bool image_display_init(void)
 {
     /* 2026-10-06 版本戳:用户核对烧录版本(电量横屏位置/立牌旋转/按钮恢复/Ur_Info 下载) */
-    ESP_LOGI(TAG, "FWV=20261007-0011 (dl-concurrency-fix + batt-align-anchor + urinfo-wait-net + speed-0kbps)");
+    ESP_LOGI(TAG, "FWV=20261007-0012 (bg-btn-no-cancel + popup-speed + speed-window-cache + urinfo-cond)");
     ESP_LOGI(TAG, "Initializing image display...");
 
     if (!ppa_init()) {
@@ -2870,8 +2870,10 @@ static void ur_info_fetch_task(void *arg) {
     int uid = (int)(intptr_t)arg;
     if (!ur_info_wait_network()) { vTaskDelete(NULL); return; }
     int64_t total = 0;
+    /* 2026-10-07 判断修复:check 返回 0=部分缺失 / 1=齐全 / -1=网络失败 / -2=云端无包,
+       原条件 missing>0(齐全)才下载 → 缺失时从不下载(蟑螂派对一直不更新上传内容的根因) */
     int missing = role_download_check_user(uid, "Ur_Info", &total);
-    if (missing > 0) role_download_fetch_user(uid, "Ur_Info", NULL, NULL);
+    if (missing == 0) role_download_fetch_user(uid, "Ur_Info", NULL, NULL);
     vTaskDelete(NULL);
 }
 
@@ -3278,31 +3280,37 @@ static int64_t s_upd_total = 0;   /* 2026-10-07 更新下载总量(速度统计�
 extern int64_t g_dl_bytes_done;
 static int64_t s_dl_speed_last_bytes = 0;
 static int64_t s_dl_speed_ts = 0;
+static int s_dl_speed_kbps = 0;   // 2026-10-07 窗口内缓存值(reset 清 0)
 static void dl_speed_reset(int64_t total) {
     (void)total;
     s_dl_speed_last_bytes = g_dl_bytes_done;
     s_dl_speed_ts = 0;
+    s_dl_speed_kbps = 0;
 }
 static void dl_speed_fmt(int pct, char *out, size_t n) {
-    int kbps = 0;
+    /* 2026-10-07 窗口内缓存:小条与弹窗每步都调用本函数,若每次调用都重置
+       窗口/字节基准,两个调用者互相抢窗口 → 速度恒 0(展开弹窗"速度停止"的另一半原因)。
+       改为 1 秒窗口内首个调用计算并缓存,其余调用复用缓存值 */
     int64_t now = esp_timer_get_time();
     if (s_dl_speed_ts > 0 && now > s_dl_speed_ts) {
         int64_t bytes = g_dl_bytes_done - s_dl_speed_last_bytes;
-        kbps = (int)(bytes * 1000000 / (now - s_dl_speed_ts) / 1024);
-        if (kbps < 0) kbps = 0;
+        s_dl_speed_kbps = (int)(bytes * 1000000 / (now - s_dl_speed_ts) / 1024);
+        if (s_dl_speed_kbps < 0) s_dl_speed_kbps = 0;
+        s_dl_speed_ts = now;
+        s_dl_speed_last_bytes = g_dl_bytes_done;
+        /* 2026-10-07 速度入日志(用户要求:进度条不显示时可从串口判断) */
+        if (s_dl_speed_kbps > 0) ESP_LOGI(TAG, "dl speed: %d%% %dKB/s", pct, s_dl_speed_kbps);
+    } else if (s_dl_speed_ts == 0) {
+        s_dl_speed_ts = now;   // 首帧只建窗口
     }
-    s_dl_speed_ts = now;
-    s_dl_speed_last_bytes = g_dl_bytes_done;
-    /* 2026-10-07 速度入日志(用户要求:进度条不显示时可从串口判断) */
-    if (kbps > 0) ESP_LOGI(TAG, "dl speed: %d%% %dKB/s", pct, kbps);
     /* 2026-10-06 -Werror=format-truncation 可证安全写法:
        n>=28 才拼速度(最坏 27 字节),否则退化为纯百分比。
-       2026-10-07 窗口建立后无条件拼速度(kbps 可为 0):
-       下载停滞时显示 "0KB/s" 比空白更能判断卡死 vs 慢 */
-    if (s_dl_speed_ts > 0 && n >= 28) snprintf(out, n, "%d%% %dKB/s", pct, kbps);
+       2026-10-07 窗口建立后无条件拼速度(可为 0KB/s):停滞可见 */
+    if (s_dl_speed_ts > 0 && n >= 28) snprintf(out, n, "%d%% %dKB/s", pct, s_dl_speed_kbps);
     else snprintf(out, n, "%d%%", pct);
 }
 static lv_obj_t *s_pp_popup = NULL, *s_pp_title = NULL, *s_pp_bar = NULL; // 前台进度弹窗(lv_layer_top)
+static lv_obj_t *s_pp_speed = NULL; // 2026-10-07 弹窗内速度标签(展开弹窗也能看速度)
 static lv_obj_t *s_pp_mini = NULL, *s_pp_mini_bar = NULL, *s_pp_mini_lbl = NULL; // 顶部小条
 static void pp_popup_show(void);     // 前台进度弹窗(含[后台下载][取消下载])
 static void pp_mini_show(void);      // 顶部小条(点击展开回弹窗)
@@ -4350,7 +4358,7 @@ static void dl_lock_buttons(bool lock) {
 }
 
 static void pp_hide_all(void) {
-    if (s_pp_popup) { lv_obj_del(s_pp_popup); s_pp_popup = s_pp_title = s_pp_bar = NULL; }
+    if (s_pp_popup) { lv_obj_del(s_pp_popup); s_pp_popup = s_pp_title = s_pp_bar = s_pp_speed = NULL; }
     if (s_pp_mini) { lv_obj_del(s_pp_mini); s_pp_mini = s_pp_mini_bar = s_pp_mini_lbl = NULL; }
 }
 
@@ -4378,6 +4386,13 @@ static void pp_popup_show(void) {
     lv_obj_align(s_pp_bar, LV_ALIGN_TOP_MID, 0, 56);
     lv_bar_set_value(s_pp_bar, 0, LV_ANIM_OFF);
 
+    /* 2026-10-07 弹窗内速度标签:小条收起时弹窗也能看速度(用户:展开后速度显示"停止") */
+    s_pp_speed = lv_label_create(s_pp_popup);
+    lv_label_set_text(s_pp_speed, "");
+    lv_obj_set_style_text_color(s_pp_speed, lv_color_hex(0xcccccc), 0);
+    lv_obj_set_style_text_font(s_pp_speed, s_chat_font, 0);
+    lv_obj_align(s_pp_speed, LV_ALIGN_TOP_MID, 0, 76);
+
     lv_obj_t* bg_btn = lv_btn_create(s_pp_popup);
     lv_obj_set_size(bg_btn, 120, 34);
     lv_obj_align(bg_btn, LV_ALIGN_BOTTOM_LEFT, 24, -12);
@@ -4390,18 +4405,15 @@ static void pp_popup_show(void) {
     lv_obj_set_style_text_font(bg_lbl, s_chat_font, 0);
     lv_obj_center(bg_lbl);
     lv_obj_add_event_cb(bg_btn, [](lv_event_t* e) {
-        /* 缩成顶部小条;角色下载时有立绘则展示立绘(索引页关闭) */
+        /* 缩成顶部小条,下载继续。2026-10-07 去掉"切立绘"逻辑:
+           agent_index_hide() 会置 s_dl_cancel=true → 下载任务立即取消
+           (实测:展开小条再点后台 → "Logos 取消: 1 ok / 412 skip")。
+           cover 本就在展示(更新下载从索引页点角色进入),无需重载 */
         if (s_pp_popup) {
             lv_obj_del(s_pp_popup);
-            s_pp_popup = s_pp_title = s_pp_bar = NULL;
+            s_pp_popup = s_pp_title = s_pp_bar = s_pp_speed = NULL;
         }
         pp_mini_show();
-        /* 背景/公共资源下载(bg_fetch)时 s_dl_path 是陈旧的字符路径——
-           误触发切立绘会退出 PPD 交互并取消下载(实测:展开小条再点后台→下载被取消) */
-        if (!s_bg_task_running && agent_has_cover(s_dl_path)) {
-            agent_index_hide();
-            cover_display_start_async(s_dl_path);
-        }
     }, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t* cn_btn = lv_btn_create(s_pp_popup);
@@ -4827,6 +4839,11 @@ static void index_dl_fetch_task(void *arg) {
                 char pb[32];
                 dl_speed_fmt(pct, pb, sizeof(pb));   /* 2026-10-06 xx% xxKB/s(32 字节满足 -Werror=format-truncation 最坏 27) */
                 lv_label_set_text(s_pp_mini_lbl, pb);
+            }
+            if (s_pp_speed && lv_obj_is_valid(s_pp_speed)) {   /* 2026-10-07 弹窗内速度 */
+                char sp[32];
+                dl_speed_fmt(pct, sp, sizeof(sp));
+                lv_label_set_text(s_pp_speed, sp);
             }
         }
         if (file && s_pp_title && lv_obj_is_valid(s_pp_title)) {
@@ -6781,6 +6798,11 @@ static void bg_fetch_task(void *arg) {
                 char pb[32];
                 dl_speed_fmt(pct, pb, sizeof(pb));   /* 2026-10-06 xx% xxKB/s(32 字节满足 -Werror=format-truncation 最坏 27) */
                 lv_label_set_text(s_pp_mini_lbl, pb);
+            }
+            if (s_pp_speed && lv_obj_is_valid(s_pp_speed)) {   /* 2026-10-07 弹窗内速度 */
+                char sp[32];
+                dl_speed_fmt(pct, sp, sizeof(sp));
+                lv_label_set_text(s_pp_speed, sp);
             }
         }
         if (file && s_pp_title && lv_obj_is_valid(s_pp_title))
