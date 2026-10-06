@@ -380,11 +380,14 @@ static void batt_apply_orientation(void) {
         /* 2026-10-06 layer_sys 层的 transform 旋转不渲染(横屏看不到胶囊的根因):
            横屏时挂到 screen 层(与旋转按钮同层同规律),竖屏回 sys(全页面置顶) */
         lv_obj_set_parent(s_batt_box, lv_screen_active());
-        /* 2026-10-07 诊断:打印父对象与屏幕尺寸,核对层级与坐标 */
-        ESP_LOGI(TAG, "batt parent=%s parent_size=%dx%d",
-                 lv_obj_get_type(lv_obj_get_parent(s_batt_box)),
-                 lv_obj_get_width(lv_obj_get_parent(s_batt_box)),
-                 lv_obj_get_height(lv_obj_get_parent(s_batt_box)));
+        /* 2026-10-07 诊断:打印父对象指针与屏幕尺寸,核对层级与坐标 */
+        {
+            lv_obj_t *par = lv_obj_get_parent(s_batt_box);
+            ESP_LOGI(TAG, "batt parent=%p screen=%p parent_size=%dx%d batt_pos=%d,%d",
+                     (void*)par, (void*)lv_screen_active(),
+                     lv_obj_get_width(par), lv_obj_get_height(par),
+                     lv_obj_get_x(s_batt_box), lv_obj_get_y(s_batt_box));
+        }
         lv_obj_set_size(s_batt_box, 32, 100);
         /* 2026-10-06 用户拍板:横屏放横屏视觉右上角 = 逻辑(竖屏)右下角,
            rot 900 后视觉 x∈[448,480] y∈[700,800] */
