@@ -319,7 +319,12 @@ const mesh = {
    (Ceobe 斧子实测 base 顶点 y=-28、x 到 549 出屏 → 用户看到斧子飞左上)。
    改用 Idle 首帧:与动作循环一致、武器 detach 正确、静态图与动作无缝衔接;
    无 Idle 的角色回退 Default(保持旧行为) */
-const baseAnim = data.animations.find(a => a.name === 'Idle') || defaultAnim;
+const baseAnim = data.animations.find(a => a.name === 'Idle') ||
+                 data.animations.find(a => a.name === 'Start') ||
+                 data.animations.find(a => a.name !== 'Default' &&
+                     !['Begin', 'End', 'Down'].some(sg => a.name.includes(sg)) &&
+                     !a.name.startsWith('Start_')) ||
+                 defaultAnim;
 mesh.base = collectFrame(baseAnim, 0);
 for (const anim of data.animations) {
     if (anim.name === 'Default') continue;
