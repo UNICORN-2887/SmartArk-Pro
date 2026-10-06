@@ -17,7 +17,14 @@
 #include <esp_log.h>
 #include <cJSON.h>
 #include <driver/gpio.h>
+#include <esp_wifi.h>
 #include <arpa/inet.h>
+
+/* 2026-10-07 下载提速:关闭 WiFi 省电(默认 MIN_MODEM 使 TCP 吞吐掉到
+   200-400KB/s;用户 WiFi 上限 8MB/s,服务器本地 10-21MB/s,瓶颈在设备端) */
+void wifi_power_save_off(void) {
+    esp_wifi_set_ps(WIFI_PS_NONE);
+}
 
 #define TAG "Application"
 
@@ -700,6 +707,13 @@ void Application::Start() {
 
     /* Wait for the network to be ready */
     board.StartNetwork();
+
+    /* 2026-10-07 下载提速:关闭 WiFi 省电(默认 MIN_MODEM 使 TCP 吞吐掉到
+       200-400KB/s;用户 WiFi 上限 8MB/s,服务器本地 10-21MB/s,瓶颈在设备端) */
+    {
+        extern void wifi_power_save_off(void);
+        wifi_power_save_off();
+    }
 
     /* 2026-09-26 索引页提前:WiFi 连接成功立即显示角色选择页(黑底),
        后续 OTA 检查/协议连接只更新顶部状态栏,不再出现"白屏→检查新版本→待命→
