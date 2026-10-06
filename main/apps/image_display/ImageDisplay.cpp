@@ -527,6 +527,20 @@ bool image_display_init(void)
         xTaskCreate(thumbs_sync_task, "thumbs_bg", 16384, (void*)0, 2, NULL);
     }
 
+    /* 2026-10-07 蟑螂派对主页资源后台预下载(用户拍板:动图大,WiFi 后提前拉,
+       不等到打开 profile 才下):
+       公共 Ur_Info(默认照片/动图)+ 用户仓库 Ur_Info(用户上传的) */
+    xTaskCreate([](void*) {
+        vTaskDelay(pdMS_TO_TICKS(8000));   // 等网络起来 + 不与缩略图同步抢带宽
+        ur_info_public_fetch_task(NULL);
+    }, "urinfo_boot", 8192, NULL, 2, NULL);
+    xTaskCreate([](void*) {
+        vTaskDelay(pdMS_TO_TICKS(8000));
+        int uid = scan_bound_user_uid();
+        if (uid > 0) ur_info_fetch_task((void*)(intptr_t)uid);
+        else vTaskDelete(NULL);
+    }, "urinfo_uboot", 8192, NULL, 2, NULL);
+
     ESP_LOGI(TAG, "Image display initialized (empty canvas)");
     return true;
 }
@@ -3120,9 +3134,13 @@ static void profile_hide(void) {
 
     // 恢复按钮
     if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
-        /* 罗德岛按钮只在 cover 立绘模式显示（cover_display_start 显式恢复）；
-           profile 场景一律隐藏——与 Live2D 共用槽位 (366,165)，同显必重合 */
-        if (s_rhodes_btn) lv_obj_add_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
+        /* 2026-10-07 修复:曾一律隐藏罗德岛/立牌按钮且无恢复路径
+           (注释称 cover_display_start 恢复,但 profile 返回不走该函数)
+           → 返回竖屏通行证时"横屏立牌/时装/罗德岛按钮丢失" */
+        if (s_rhodes_btn) {
+            if (s_profile_was_cover) lv_obj_remove_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
+            else lv_obj_add_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
+        }
         fashion_btn_sync();
         if (s_settings_btn) lv_obj_remove_flag(s_settings_btn, LV_OBJ_FLAG_HIDDEN);
         if (s_menu_btn)     lv_obj_remove_flag(s_menu_btn, LV_OBJ_FLAG_HIDDEN);
@@ -3132,7 +3150,10 @@ static void profile_hide(void) {
             if (s_lv2_interact_btn) lv_obj_remove_flag(s_lv2_interact_btn, LV_OBJ_FLAG_HIDDEN);
             if (s_ppd_interact_btn) lv_obj_remove_flag(s_ppd_interact_btn, LV_OBJ_FLAG_HIDDEN);
             if (s_kb_btn) lv_obj_remove_flag(s_kb_btn, LV_OBJ_FLAG_HIDDEN);
-            if (s_standee_btn) lv_obj_add_flag(s_standee_btn, LV_OBJ_FLAG_HIDDEN);   // profile 返回对话模式：立牌隐藏
+            if (s_standee_btn) lv_obj_add_flag(s_standee_btn, LV_OBJ_FLAG_HIDDEN);   // profile 返回对话模式:立牌隐藏
+        } else {
+            /* 2026-10-07 返回竖屏通行证(cover):立牌按钮恢复 */
+            if (s_standee_btn) lv_obj_remove_flag(s_standee_btn, LV_OBJ_FLAG_HIDDEN);
         }
         lvgl_port_unlock();
     }
