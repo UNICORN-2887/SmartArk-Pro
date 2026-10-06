@@ -109,8 +109,10 @@ const skin0 = data.defaultSkin || data.skins[0];
 const defaultAnim = data.animations.find(a => a.name === 'Default');
 
 function applyPose(anim, time = 0) {
+    /* 2026-10-06 去掉 defaultAnim 应用(恢复旧工具行为):Default 动画会把
+       隐藏链附件移除(Ceobe 等 41 个身体层 att=null → 整层缺失)。
+       setup 姿势皮肤默认附件 + 动画帧覆盖 */
     skel.setToSetupPose();
-    if (defaultAnim) defaultAnim.apply(skel, 0, 0, false, null, 1, 0, 0);
     if (anim && anim !== defaultAnim) anim.apply(skel, 0, time, false, null, 1, 0, 0);
     skel.updateWorldTransform();
 }
@@ -196,7 +198,12 @@ function clippedOutSlotIndexes(verts) {
 }
 
 // Same fit as render_layers.mjs: only currently visible attachments define the scene frame.
-applyPose(defaultAnim, 0);
+// 2026-10-06 bbox 仍用 Default 首帧姿势(可见附件框;collectFrame 已改为纯 setup+动画)
+{
+    skel.setToSetupPose();
+    if (defaultAnim) defaultAnim.apply(skel, 0, 0, false, null, 1, 0, 0);
+    skel.updateWorldTransform();
+}
 let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
 {
     const verts = new Float32Array(4096);
@@ -264,7 +271,20 @@ function collectFrame(anim, time) {
     const draw = [];
     for (const slot of skel.slots) {   // 2026-09-17:与 render_layers 同序(slots 声明序),设备与 PC 层级一致
         if (clippedOut.has(slot.data.index)) continue;
-        const at = slot.getAttachment();
+        let at = slot.getAttachment();
+        /* 2026-10-07 fallback 修正:动画显式 detach 的槽(武器/部件切换)必须尊重
+           动画(attach=null 不画),曾无条件挂回皮肤第一个附件 → 备选武器
+           全部叠画且出屏(Ceobe Knife_Holding I~VI)。
+           仅当动画没有该槽 timeline 时才回退到皮肤附件(换链角色 setup
+           被 Default 清空的场景;有 timeline 的槽完全跟动画走) */
+        if ((!at || !at.region) && (!anim || anim === defaultAnim ||
+            !anim.timelines.some(t => t.slotIndex === slot.data.index))) {
+            const sk = data.skins[0] && data.skins[0].attachments[slot.data.index];
+            if (sk) {
+                const first = Object.keys(sk)[0];
+                if (first) { at = sk[first]; slot.setAttachment(at); }
+            }
+        }
         if (!slotVisible(slot, at) || !isDrawableAttachment(at)) continue;
         const key = attachmentKey(slot, at);
         const worldLen = at.constructor.name === 'RegionAttachment' ? 8 : at.worldVerticesLength;

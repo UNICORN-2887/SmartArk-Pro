@@ -8044,10 +8044,10 @@ var spine;
 			offset[RegionAttachment.OY4] = localYCos + localX2Sin;
 		};
 		RegionAttachment.prototype.setRegion = function (region) {
-			/* 2026-10-07 修复:官方 3.8 此函数 return this;本文件缺失 →
-			   new RegionAttachment(n).setRegion(r) 返回 undefined,
-			   readAttachment 里 region == null 判定(JS undefined==null)误判
-			   → 全部 Region 附件被丢弃(Ceobe 等 17 角色缺脸/缺腿根因!) */
+			/* 2026-10-07 修复:官方 3.8 此函数 return this 在函数末尾;
+			   曾把 return this 误放进 else 分支 → rotate:true 的 region
+			   (Ceobe 左小腿/刀/闭眼等)仍返回 undefined → 被误判 null 丢弃。
+			   官方实现末尾为 this.updateOffset() + return this */
 			this.region = region;
 			var uvs = this.uvs;
 			if (region.rotate) {
@@ -8069,8 +8069,9 @@ var spine;
 				uvs[5] = region.v;
 				uvs[6] = region.u2;
 				uvs[7] = region.v2;
-				return this;
 			}
+			this.updateOffset();
+			return this;
 		};
 		RegionAttachment.prototype.computeWorldVertices = function (bone, worldVertices, offset, stride) {
 			var vertexOffset = this.offset;
