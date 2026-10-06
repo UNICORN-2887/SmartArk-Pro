@@ -28,6 +28,17 @@ class HTTPVFS {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${rel}`);
     return resp.arrayBuffer();
   }
+  async listDirs(rel) {
+    /* 目录列表:走同源 /simchar_list/(带 vfs.base 内的相对路径)。
+       仅对 http(s) base 有效。 */
+    const u = new URL(this.base, location.href);
+    if (u.origin !== location.origin) return null;
+    const p = u.pathname.replace(/\/+$/, '') + '/' + rel.replace(/^\/+/, '');
+    const resp = await fetch('/simchar_list' + p.replace('/simchar/', ''));
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: list ${rel}`);
+    const d = await resp.json();
+    return d.dirs || [];
+  }
 }
 
 class FileListVFS {
@@ -122,18 +133,52 @@ async function loadCharacter(vfs, subPath) {
 
   const scene = JSON.parse(await getText('scene.json'));
 
+  /* 2026-10-06 PPD_Q 强制 mesh 模式:scene.layers 非空时旧的场景模式
+     (anims 轨道 + 逐层贴图)渲染轨迹乱飞(该路径从未验收);PPD_Q 部署
+     始终有 mesh.json,帧顶点直渲染才是验收过的正确路径 */
+  let hasMesh = false;
+  try { await vfs.get(base + 'mesh.json'); hasMesh = true; } catch (e) { hasMesh = false; }
+  if (hasMesh) {
+    const mesh = JSON.parse(await getText('mesh.json'));
+    const texImgs = new Map();
+    for (const t of (mesh.textures || [])) {
+      try {
+        const buf = await vfs.get(base + t.file);
+        const blob = new Blob([buf], { type: 'image/png' });
+        texImgs.set(t.id, await createImageBitmap(blob));
+      } catch (e) { texImgs.set(t.id, null); }
+    }
+    let forms = null;
+    try { forms = JSON.parse(await getText('forms.json')); } catch (e) { forms = null; }
+    if (!forms && typeof vfs.listDirs === 'function') {
+      /* 2026-10-05 无 forms.json 时扫 forms/ 子目录(7861 提供 /simchar_list/) */
+      try {
+        const dirs = await vfs.listDirs(base + 'forms/');
+        if (dirs && dirs.length) forms = { forms: dirs };
+      } catch (e) { forms = null; }
+    }
+    return { base, scene, mode: 'mesh', mesh, texImgs, anims: mesh.animations || {}, forms };
+  }
+
   let anims = {};
   try { anims = JSON.parse(await getText('anims.json')); } catch (e) { anims = {}; }
   let forms = null;
   try { forms = JSON.parse(await getText('forms.json')); } catch (e) { forms = null; }
 
   const textures = new Map();
-  for (const L of scene.layers) {
+  /* 2026-10-06 并发加载:曾逐层串行 fetch(177 层 × RTT = 数十秒~分钟级),
+     8 并发批量拉取 */
+  const layerNames = scene.layers.map(L => L.name);
+  const CONC = 8;
+  for (let i = 0; i < layerNames.length; i += CONC) {
+    const batch = layerNames.slice(i, i + CONC);
+    let bufs;
     try {
-      textures.set(L.name, decodeRaw(await vfs.get(base + L.name + '.raw')));
+      bufs = await Promise.all(batch.map(n => vfs.get(base + n + '.raw')));
     } catch (e) {
-      throw new Error(`加载贴图 ${base}${L.name}.raw 失败: ${e.message}`);
+      throw new Error(`加载贴图 ${base}*.raw 失败: ${e.message}`);
     }
+    bufs.forEach((buf, j) => textures.set(batch[j], decodeRaw(buf)));
   }
   return { base, scene, anims, textures, forms };
 }
@@ -167,11 +212,69 @@ function sampleTrack(track, duration, t) {
  *   ctx.drawImage(tex, 0, 0, L.w, L.h);
  * 层按 z 升序；无轨道的层 dx/dy/drot=0、vis=scene.visible。 */
 
+function sampleMeshDraw(anim, t) {
+  /* 帧顶点线性插值(与 sampleTrack 同节奏) */
+  const frames = anim.frames;
+  const n = frames.length;
+  if (n < 2 || !(anim.duration > 0)) return frames[0].draw;
+  const pos = Math.min(Math.max(t / anim.duration * (n - 1), 0), n - 1);
+  const i0 = Math.floor(pos), frac = pos - i0;
+  const f0 = frames[i0], f1 = frames[Math.min(i0 + 1, n - 1)];
+  const m1 = new Map(f1.draw.map(d => [d.key, d.vertices]));
+  return f0.draw.map(d => {
+    const v1 = m1.get(d.key);
+    if (!v1 || v1.length !== d.vertices.length) return d;
+    return { key: d.key, vertices: d.vertices.map((v, k) => v + (v1[k] - v) * frac) };
+  });
+}
+
+function drawMesh(ctx, cur) {
+  const draw = st.anim ? sampleMeshDraw(st.anim, st.t) : cur.mesh.base.draw;
+  for (const d of draw) {
+    const a = cur.mesh.attachments[d.key];
+    if (!a) continue;
+    const tex = cur.texImgs.get(a.texture);
+    if (!tex) continue;
+    const uv = a.uvs, v = d.vertices;
+    /* 2026-10-05 网格是多边形(N 点,如头/脸 17 点),扇形三角化:0,1,2 / 0,2,3 / … */
+    const tris = [];
+    for (let i = 1; i + 1 < v.length / 2; i++) tris.push([0, i, i + 1]);
+    if (!tris.length) tris.push([0, 1, 2]);
+    for (const [i0, i1, i2] of tris) {
+      const x0 = uv[i0 * 2], y0 = uv[i0 * 2 + 1];
+      const x1 = uv[i1 * 2], y1 = uv[i1 * 2 + 1];
+      const x2 = uv[i2 * 2], y2 = uv[i2 * 2 + 1];
+      const vx0 = v[i0 * 2], vy0 = v[i0 * 2 + 1];
+      const vx1 = v[i1 * 2], vy1 = v[i1 * 2 + 1];
+      const vx2 = v[i2 * 2], vy2 = v[i2 * 2 + 1];
+      const det = x0 * (y1 - y2) + x1 * (y2 - y0) + x2 * (y0 - y1);
+      if (Math.abs(det) < 1e-6) continue;
+      const a11 = (vx0 * (y1 - y2) + vx1 * (y2 - y0) + vx2 * (y0 - y1)) / det;
+      const a12 = (vx0 * (x2 - x1) + vx1 * (x0 - x2) + vx2 * (x1 - x0)) / det;
+      const a21 = (vy0 * (y1 - y2) + vy1 * (y2 - y0) + vy2 * (y0 - y1)) / det;
+      const a22 = (vy0 * (x2 - x1) + vy1 * (x0 - x2) + vy2 * (x1 - x0)) / det;
+      const tx = vx0 - a11 * x0 - a12 * y0;
+      const ty = vy0 - a21 * x0 - a22 * y0;
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(vx0, vy0);
+      ctx.lineTo(vx1, vy1);
+      ctx.lineTo(vx2, vy2);
+      ctx.closePath();
+      ctx.clip();
+      ctx.transform(a11, a21, a12, a22, tx, ty);
+      ctx.drawImage(tex, 0, 0);
+      ctx.restore();
+    }
+  }
+}
+
 function drawFrame() {
   const cur = st.current;
   if (!cur) return;
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+  if (cur.mode === 'mesh') { drawMesh(ctx, cur); return; }
   const sorted = [...cur.scene.layers].sort((a, b) => a.z - b.z);
   for (const L of sorted) {
     if (st.hidden.has(L.name)) continue;
@@ -216,6 +319,8 @@ const st = {
   rot: 0,             // 画布旋转 0/90/180/270
   zoom: 0.8,
   hidden: new Set(),  // 调试用：手动隐藏的层
+  rootBase: '',       // 2026-10-06 主场景 base(切子形态后保留返回入口)
+  rootForms: null,    // 主场景的形态列表(切到子形态后下拉仍可切回/切换其他)
 };
 
 /* ---------------- 画布视图（旋转 + 缩放） ---------------- */
@@ -243,16 +348,36 @@ function applyLoaded(cur, label) {
   st.hidden.clear();
   el.stageHint.style.display = 'none';
 
-  // 形态下拉（子形态 dir 相对当前形态目录，拼上 cur.base 成全局路径）
+  /* 2026-10-06 形态下拉:主场景时记录根形态列表;切到子形态后下拉保留
+     全部根形态(主场景+背面+基建),不再只剩"主场景"回不去 */
+  const isRoot = !label;
+  if (isRoot) {
+    st.rootBase = cur.base;
+    st.rootForms = cur.forms ? cur.forms.forms.map(f => ({ name: f.name, dir: cur.base + f.dir })) : null;
+  }
   el.formSel.innerHTML = '';
-  el.formSel.add(new Option('主场景', ''));
-  if (cur.forms) for (const f of cur.forms.forms) el.formSel.add(new Option(f.name, cur.base + f.dir));
+  el.formSel.add(new Option('主场景', st.rootBase || ''));
+  if (st.rootForms) for (const f of st.rootForms) el.formSel.add(new Option(f.name, f.dir));
+  if (!isRoot && cur.forms) for (const f of cur.forms.forms) {
+    const v = cur.base + f.dir;
+    if (!st.rootForms || !st.rootForms.some(r => r.dir === v)) el.formSel.add(new Option(f.name, v));
+  }
+  if (label) el.formSel.value = label;
 
-  // 动画下拉
+  // 动画下拉(mesh 模式动画在 mesh.animations)
   el.animSel.innerHTML = '';
   el.animSel.add(new Option('（默认姿势）', ''));
-  for (const name of Object.keys(cur.anims)) el.animSel.add(new Option(name, name));
+  for (const name of Object.keys(cur.anims || {})) el.animSel.add(new Option(name, name));
 
+  /* 2026-10-05 Q 版横屏:mesh.canvas.landscape → 默认旋转 90 显示 */
+  if (cur.mode === 'mesh' && cur.mesh.canvas && cur.mesh.canvas.landscape) {
+    st.rot = 270;
+    document.querySelectorAll('.rot').forEach(x => x.classList.toggle('active', +x.dataset.rot === 270));
+    applyView();
+  } else if (st.rot === 90 && cur.mode !== 'mesh') {
+    st.rot = 0;
+    applyView();
+  }
   rebuildLayerList();
   updatePlayBtn();
   updateTimeUI();
@@ -304,6 +429,9 @@ function updateTimeUI() {
 /* ---------------- 数据源入口 ---------------- */
 
 async function loadFrom(vfs, subPath, sourceName) {
+  /* 2026-10-06 中央大字加载提示(177 层贴图加载数十秒,顶部小字不易察觉) */
+  const mask = document.getElementById('loadMask');
+  if (mask) mask.style.display = 'flex';
   try {
     el.srcStatus.textContent = '加载中…';
     el.srcStatus.classList.remove('error');
@@ -314,6 +442,8 @@ async function loadFrom(vfs, subPath, sourceName) {
   } catch (e) {
     el.srcStatus.textContent = '加载失败: ' + e.message;
     el.srcStatus.classList.add('error');
+  } finally {
+    if (mask) mask.style.display = 'none';
   }
 }
 

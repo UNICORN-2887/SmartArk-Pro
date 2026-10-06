@@ -10,9 +10,20 @@
 // --landscape（横屏 Q 版互动用）：Spine 内容顺时针旋转 90° 画入 480×800 竖帧
 // （角色头朝画布左 = 用户横持设备的视觉上方，与 standee 预旋转同思路，设备端零旋转）。
 // 角色世界高度映射画布宽度、宽度映射画布高度（fit 公式交换 CW/CH）。
-import { createCanvas, loadImage } from 'canvas';
 import fs from 'fs';
 import path from 'path';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+function loadCanvasModule() {
+    try {
+        return require('canvas');
+    } catch (e) {
+        return require(path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')),
+            '../../tools/spine2ppd/node_modules/canvas'));
+    }
+}
+const { createCanvas, loadImage } = loadCanvasModule();
 
 const dir = process.argv[2];
 const outDir = process.argv[3];
@@ -52,7 +63,16 @@ const pageTex = new Map();
 // 30-60px,采到贴图纯白区域 → 光晕层渲染成实心半透明方块(C_Mon3tr_Light)
 let atlasFinal = atlasText;
 for (const pg of pages) {
-    const timg = await loadImage(path.join(dir, pg.name));
+    let timg;
+    try {
+        timg = await loadImage(path.join(dir, pg.name));
+    } catch (e) {
+        // 2026-09-26 官方资源不完整(atlas 声明多页但缺 PNG,凯尔希·思衡托
+        // kalts22.png 缺失)→ 用目录内第一个 png 兜底(画面可能局部错位,资源组后续修数据)
+        if (!pngFiles.length) throw e;
+        console.log();
+        timg = await loadImage(path.join(dir, pngFiles[0]));
+    }
     if (pg.w && (timg.width < pg.w || timg.height < pg.h)) {
         const sx = timg.width / pg.w, sy = timg.height / pg.h;
         if (Math.abs(sx - 1) > 0.01 || Math.abs(sy - 1) > 0.01) {
@@ -72,17 +92,83 @@ const atlas = new spine.TextureAtlas(atlasFinal, p => {
     const timg = pageTex.get(p) || pageTex.values().next().value;
     return new spine.Texture(timg, timg.width, timg.height);
 });
-const bin = new spine.SkeletonBinary(new spine.AtlasAttachmentLoader(atlas));
-const data = bin.readSkeletonData(new Uint8Array(fs.readFileSync(path.join(dir, skelFile))));
-const skel = new spine.Skeleton(data);
-skel.setToSetupPose();
-// 应用 Default 动画第 0 帧：正确的初始姿势（单臂单表情）——
-// setup pose 同时含 5 套手臂骨骼链与表情变体，不应用动画会全部叠加显示
-const defaultAnim = data.animations.find(a => a.name === 'Default');
-if (defaultAnim) {
-    defaultAnim.apply(skel, 0, 0, false, null, 1, 0, 0);
+// 2026-09-26 宽容 loader:图集缺区域(官方资源矛盾)跳过该附件而非抛错
+class LenientLoaderR {
+    constructor(atlas) { this.atlas = atlas; }
+    _region(path) {
+        try {
+            return this.atlas.findRegion(path);
+        } catch (e) {
+            console.log('atlas missing region (skip): ' + path);
+            return null;
+        }
+    }
+    newRegionAttachment(skin, name, path) {
+        const r = this._region(path);
+        if (!r) return null;
+        r.renderObject = r;
+        return new spine.RegionAttachment(name).setRegion(r);   // Region 有 setRegion(算 uvs)
+    }
+    newMeshAttachment(skin, name, path) {
+        const r = this._region(path);
+        if (!r) return null;
+        r.renderObject = r;
+        const a = new spine.MeshAttachment(name);
+        a.region = r;   // 3.8 Mesh 无 setRegion,原生 loader 直接赋值
+        return a;
+    }
+    newBoundingBoxAttachment(skin, name) { return new spine.BoundingBoxAttachment(name); }
+    newPathAttachment(skin, name) { return new spine.PathAttachment(name); }
+    newPointAttachment(skin, name) { return new spine.PointAttachment(name); }
+    newClippingAttachment(skin, name) { return new spine.ClippingAttachment(name); }
 }
-skel.updateWorldTransform();   // 必须：骨骼世界矩阵（bbox 顶点计算依赖）
+/* 2026-10-06 JSON skel 兼容(死芒基建等个别角色导出为 JSON,非二进制) */
+const skelBytesR = fs.readFileSync(path.join(dir, skelFile));
+let data;
+if (skelBytesR[0] === 0x7b) {
+    data = new spine.SkeletonJson(new LenientLoaderR(atlas)).readSkeletonData(skelBytesR.toString('utf8'));
+} else {
+    data = new spine.SkeletonBinary(new LenientLoaderR(atlas)).readSkeletonData(new Uint8Array(skelBytesR));
+}
+const skel = new spine.Skeleton(data);
+// Default/Start 等官方动画第 0 帧里包含附件显隐状态（单臂单表情），
+// 但部分角色的 Start 还包含入场位移，不能拿来切图/算画布 fit。
+// 因此拆成：visibility pose 决定默认哪些附件可见；geometry pose 负责切图几何。
+const defaultAnim = data.animations.find(a => a.name === 'Default');
+function pickVisibilityPoseAnim() {
+    if (defaultAnim && defaultAnim.duration > 0)
+        return defaultAnim;
+    for (const nm of ['Start', 'Idle', 'Wait']) {
+        const a = data.animations.find(x => x.name === nm);
+        if (a) return a;
+    }
+    return defaultAnim || null;
+}
+const geometryPoseAnim = defaultAnim || null;
+const visibilityPoseAnim = pickVisibilityPoseAnim();
+function applyPose(anim, t = 0) {
+    skel.setToSetupPose();
+    if (anim) anim.apply(skel, 0, t, false, null, 1, 0, 0);
+    skel.updateWorldTransform();
+}
+
+function attachmentAlphaVisible(slot, at) {
+    if (!at || !at.region) return false;
+    const slotAlpha = slot.color ? slot.color.a : 1;
+    const attAlpha = at.color ? at.color.a : 1;
+    return slotAlpha * attAlpha > 0.01;
+}
+
+const visibleDefaultAttachments = new Map();
+applyPose(visibilityPoseAnim, visibilityPoseAnim ? visibilityPoseAnim.duration : 0);   /* 2026-10-06 末帧基准:开场动画首帧全透明 → 场景全隐藏/scale 0 */
+for (const s of skel.slots) {
+    const at = s.getAttachment();
+    if (attachmentAlphaVisible(s, at))
+        visibleDefaultAttachments.set(s.data.index, at.name || '');
+}
+applyPose(geometryPoseAnim);   // 必须：骨骼世界矩阵（bbox 顶点计算依赖）
+console.log(`base pose: geometry=${geometryPoseAnim ? geometryPoseAnim.name : 'setup'} visibility=${visibilityPoseAnim ? visibilityPoseAnim.name : 'setup'}`);
+const skin0 = data.defaultSkin || data.skins[0];
 
 // 内容 bbox：只算当前实际挂载的附件顶点（Default 动画把隐藏姿势链骨骼移出屏幕，
 // 若遍历皮肤全部附件会把远点算进 bbox → 模型缩成一小块）
@@ -90,7 +176,14 @@ let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
 {
     const verts = new Float32Array(2048);
     for (const s of skel.slots) {
-        const at = s.getAttachment();
+        const visibleName = visibleDefaultAttachments.get(s.data.index);
+        if (visibleName === undefined) continue;
+        let at = s.getAttachment();
+        if (!at || at.name !== visibleName) {
+            const map = skin0.attachments[s.data.index];
+            at = map && map[visibleName];
+            if (at) s.setAttachment(at);
+        }
         if (!at || !at.region) continue;
         if (at.constructor.name === 'RegionAttachment') {
             at.computeWorldVertices(skel.bones[s.data.boneData.index], verts, 0, 2);
@@ -134,13 +227,19 @@ renderer.triangleRendering = true;   // 官方三角形渲染：Region + Mesh �
 //   隐藏槽用皮肤第一个附件 + setup 姿势渲染（Default 动画会把隐藏链移到屏幕外），
 //   场景里 visible=false，动作播放时由可见性轨道激活）
 // 图层名用槽名（唯一）：两个槽可能挂同名附件（raw 文件名冲突）
-const skin0 = data.defaultSkin || data.skins[0];
 const entries = [];
 for (const s of skel.slots) {
-    const at = s.getAttachment();
-    if (at) {
-        entries.push({ slotIndex: s.data.index, name: s.data.name, att: at, hidden: false });
-        continue;
+    const visibleName = visibleDefaultAttachments.get(s.data.index);
+    let at = s.getAttachment();
+    if (visibleName !== undefined) {
+        if (!at || at.name !== visibleName) {
+            const map = skin0.attachments[s.data.index];
+            at = map && map[visibleName];
+        }
+        if (at && at.region) {
+            entries.push({ slotIndex: s.data.index, name: s.data.name, att: at, hidden: false });
+            continue;
+        }
     }
     const map = skin0.attachments[s.data.index];
     if (map && Object.keys(map).length > 0) {
@@ -155,8 +254,11 @@ console.log(`槽 ${entries.length} 个（隐藏 ${entries.filter(e => e.hidden).
 // Start 的 F_Eye→F_Eye_3 闭眼线等）。PPD 层无纹理切换——变体导出为隐藏层，
 // anims 用 vis 轨道在切换区间激活（与换链隐藏槽同机制，设备端零改动）
 const defaultAtt = new Map();   // slotIndex -> Default 姿势附件名
-for (const e of entries) defaultAtt.set(e.slotIndex, e.att.name || '');
-const variants = [];   // { slotIndex, att }
+for (const e of entries) defaultAtt.set(e.slotIndex, e.hidden ? '' : (e.att.name || ''));
+const variants = [];   // { slotIndex, att, name }
+function variantLayerName(slotIndex, attName) {
+    return `${data.slots[slotIndex].name}__${attName}_v`;
+}
 for (const a of data.animations) {
     for (const tl of a.timelines) {
         if (tl.constructor.name !== 'AttachmentTimeline') continue;
@@ -166,11 +268,11 @@ for (const a of data.animations) {
             const map = skin0.attachments[tl.slotIndex];
             const at = map && map[nm];
             if (at && at.region && !variants.some(v => v.slotIndex === tl.slotIndex && v.att.name === nm))
-                variants.push({ slotIndex: tl.slotIndex, att: at });
+                variants.push({ slotIndex: tl.slotIndex, att: at, name: variantLayerName(tl.slotIndex, nm) });
         }
     }
 }
-console.log(`附件变体 ${variants.length} 个（${variants.map(v => v.att.name).join(', ')}）`);
+console.log(`附件变体 ${variants.length} 个（${variants.map(v => v.name).join(', ')}）`);
 
 // head 骨骼子树判定
 const isHeadBone = bname => {
@@ -193,13 +295,16 @@ let headCenter = null, mouthCenter = null;
 // （基建场景的部分姿势链被 Default 动画移出屏幕——附件非 null 但渲染空），
 // 返回 hidden=true，anims 轨道基准相应取 setup（与隐藏槽一致）
 function exportLayer(slotIndex, name, att, useDefault) {
+    // 2026-09-26 附件名含斜杠(如 'old/F_Shield_B2',Bubble 迎风之轮)时写文件
+    // 会撞出不存在子目录 → sanitize: / → _(scene.json 与 raw 同名一致)
+    name = name.replace(/\//g, '_');
     // Spine additive(加色混合)层:官方渲染器直接画 → 得到的是"半透明实心方块"贴图,
     // PPD 引擎只做普通 alpha 混合 → 发光特效变成突兀方块(凯尔希基建 C_Mon3tr_Light)。
     // 烘焙转换:alpha = 亮度(黑=透明、亮=发光),颜色保留 → 普通混合也呈光晕效果。
     const isAdditive = data.slots[slotIndex].blendMode === 1;   // spine 枚举:1=additive
     const pose = () => {
         skel.setToSetupPose();
-        if (useDefault && defaultAnim) defaultAnim.apply(skel, 0, 0, false, null, 1, 0, 0);
+        if (useDefault && geometryPoseAnim) geometryPoseAnim.apply(skel, 0, 0, false, null, 1, 0, 0);
         for (const s of skel.slots) s.setAttachment(null);
         const slot = skel.slots[slotIndex];
         slot.setAttachment(att);
@@ -264,6 +369,11 @@ function exportLayer(slotIndex, name, att, useDefault) {
     const fy1 = H - 1 - y0;
     const fcx = W - 1 - cxSum / cnt;
     const fcy = H - 1 - cySum / cnt;
+    const bone = skel.bones[data.slots[slotIndex].boneData.index];
+    const bxBuf = landscape ? OFF_X - bone.worldY * SCALE : OFF_X + bone.worldX * SCALE;
+    const byBuf = landscape ? OFF_Y + bone.worldX * SCALE : OFF_Y + bone.worldY * SCALE;
+    const boneX = W - 1 - bxBuf;
+    const boneY = H - 1 - byBuf;
 
     // 裁切保存 raw（u16w,u16h + RGBA8888；行反转+列反转 = 内容 180° 旋转）
     const wbuf = Buffer.alloc(w * h * 4);
@@ -290,6 +400,7 @@ function exportLayer(slotIndex, name, att, useDefault) {
     fs.writeFileSync(path.join(outDir, rawName), Buffer.concat([head, wbuf]));
     return { entry: { name, x: fx0, y: fy0, w, h,
                       cx: Math.round(fcx), cy: Math.round(fcy),
+                      bone_px: Math.round(boneX - fx0), bone_py: Math.round(boneY - fy0),
                       bbox: [fx0, fy0, fx1, fy1] },
              hidden };
 }
@@ -318,7 +429,7 @@ for (const { slotIndex, name, att, hidden } of entries) {
 // 换链槽名重名（F_Emoticon_2/F_Scarf 既是槽名又是附件名），曾直接附件名
 // 导致轨道键冲突（槽层与变体层共用 frames 键，轨道长度翻倍）
 for (const v of variants) {
-    const vname = v.att.name + '_v';
+    const vname = v.name;
     if (layers.some(l => l.name === vname)) { console.log(`  skip variant ${vname} (name conflict)`); continue; }
     const r = exportLayer(v.slotIndex, vname, v.att, true);
     if (!r) continue;

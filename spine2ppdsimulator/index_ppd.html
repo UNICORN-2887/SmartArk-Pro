@@ -73,6 +73,10 @@
         <ul id="layerList"></ul>
       </section>
     </aside>
+    <!-- 2026-10-06 中央加载遮罩 -->
+    <div id="loadMask" style="position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:99">
+      <div style="color:#fff;font-size:18px;font-weight:600">⏳ 正在加载角色数据…</div>
+    </div>
     <main id="stageWrap">
       <div id="stageHint">加载角色目录后显示 480×800 画布</div>
       <div id="stage"><div id="view"><canvas id="canvas" width="480" height="800"></canvas></div></div>
@@ -80,5 +84,15 @@
   </div>
   <script src="data_tx.js"></script>
   <script src="simulator.js"></script>
+  <script>
+    /* 2026-10-05 云端预览:?load=<角色目录URL> 自动加载 */
+    (function () {
+      const lp = new URLSearchParams(location.search).get('load');
+      if (lp && el) {
+        el.urlInput.value = lp;
+        loadFrom(new HTTPVFS(lp), '', lp);
+      }
+    })();
+  </script>
 </body>
 </html>

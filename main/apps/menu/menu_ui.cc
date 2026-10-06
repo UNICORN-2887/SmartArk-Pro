@@ -104,7 +104,9 @@ void menu_ui_show(bool cover_mode, bool landscape) {
     // ── 关闭按钮 ──
     lv_obj_t *close_btn = lv_btn_create(s_overlay);
     lv_obj_set_size(close_btn, 60, 30);
-    lv_obj_set_pos(close_btn, landscape ? 725 : 405, 7);
+    /* 2026-10-05 竖屏关闭按钮左移到标题栏左侧(x=405 被右上角电量胶囊遮挡:
+       lv_layer_sys 在 layer_top 之上) */
+    lv_obj_set_pos(close_btn, landscape ? 725 : 17, 7);
     lv_obj_set_style_bg_color(close_btn, lv_color_hex(0x555555), 0);
     lv_obj_set_style_radius(close_btn, 6, 0);
     lv_obj_t *close_lbl = lv_label_create(close_btn);

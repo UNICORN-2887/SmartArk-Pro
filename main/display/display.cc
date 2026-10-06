@@ -50,7 +50,7 @@ Display::~Display() {
         lv_obj_del(notification_label_);
         lv_obj_del(status_label_);
         lv_obj_del(mute_label_);
-        lv_obj_del(battery_label_);
+        if (battery_label_ != nullptr) lv_obj_del(battery_label_);   /* 2026-10-06 状态栏电量已移除,null 保护 */
         lv_obj_del(emotion_label_);
     }
     if( low_battery_popup_ != nullptr ) {

@@ -45,6 +45,7 @@ void lv2_test_show(void);  // 供 menu_ui 调用
 static void lv2_test_hide(void);
 
 #include "PPACompositor.h"
+#include "bind_qr.h"   /* 2026-10-05 六位码绑定页二维码(200x200 RGB565) */
 #include "driver/jpeg_decode.h"
 #include "driver/jpeg_decode.h"
 #include "board.h"
@@ -181,6 +182,8 @@ static int64_t s_profile_open_ms = 0;     // profile 打开时刻（防点击穿
 static bool s_profile_chat_was_visible = false; // 进入前对话框可见?
 static bool s_profile_loading = false;     // 后台任务互斥
 static int s_profile_gen = 0;             // 后台任务版本号
+static lv_obj_t *s_profile_wait_ov = NULL;   // 2026-10-06 首次下载等待遮罩
+static bool s_profile_waiting = false;       // 等待公共 Ur_Info 下载中
 static const lv_font_t *s_chat_font = NULL;
 
 // ─── 语音记录 ────────────────────────────────
@@ -358,6 +361,52 @@ static int search_image_files(void)
 static lv_obj_t *s_batt_icon = NULL;   // 充电闪电符号
 static lv_obj_t *s_batt_pct = NULL;    // 百分比数字
 static lv_obj_t *s_batt_box = NULL;    // 2026-10-03 胶囊容器:渲染循环逐帧失效(防滑动闪烁)
+static bool s_batt_land = false;       // 2026-10-06 胶囊当前横屏态(与 s_pdq_mode 同步)
+static void batt_ui_tick(lv_timer_t *timer);   // 前向声明(横屏切换函数重建后立即刷新)
+
+/* 2026-10-06 横屏跟随:Q 版互动模式下胶囊与顶部横条按钮同旋转规则——
+   竖 100×32 row(右上角)/ 横 32×100 column + pivot(0,0) rot 900
+   (视觉仍为逻辑右上角 100×32 水平胶囊)。重建子对象:尺寸/流向变化后
+   旧 flex 布局溢出;仅模式切换瞬间调用一次,内含一次电量采样可接受 */
+static void batt_apply_orientation(void) {
+    if (!s_batt_box || !lv_obj_is_valid(s_batt_box)) return;
+    bool land = s_pdq_mode || s_standee_mode;   /* 2026-10-06 横屏立牌也要旋转 */
+    if (land == s_batt_land) return;
+    s_batt_land = land;
+    ESP_LOGI(TAG, "batt orient → %s (pos %d,%d)", land ? "横屏" : "竖屏",
+             land ? 480 : 374, land ? 700 : 2);   // 2026-10-06 诊断:横屏位置核对
+    lv_obj_clean(s_batt_box);
+    if (land) {
+        /* 2026-10-06 layer_sys 层的 transform 旋转不渲染(横屏看不到胶囊的根因):
+           横屏时挂到 screen 层(与旋转按钮同层同规律),竖屏回 sys(全页面置顶) */
+        lv_obj_set_parent(s_batt_box, lv_screen_active());
+        lv_obj_set_size(s_batt_box, 32, 100);
+        /* 2026-10-06 用户拍板:横屏放横屏视觉右上角 = 逻辑(竖屏)右下角,
+           rot 900 后视觉 x∈[448,480] y∈[700,800] */
+        lv_obj_set_pos(s_batt_box, 480, 700);
+        lv_obj_set_style_transform_pivot_x(s_batt_box, 0, 0);
+        lv_obj_set_style_transform_pivot_y(s_batt_box, 0, 0);
+        lv_obj_set_style_transform_rotation(s_batt_box, 900, 0);
+        lv_obj_set_flex_flow(s_batt_box, LV_FLEX_FLOW_COLUMN);
+    } else {
+        lv_obj_set_parent(s_batt_box, lv_layer_sys());
+        lv_obj_set_size(s_batt_box, 100, 32);
+        lv_obj_set_pos(s_batt_box, 0, 0);
+        lv_obj_set_style_transform_rotation(s_batt_box, 0, 0);
+        lv_obj_set_flex_flow(s_batt_box, LV_FLEX_FLOW_ROW);
+        lv_obj_align(s_batt_box, LV_ALIGN_TOP_RIGHT, -6, 2);
+    }
+    s_batt_icon = lv_label_create(s_batt_box);
+    lv_label_set_text(s_batt_icon, "");
+    s_batt_pct = lv_label_create(s_batt_box);
+    lv_label_set_text(s_batt_pct, "");
+    if (land) lv_obj_set_size(s_batt_pct, 32, 64);   /* 视觉=旋转后 64×32,"100%" 不折行 */
+    else lv_obj_set_width(s_batt_pct, 64);
+    lv_obj_set_style_text_align(s_batt_pct, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(s_batt_pct,
+        Board::GetInstance().GetDisplay()->GetTextFont(), 0);
+    batt_ui_tick(NULL);
+}
 
 static void batt_ui_tick(lv_timer_t *timer) {
     int level = 0;
@@ -393,6 +442,8 @@ static void battery_task(void *arg) {
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(10000));
         if (lvgl_port_lock(pdMS_TO_TICKS(200))) {
+            /* 2026-10-06 兜底:pd_anim 循环不跑时(索引页等)方向切换在此生效 */
+            if ((s_pdq_mode || s_standee_mode) != s_batt_land) batt_apply_orientation();
             batt_ui_tick(NULL);
             lvgl_port_unlock();
         }
@@ -401,6 +452,8 @@ static void battery_task(void *arg) {
 
 bool image_display_init(void)
 {
+    /* 2026-10-06 版本戳:用户核对烧录版本(电量横屏位置/立牌旋转/按钮恢复/Ur_Info 下载) */
+    ESP_LOGI(TAG, "FWV=20261006-2200 (batt-landscape-v2 + standee-rotate + orig-pos + urinfo-public)");
     ESP_LOGI(TAG, "Initializing image display...");
 
     if (!ppa_init()) {
@@ -423,7 +476,11 @@ bool image_display_init(void)
     // lv_layer_sys:在所有页面/弹窗之上(WIFI 配网页、角色选择页也可见)
     {
         lv_obj_t* batt_box = lv_obj_create(lv_layer_sys());
-        lv_obj_set_size(batt_box, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        /* 2026-10-05 固定尺寸(原 CONTENT 自适应):对话模式聊天框每帧更新触发
+           全局重绘/布局重算,CONTENT 对象的包围盒微抖 ±3px(恰等于 pad),
+           胶囊右/下边缘 3px 每帧闪烁。固定 100×32 后 bbox 恒定,不再抖
+           (84 宽放不下 display 字体的 "100%"——曾被折成两行) */
+        lv_obj_set_size(batt_box, 100, 32);
         lv_obj_set_style_bg_color(batt_box, lv_color_hex(0x000000), 0);
         lv_obj_set_style_bg_opa(batt_box, LV_OPA_50, 0);
         lv_obj_set_style_border_width(batt_box, 0, 0);
@@ -432,12 +489,14 @@ bool image_display_init(void)
         lv_obj_set_flex_flow(batt_box, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(batt_box, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
                               LV_FLEX_ALIGN_CENTER);
-        lv_obj_align(batt_box, LV_ALIGN_TOP_RIGHT, -6, 4);
+        lv_obj_align(batt_box, LV_ALIGN_TOP_RIGHT, -6, 2);   /* 2026-10-05 上移 2px:与设置按钮错开 */
         s_batt_box = batt_box;   // 2026-10-03 逐帧失效用
         s_batt_icon = lv_label_create(batt_box);
         lv_label_set_text(s_batt_icon, "");
         s_batt_pct = lv_label_create(batt_box);
         lv_label_set_text(s_batt_pct, "");
+        lv_obj_set_width(s_batt_pct, 64);   /* 2026-10-05 百分比固定宽居中:100%→99% 不再改胶囊宽度 */
+        lv_obj_set_style_text_align(s_batt_pct, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_style_text_font(s_batt_pct,
             Board::GetInstance().GetDisplay()->GetTextFont(), 0);
     }
@@ -512,6 +571,38 @@ static void cover_display_start_async(const char* agent_path) {
 
 // ── 时装系统（竖屏 cover 多立绘切换;不记忆,切角色/重启回默认精二）──
 // cover 目录文件约定:默认精二 = 任意非 fashion_ 前缀 .mjpeg;时装 = fashion_<名>.mjpeg
+/* 2026-10-05 选默认精二立绘:优先第一个非 fashion_ 的 .mjpeg;
+   全部是时装时回退第一个 .mjpeg(罕见)。修复夕等角色时装文件排前被误当默认 */
+static bool cover_pick_default(const char *agent_sd_path, char *out, size_t out_sz) {
+    if (!agent_sd_path || !agent_sd_path[0] || !out) return false;
+    out[0] = '\0';
+    char cover_dir[300];
+    snprintf(cover_dir, sizeof(cover_dir), "%s/cover", agent_sd_path);
+    DIR *d = opendir(cover_dir);
+    if (!d) return false;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        const char *ext = strrchr(e->d_name, '.');
+        if (!ext || strcasecmp(ext, ".mjpeg") != 0) continue;
+        if (strncasecmp(e->d_name, "fashion_", 8) != 0) {
+            snprintf(out, out_sz, "%s/cover/%.*s", agent_sd_path, 200, e->d_name);
+            closedir(d);
+            return true;
+        }
+    }
+    rewinddir(d);
+    while ((e = readdir(d)) != NULL) {
+        const char *ext = strrchr(e->d_name, '.');
+        if (ext && strcasecmp(ext, ".mjpeg") == 0) {
+            snprintf(out, out_sz, "%s/cover/%.*s", agent_sd_path, 200, e->d_name);
+            closedir(d);
+            return true;
+        }
+    }
+    closedir(d);
+    return false;
+}
+
 static void fashion_btn_sync(void);
 static void fashion_panel_hide(void);
 void agent_index_show(void);   /* 2026-09-26 开机直进索引页:去 static 供 application.cc 调用 */   // 前向声明:cover 加载失败回退索引页(2026-09-10)
@@ -673,21 +764,7 @@ bool cover_display_start(const char *agent_sd_path) {
     if (frame_count == 0) {
         // 异角色旧 cover：先不清，等新 cover 就位再 swap+free
         // 默认 = 第一个非 fashion_ 的 .mjpeg（时装文件排前时不能错选时装为精二）
-        char cover_dir[300];
-        snprintf(cover_dir, sizeof(cover_dir), "%s/cover", agent_sd_path);
-        DIR *d = opendir(cover_dir);
-        if (d) {
-            struct dirent *entry;
-            while ((entry = readdir(d)) != NULL) {
-                const char *ext = strrchr(entry->d_name, '.');
-                if (ext && strcasecmp(ext, ".mjpeg") == 0 &&
-                    strncasecmp(entry->d_name, "fashion_", 8) != 0) {
-                    snprintf(path, sizeof(path), "%s/cover/%.*s", agent_sd_path, 200, entry->d_name);
-                    break;
-                }
-            }
-            closedir(d);
-        }
+        cover_pick_default(agent_sd_path, path, sizeof(path));
         if (path[0] == '\0') {
             /* 统一文件系统(2026-09-10):本地无立绘(未下载/被清空)→ 回退索引页
                (428 列表 + 克隆/下载入口),不再空屏 */
@@ -870,22 +947,10 @@ bool expression_display_start(const char *agent_sd_path, const char *emotion) {
 
     // 换角色 → 后台异步加载新 cover 到槽，对话结束时秒切
     if (!same_agent) {
-        char cover_dir[300];
-        snprintf(cover_dir, sizeof(cover_dir), "%s/cover", agent_sd_path);
-        DIR *d = opendir(cover_dir);
-        if (d) {
-            struct dirent *entry;
-            while ((entry = readdir(d))) {
-                const char *ext = strrchr(entry->d_name, '.');
-                if (ext && strcasecmp(ext, ".mjpeg") == 0) {
-                    char cover_path[520];
-                    snprintf(cover_path, sizeof(cover_path), "%s/cover/%s", agent_sd_path, entry->d_name);
-                    ppa_preload_cover_async(cover_path);
-                    ESP_LOGI(TAG, "Preloading new cover async: %s", cover_path);
-                    break;
-                }
-            }
-            closedir(d);
+        char cover_path[520];
+        if (cover_pick_default(agent_sd_path, cover_path, sizeof(cover_path))) {
+            ppa_preload_cover_async(cover_path);
+            ESP_LOGI(TAG, "Preloading new cover async: %s", cover_path);
         }
     }
     return true;
@@ -1061,20 +1126,7 @@ static void cover_restore(void) {
     if (count == 0) {
         ESP_LOGI(TAG, "→ Return-to-cover: cache miss, loading from SD (agent=%s)", s_agent_path);
         char path[520] = {0};
-        char cover_dir[300];
-        snprintf(cover_dir, sizeof(cover_dir), "%s/cover", s_agent_path);
-        DIR *d = opendir(cover_dir);
-        if (d) {
-            struct dirent *e;
-            while ((e = readdir(d))) {
-                const char *ext = strrchr(e->d_name, '.');
-                if (ext && strcasecmp(ext, ".mjpeg") == 0) {
-                    snprintf(path, sizeof(path), "%s/cover/%.*s", s_agent_path, 200, e->d_name);
-                    break;
-                }
-            }
-            closedir(d);
-        }
+        cover_pick_default(s_agent_path, path, sizeof(path));   /* 2026-10-05 跳过时装文件 */
         if (path[0]) {
             loading_set_stage("封面", 0);  // 内部帧级回调报 N%
             count = ppa_preload_cover(path);
@@ -1310,6 +1362,13 @@ static void video_playback_task(void *arg)
                 }
             }
         }
+        /* 2026-10-05 电量胶囊每帧重绘:cover/对话模式直写帧覆盖面板 fb,
+           胶囊此前只在 10s tick 重绘 → 闪烁。与 pd_render 路径同款修复
+           (84×32 小区域,持 LVGL 锁防跨核失效链表破坏)。 */
+        if (s_batt_box && lvgl_port_lock(pdMS_TO_TICKS(4))) {
+            if (lv_obj_is_valid(s_batt_box)) lv_obj_invalidate(s_batt_box);
+            lvgl_port_unlock();
+        }
         s_frame_count++;
 
         if (!s_cover_mode) {
@@ -1414,8 +1473,10 @@ static void standee_ui_rotate(bool enter) {
         s_standee_btn,
         s_hide_btn,                        // 显示/隐藏聊天框（横屏对话侧边栏开关）
     };
+    /* 2026-10-06 更新为当前真实竖屏位置(2026-10-02 按钮列整体下移后旧值过时:
+       设置回 (366,5) 与电量胶囊重合、立牌回 (366,285) 与时装按钮重合) */
     static const int orig_pos[5][2] = {
-        {366, 5}, {366, 45}, {366, 85}, {366, 285}, {366, 125},
+        {366, 35}, {366, 75}, {366, 115}, {366, 315}, {366, 155},
     };
     for (int i = 0; i < 5; i++) {
         lv_obj_t* b = btns[i];
@@ -1439,6 +1500,7 @@ static void standee_ui_rotate(bool enter) {
         else lv_obj_clear_flag(s_rhodes_btn, LV_OBJ_FLAG_HIDDEN);
     }
     fashion_btn_sync();
+    batt_apply_orientation();   /* 2026-10-06 电量胶囊跟随横屏立牌(曾等 10s 兜底,进入瞬间方向不对) */
 }
 
 static void standee_task(void* arg) {
@@ -1518,25 +1580,8 @@ static void standee_task(void* arg) {
 // standee_exit(true) 恢复 cover 时无帧可播（曾卡死在立牌一帧）——后台重载
 static void standee_reload_cover_task(void *arg) {
     loading_show("返回通行证");
-    char cover_dir[300];
-    snprintf(cover_dir, sizeof(cover_dir), "%s/cover", s_agent_path);
     char path[520] = {0};
-    DIR *d = opendir(cover_dir);
-    if (d) {
-        struct dirent *e;
-        while ((e = readdir(d))) {
-            const char *ext = strrchr(e->d_name, '.');
-            if (!ext || strcasecmp(ext, ".mjpeg") != 0) continue;
-            size_t alen = strlen(cover_dir), nlen = strlen(e->d_name);
-            if (alen + 1 + nlen < sizeof(path)) {
-                memcpy(path, cover_dir, alen);
-                path[alen] = '/';
-                memcpy(path + alen + 1, e->d_name, nlen + 1);
-            }
-            break;
-        }
-        closedir(d);
-    }
+    cover_pick_default(s_agent_path, path, sizeof(path));   /* 2026-10-05 跳过时装文件 */
     int count = 0;
     if (path[0]) {
         count = ppa_preload_cover(path);
@@ -2121,6 +2166,35 @@ static void music_play_task(void *path_arg) {
     s_music_task = NULL;
     ESP_LOGI(TAG, "Music playback done%s", s_music_cancel ? " (cancelled)" : "");
     vTaskDelete(NULL);
+}
+
+/* 2026-10-06 开机音乐:boot 封面显示后播放 Rhodes_Island(与背景音乐同一链路,
+   唤醒/对话时由 bg_music_stop 停掉)。文件缺失静默跳过。 */
+void boot_music_play(void) {
+    /* 2026-10-06 用户拍板:开机曲从生命流改为 Rhodes_Island(16kHz mono WAV,音乐库英文命名) */
+    const char *dir = "/sdcard/Arknights/main/music";
+    char path[220] = {0};
+    DIR *d = opendir(dir);
+    if (d) {
+        struct dirent *e;
+        while ((e = readdir(d)) != NULL) {
+            if (strstr(e->d_name, "Rhodes_Island") && strstr(e->d_name, ".wav")) {
+                snprintf(path, sizeof(path), "%s/%.*s", dir, 160, e->d_name);   /* 精度限制满足 -Werror=format-truncation */
+                break;
+            }
+        }
+        closedir(d);
+    }
+    if (!path[0]) {
+        ESP_LOGI(TAG, "boot music: Rhodes_Island wav 不存在,跳过");
+        return;
+    }
+    char *p = strdup(path);
+    if (!p) return;
+    if (xTaskCreate(music_play_task, "boot_music", 8192, p, 3, &s_music_task) != pdPASS) {
+        free(p);
+        s_music_task = NULL;
+    }
 }
 
 static void music_ui_hide(void) {
@@ -2731,6 +2805,44 @@ static void profile_progress_cb(const char* stage, int percent) {
     lvgl_port_unlock();
 }
 
+/* 2026-10-06 用户仓库 Ur_Info 后台补下载(my.html 上传的横屏主页照片/视频);
+   打开 profile 时本地缺失则拉取,下次打开生效(静默,不阻塞 UI) */
+static int scan_bound_user_uid(void);   // 前向声明(定义在文件后部)
+static void ur_info_fetch_task(void *arg) {
+    int uid = (int)(intptr_t)arg;
+    int64_t total = 0;
+    int missing = role_download_check_user(uid, "Ur_Info", &total);
+    if (missing > 0) role_download_fetch_user(uid, "Ur_Info", NULL, NULL);
+    vTaskDelete(NULL);
+}
+
+/* 2026-10-06 公共 Ur_Info 后台下载(设备 SD 从未预置过默认照片/动图,
+   蟑螂派对 JPG load failed 的根因):Profile.jpg + Profile.mjpeg 缺失则拉取 */
+void profile_show(void);   // 前向声明(下载完成重入显示)
+static void ur_info_public_fetch_task(void *arg) {
+    mkdir("/sdcard/User", 0777);            // 已存在时 EEXIST 忽略
+    mkdir("/sdcard/User/Ur_Info", 0777);
+    const char *files[2] = {"Profile.jpg", "Profile.mjpeg"};
+    for (int i = 0; i < 2; i++) {
+        char dst[96];
+        snprintf(dst, sizeof(dst), "/sdcard/User/Ur_Info/%s", files[i]);
+        struct stat st;
+        if (stat(dst, &st) == 0 && st.st_size > 0) continue;
+        role_download_fetch_public_profile(files[i], dst);
+    }
+    /* 2026-10-06 下载完成:仍在等待遮罩 → 删遮罩并重入 profile_show 自动显示 */
+    lvgl_port_lock(pdMS_TO_TICKS(2000));
+    bool reenter = s_profile_waiting;
+    if (s_profile_wait_ov && lv_obj_is_valid(s_profile_wait_ov)) {
+        lv_obj_del(s_profile_wait_ov);
+        s_profile_wait_ov = NULL;
+    }
+    s_profile_waiting = false;
+    lvgl_port_unlock();
+    if (reenter) profile_show();
+    vTaskDelete(NULL);
+}
+
 void profile_show(void) {
     fashion_panel_hide();   // 覆盖层打开前关时装面板
     ESP_LOGI(TAG, "Profile show: enter");
@@ -2768,14 +2880,57 @@ void profile_show(void) {
     ppa_release_expendable_caches();
 
     // ① 立刻显示 JPG 占位（LVGL 顶层 canvas）
-    const char *jpg_path = "/sdcard/User/Ur_Info/Profile.jpg";
-    ESP_LOGI(TAG, "Profile show: opening JPG");
+    /* 2026-10-06 用户仓库 Ur_Info 优先(my.html 上传的横屏主页照片);
+       本地无则回退公共默认,并后台补下载(下次打开生效) */
+    int uid = scan_bound_user_uid();
+    char jpg_path[96];
+    snprintf(jpg_path, sizeof(jpg_path), "/sdcard/User/Ur_Info/Profile.jpg");
+    if (uid > 0) {
+        char cand[96];
+        snprintf(cand, sizeof(cand), "/sdcard/_users/u%d/Ur_Info/Profile.jpg", uid);
+        FILE *cf = fopen(cand, "rb");
+        if (cf) { fclose(cf); snprintf(jpg_path, sizeof(jpg_path), "%s", cand); }
+        else xTaskCreate(ur_info_fetch_task, "urinfo", 8192, (void*)(intptr_t)uid, 2, NULL);
+    }
+    ESP_LOGI(TAG, "Profile show: opening JPG %s", jpg_path);
     FILE *fp = fopen(jpg_path, "rb");
     bool has_jpg = false;
+    if (!fp && strstr(jpg_path, "/sdcard/User/") != NULL) {
+        /* 2026-10-06 首次打开:公共 Ur_Info 未下载 → 显示等待遮罩,下载完成自动显示
+           (用户拍板:不要"先关闭等第二次打开") */
+        lvgl_port_lock(pdMS_TO_TICKS(500));
+        if (!s_profile_wait_ov || !lv_obj_is_valid(s_profile_wait_ov)) {
+            s_profile_wait_ov = lv_obj_create(lv_layer_top());
+            lv_obj_set_size(s_profile_wait_ov, 480, 800);
+            lv_obj_set_pos(s_profile_wait_ov, 0, 0);
+            lv_obj_set_style_bg_color(s_profile_wait_ov, lv_color_black(), 0);
+            lv_obj_set_style_bg_opa(s_profile_wait_ov, LV_OPA_90, 0);
+            lv_obj_set_style_border_width(s_profile_wait_ov, 0, 0);
+            lv_obj_clear_flag(s_profile_wait_ov, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_t *wl = lv_label_create(s_profile_wait_ov);
+            lv_label_set_text(wl, "正在下载主页资源…\n(首次约十几秒)");
+            lv_obj_set_style_text_color(wl, lv_color_white(), 0);
+            lv_obj_set_style_text_font(wl, s_chat_font, 0);
+            lv_obj_set_style_text_align(wl, LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_center(wl);
+            lv_obj_add_event_cb(s_profile_wait_ov, [](lv_event_t *e) {
+                /* 点击遮罩取消等待(恢复按钮状态) */
+                s_profile_waiting = false;
+                if (s_profile_wait_ov) { lv_obj_del(s_profile_wait_ov); s_profile_wait_ov = NULL; }
+                profile_hide();
+            }, LV_EVENT_CLICKED, NULL);
+        }
+        lvgl_port_unlock();
+        s_profile_waiting = true;
+        xTaskCreate(ur_info_public_fetch_task, "urinfo_pub", 8192, (void*)1, 2, NULL);
+        ESP_LOGW(TAG, "Profile: JPG 不存在 %s,等待下载完成后自动显示", jpg_path);
+        return;   // 不关闭:遮罩在,下载完成重入 profile_show
+    }
     if (fp) {
         fclose(fp);
         char lv_path[300];
-        snprintf(lv_path, sizeof(lv_path), "S:/User/Ur_Info/Profile.jpg");
+        /* load_jpg_thumbnail 内部拼 "/sdcard"+path+2,故传 S: + 去前缀路径 */
+        snprintf(lv_path, sizeof(lv_path), "S:%s", jpg_path + 7);
         lv_img_dsc_t *dsc = load_jpg_thumbnail(lv_path, 0);
         if (dsc) {
             s_profile_dsc = dsc;  // 保存，profile_hide 时释放（防每次打开泄漏 ~770KB PSRAM）
@@ -2796,8 +2951,16 @@ void profile_show(void) {
 
     if (!has_jpg) { ESP_LOGW(TAG, "Profile: JPG load failed (PSRAM tight?), closing"); profile_hide(); return; }
 
-    // ② "动图"按钮（右下角, 用户手动触发加载）
-    FILE *mjpeg = fopen("/sdcard/User/Ur_Info/Profile.mjpeg", "rb");
+    // ② "动图"按钮（右下角, 用户手动触发加载;2026-10-06 用户仓库优先,无视频无按钮）
+    char mjpeg_path[96];
+    snprintf(mjpeg_path, sizeof(mjpeg_path), "/sdcard/User/Ur_Info/Profile.mjpeg");
+    if (uid > 0) {
+        char cand[96];
+        snprintf(cand, sizeof(cand), "/sdcard/_users/u%d/Ur_Info/Profile.mjpeg", uid);
+        FILE *cf = fopen(cand, "rb");
+        if (cf) { fclose(cf); snprintf(mjpeg_path, sizeof(mjpeg_path), "%s", cand); }
+    }
+    FILE *mjpeg = fopen(mjpeg_path, "rb");
     if (mjpeg) { fclose(mjpeg);
         lv_obj_t *btn = lv_btn_create(s_profile_overlay);
         lv_obj_set_size(btn, 80, 45);
@@ -2811,8 +2974,15 @@ void profile_show(void) {
         lv_obj_set_style_text_font(lbl, s_chat_font, 0);
         lv_obj_set_style_transform_rotation(btn, 900, 0);
         lv_obj_center(lbl);
+        /* 2026-10-06 创建时拷贝路径(点击回调触发时 profile_show 栈已返回,
+           引用局部变量会悬垂);按钮删除时释放 */
+        char *mj_path_copy = strdup(mjpeg_path);
+        lv_obj_add_event_cb(btn, [](lv_event_t *e) {
+            free((void*)lv_event_get_user_data(e));
+        }, LV_EVENT_DELETE, mj_path_copy);
         lv_obj_add_event_cb(btn, [](lv_event_t *e) {
             if (s_profile_loading) return;
+            const char *mj_path = (const char*)lv_event_get_user_data(e);
             s_profile_loading = true;
             int gen = ++s_profile_gen;
             /* 小加载指示（动图按钮旁）：spin + 百分比——静图切动图要加载 ~5 秒，给用户反馈 */
@@ -2851,9 +3021,16 @@ void profile_show(void) {
                 lv_obj_set_user_data(s_profile_load_ind, pct);
             }
             lvgl_port_unlock();
+            /* 2026-10-06 路径随 arg 进任务堆拷贝(回调触发时局部变量已失效) */
+            void *mj_arg = malloc(sizeof(int) + 96);
+            *(int*)mj_arg = gen;
+            snprintf((char*)mj_arg + sizeof(int), 96, "%s", mj_path);
             xTaskCreate([](void *arg) {
-                int gen = (int)(intptr_t)arg;
-                int n = ppa_preload_profile("/sdcard/User/Ur_Info/Profile.mjpeg");
+                int gen = *(int*)arg;
+                char path[96];
+                snprintf(path, sizeof(path), "%s", (char*)arg + sizeof(int));
+                free(arg);
+                int n = ppa_preload_profile(path);
                 if (gen == s_profile_gen && n > 0 && s_profile_overlay) {
                     ppa_use_profile_cache(true);
                     s_image_count = n; s_cover_mode = false;
@@ -2883,8 +3060,8 @@ void profile_show(void) {
                 }
                 lvgl_port_unlock();
                 vTaskDelete(NULL);
-            }, "pfl", 8192, (void*)(intptr_t)gen, 2, NULL);
-        }, LV_EVENT_CLICKED, NULL);
+            }, "pfl", 8192, mj_arg, 2, NULL);
+        }, LV_EVENT_CLICKED, mj_path_copy);
     }
 
     // 触摸 overlay（JPG 已创建则复用并加触摸，否则新建透明层）
@@ -2907,6 +3084,12 @@ void profile_show(void) {
 }
 
 static void profile_hide(void) {
+    /* 2026-10-06 等待遮罩清理(首次下载等待中退出,防残留) */
+    s_profile_waiting = false;
+    if (s_profile_wait_ov && lv_obj_is_valid(s_profile_wait_ov)) {
+        lv_obj_del(s_profile_wait_ov);
+        s_profile_wait_ov = NULL;
+    }
     if (!s_profile_overlay) return;
     /* 加载中关闭：指示对象随 overlay 一起删，但动画必须显式删（防回调踩已删对象） */
     if (s_profile_load_ind && s_profile_spin) lv_anim_delete(s_profile_spin, profile_spin_rotate_cb);
@@ -3014,6 +3197,32 @@ static char s_dl_user_rel[160];       // 用户根下 rel(Arknights/main/operato
 static bool s_dl_user_mode = false;   // 探测命中的下载模式(true=用户仓库)
 // ── 下载中状态:统一进度弹窗 / 顶部小条(后台下载) / 页面锁定 ──
 static bool s_dl_locked = false;                                          // 下载中:禁止切换页面
+
+/* 2026-10-06 下载速度统计(pct 驱动,1 秒窗口):下载框显示 xx% · xxKB/s,
+   用户可判断是网络慢还是真卡死(速度持续为 0 = 卡死) */
+static int64_t s_dl_speed_bytes_total = 0;
+static int64_t s_dl_speed_ts = 0;
+static int s_dl_speed_last_pct = 0;
+static void dl_speed_reset(int64_t total) {
+    s_dl_speed_bytes_total = total;
+    s_dl_speed_ts = 0;
+    s_dl_speed_last_pct = 0;
+}
+static void dl_speed_fmt(int pct, char *out, size_t n) {
+    int kbps = 0;
+    int64_t now = esp_timer_get_time();
+    if (s_dl_speed_ts > 0 && now > s_dl_speed_ts && s_dl_speed_bytes_total > 0) {
+        int64_t bytes = (int64_t)(pct - s_dl_speed_last_pct) * s_dl_speed_bytes_total / 100;
+        kbps = (int)(bytes * 1000000 / (now - s_dl_speed_ts) / 1024);
+        if (kbps < 0) kbps = 0;
+    }
+    s_dl_speed_ts = now;
+    s_dl_speed_last_pct = pct;
+    /* 2026-10-06 -Werror=format-truncation 可证安全写法:
+       n>=28 才拼速度(最坏 27 字节),否则退化为纯百分比 */
+    if (kbps > 0 && n >= 28) snprintf(out, n, "%d%% %dKB/s", pct, kbps);
+    else snprintf(out, n, "%d%%", pct);
+}
 static lv_obj_t *s_pp_popup = NULL, *s_pp_title = NULL, *s_pp_bar = NULL; // 前台进度弹窗(lv_layer_top)
 static lv_obj_t *s_pp_mini = NULL, *s_pp_mini_bar = NULL, *s_pp_mini_lbl = NULL; // 顶部小条
 static void pp_popup_show(void);     // 前台进度弹窗(含[后台下载][取消下载])
@@ -3231,7 +3440,13 @@ static lv_img_dsc_t* load_jpg_thumbnail_ex(const char *path, int idx, jpeg_decod
     free(jpg_data);
 
     uint32_t dec;
+    if (!ppa_jpg_lock()) {   // 2026-10-06 超时不等待(悬挂保护):menu→profile 曾在此永久卡死
+        free(tx_buf); free(rx_buf);
+        thumb_fail_log("lock timeout", idx, fs_path);
+        return NULL;
+    }
     esp_err_t e = jpeg_decoder_process(handle, &s_thumb_jpg_cfg, tx_buf, tx_sz, rx_buf, rx_sz, &dec);
+    ppa_jpg_unlock();
     free(tx_buf);
     if (e != ESP_OK) { ESP_LOGW(TAG, "[%d] dec fail %d", idx, (int)e); free(rx_buf); return NULL; }
 
@@ -3247,10 +3462,15 @@ static lv_img_dsc_t* load_jpg_thumbnail_ex(const char *path, int idx, jpeg_decod
 static jpeg_decoder_handle_t thumb_engine_ensure(jpeg_decoder_handle_t *slot) {
     if (*slot) return *slot;
     jpeg_decode_engine_cfg_t eng_cfg = { .timeout_ms = 1000 };  // 1s 兜底超时
+    if (!ppa_jpg_lock()) {   // 2026-10-06 超时不等待(悬挂保护)
+        ESP_LOGE(TAG, "thumb engine lock timeout");
+        return NULL;
+    }
     for (int retry = 0; retry < 3; retry++) {
-        if (jpeg_new_decoder_engine(&eng_cfg, slot) == ESP_OK) return *slot;
+        if (jpeg_new_decoder_engine(&eng_cfg, slot) == ESP_OK) { ppa_jpg_unlock(); return *slot; }
         vTaskDelay(pdMS_TO_TICKS(50));
     }
+    ppa_jpg_unlock();
     // 诊断：现场/预取加载"0 卡片无日志"的盲区路径
     ESP_LOGE(TAG, "thumb engine create FAILED (PSRAM free %u KB, slot=%p)",
              (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024), (void*)slot);
@@ -3596,6 +3816,8 @@ static void index_hint_update(void) {
 void agent_index_show(void) {
     if (s_index_page) { agent_index_hide(); return; }
 
+    bg_music_stop();   /* 2026-10-04 开机音乐(生命流)播到配网结束、进入选择角色页面的这一刻即停 */
+
     s_index_building = true;
     s_building_since = esp_timer_get_time();  // 构建完成前屏蔽手势（防点击/滑动重入崩溃）
 
@@ -3842,11 +4064,11 @@ void agent_index_show(void) {
         s_card_objs[i] = card;
     }
 
-    // ── 页码指示器（右上角，顶部 bar 内；底部区域留给"切换立绘"确认按钮）──
+    // ── 页码指示器（2026-10-06 左移避让右上角电量胶囊 [374,474]×[2,34]）──
     s_index_pg_label = lv_label_create(bar);
     lv_obj_set_style_text_color(s_index_pg_label, lv_color_hex(0x888888), 0);
     lv_obj_set_style_text_font(s_index_pg_label, s_chat_font, 0);
-    lv_obj_align(s_index_pg_label, LV_ALIGN_RIGHT_MID, -8, 0);
+    lv_obj_align(s_index_pg_label, LV_ALIGN_RIGHT_MID, -120, 0);
 
     // ── 底部"切换立绘"确认按钮（两段式：点卡片选中后出现）──
     s_confirm_btn = lv_btn_create(page);
@@ -3995,8 +4217,8 @@ static void index_dl_probe_task(void *arg) {
     } else if (user_total == -2 && pub_total >= 0) {
         // 2026-09-30 方案B(用户拍板):设备端不再自助克隆,仅提示到网页/后台克隆
         s_dl_state = 6;   // 未克隆:仅提示(无克隆按钮)
-        lv_label_set_text(s_dl_title, "该角色尚未克隆\n到你的仓库");
-        lv_label_set_text(s_dl_sub, "请到网页或后台克隆后\n再下载(验收后可用)");
+        lv_label_set_text(s_dl_title, "该角色尚未克隆到\n您的私人仓库");
+        lv_label_set_text(s_dl_sub, "请前往网站后台【仓库】\n克隆后方可下载");
         lv_obj_add_flag(s_dl_yes, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(s_dl_no_lbl, "知道了");
         lv_obj_remove_flag(s_dl_no, LV_OBJ_FLAG_HIDDEN);
@@ -4005,7 +4227,7 @@ static void index_dl_probe_task(void *arg) {
         if (user_unbound) {
             lv_label_set_text(s_dl_title, "设备未绑定用户,\n请先在后台绑定");
         } else {
-            lv_label_set_text(s_dl_title, "云端资源未就绪,\n立绘上传后可下载");
+            lv_label_set_text(s_dl_title, "资源组制作中,\n敬请期待");
         }
         lv_obj_add_flag(s_dl_yes, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(s_dl_no_lbl, "取消选中");
@@ -4170,6 +4392,7 @@ static void index_dl_start(void) {
 static void index_dl_popup_show(int ai, int mode, int64_t total) {
     if (!s_index_page || s_dl_popup) return;
     s_dl_cancel = false;
+    dl_speed_reset(total);   /* 2026-10-06 速度统计窗口重置 */
     s_dl_mode = mode;
     snprintf(s_dl_voc, sizeof(s_dl_voc), "%s", PROF_EN[s_agents[ai].prof]);
     snprintf(s_dl_star, sizeof(s_dl_star), "%s", RARITY_DIR[s_agents[ai].rarity]);
@@ -4199,12 +4422,16 @@ static void index_dl_popup_show(int ai, int mode, int64_t total) {
     lv_label_set_text(s_dl_title, "正在检查角色…");
     lv_obj_set_style_text_color(s_dl_title, lv_color_white(), 0);
     lv_obj_set_style_text_font(s_dl_title, s_chat_font, 0);
+    lv_obj_set_width(s_dl_title, 360);                       /* 2026-10-05 文案居中 */
+    lv_obj_set_style_text_align(s_dl_title, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(s_dl_title, LV_ALIGN_TOP_MID, 0, 20);
 
     s_dl_sub = lv_label_create(s_dl_popup);
     lv_label_set_text(s_dl_sub, "");
     lv_obj_set_style_text_color(s_dl_sub, lv_color_hex(0xcccccc), 0);
     lv_obj_set_style_text_font(s_dl_sub, s_chat_font, 0);
+    lv_obj_set_width(s_dl_sub, 360);                         /* 2026-10-05 文案居中 */
+    lv_obj_set_style_text_align(s_dl_sub, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(s_dl_sub, LV_ALIGN_TOP_MID, 0, 84);
 
     s_dl_bar = lv_bar_create(s_dl_popup);
@@ -4511,8 +4738,8 @@ static void index_dl_fetch_task(void *arg) {
             if (s_pp_mini_bar && lv_obj_is_valid(s_pp_mini_bar))
                 lv_bar_set_value(s_pp_mini_bar, pct, LV_ANIM_OFF);
             if (s_pp_mini_lbl && lv_obj_is_valid(s_pp_mini_lbl)) {
-                char pb[16];
-                snprintf(pb, sizeof(pb), "%d%%", pct);
+                char pb[32];
+                dl_speed_fmt(pct, pb, sizeof(pb));   /* 2026-10-06 xx% xxKB/s(32 字节满足 -Werror=format-truncation 最坏 27) */
                 lv_label_set_text(s_pp_mini_lbl, pb);
             }
         }
@@ -4607,8 +4834,8 @@ static void index_clone_fetch_task(void *arg) {
             if (s_pp_mini_bar && lv_obj_is_valid(s_pp_mini_bar))
                 lv_bar_set_value(s_pp_mini_bar, pct, LV_ANIM_OFF);
             if (s_pp_mini_lbl && lv_obj_is_valid(s_pp_mini_lbl)) {
-                char pb[16];
-                snprintf(pb, sizeof(pb), "%d%%", pct);
+                char pb[32];
+                dl_speed_fmt(pct, pb, sizeof(pb));   /* 2026-10-06 xx% xxKB/s(32 字节满足 -Werror=format-truncation 最坏 27) */
                 lv_label_set_text(s_pp_mini_lbl, pb);
             }
         }
@@ -5780,7 +6007,8 @@ static void pd_ppa_present(uint16_t* src, uint16_t* dst) {
     struct protect_rect_t { int x0, y0, x1, y1; };
     static const protect_rect_t PROTECT_PORTRAIT[] = {
         /* 2026-10-02 右上角按钮列整体下移(Live2D 按钮已删),保护矩形同步 */
-        {396, 0,   480, 32},    // 电量胶囊(layer_sys,2026-10-02 防直写覆盖闪烁)
+        {374, 0,   480, 34},    // 电量胶囊(2026-10-06 补全:胶囊实际 [374,474]×[2,34],
+                                // 曾只护 x≥396 → 左 22px/下 2px 每帧被直写覆盖 → 左/下边缘闪烁)
         {366, 35,  476, 70},    // 设置
         {366, 75,  476, 110},   // 菜单
         {366, 115, 476, 150},   // 模式
@@ -5799,6 +6027,7 @@ static void pd_ppa_present(uint16_t* src, uint16_t* dst) {
     // 横屏聊天框侧边栏（旋转后 x∈[350,480] y∈[360,780]）在下方动态追加（仅可见时保护，
     // 隐藏时不保护——否则直写跳过的区域纸偶画面冻结）
     static const protect_rect_t PROTECT_LANDSCAPE[] = {
+        {448, 700, 480, 800},  // 电量胶囊(横屏 rot 900,视觉右上角=逻辑右下角,2026-10-06 用户拍板)
         {155, 10, 190, 120},   // 设置
         {195, 10, 230, 120},   // 菜单
         {235, 10, 270, 120},   // 模式
@@ -6173,7 +6402,7 @@ static void bg_invalidate_ui(void) {
         /* 2026-10-03 与 pd_ppa_present 的 PROTECT_PORTRAIT 精确同步(曾偏移 30px:
            2026-10-02 按钮列下移只改了跳过列表,失效列表还是旧坐标 → 按钮周围
            留边区永不重绘,切背景/滑动后残留旧背景) */
-        {396, 0,   480, 32},    // 电量胶囊(补:直写跳过但从未失效,死区)
+        {374, 0,   480, 34},    // 电量胶囊(与 PROTECT_PORTRAIT 同步,2026-10-06 补全)
         {366, 35,  476, 70},    // 设置
         {366, 75,  476, 110},   // 菜单
         {366, 115, 476, 150},   // 模式
@@ -6189,6 +6418,7 @@ static void bg_invalidate_ui(void) {
         {0,   505, 480, 800},   // 聊天区(与 PROTECT_PORTRAIT 同步全宽)
     };
     static const lv_area_t rects_landscape[] = {
+        {448, 700, 480, 800},  // 电量胶囊(与 PROTECT_LANDSCAPE 同步,2026-10-06)
         {155, 10, 190, 120},   // 设置
         {195, 10, 230, 120},   // 菜单
         {235, 10, 270, 120},   // 模式
@@ -6309,7 +6539,20 @@ static void bg_unlock_click(lv_event_t *e) {
     if (s_bg_checking || s_bg_task_running) return;
     s_bg_checking = true;
     bg_check_popup_show();
-    xTaskCreate(bg_check_task, "bg_check", 32768, NULL, 5, NULL);   /* 2026-10-03 栈 16384→32768:HTTP 清单解析+LVGL 深调用(弹窗/解锁收尾),自删任务金丝雀盲区 */
+    /* 2026-10-05 创建失败必须恢复状态:此前 32768 栈在碎片堆分配失败时
+       任务不存在 → s_bg_checking 永远 true → 卡死在"正在检查背景…" */
+    BaseType_t cret = xTaskCreate(bg_check_task, "bg_check", 32768, NULL, 5, NULL);
+    if (cret != pdPASS) {
+        ESP_LOGE(TAG, "bg_check create FAILED (free %u, maxblk %u)",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+        /* 降级:16K 栈再试一次(HTTP 检查路径实测浅调用) */
+        cret = xTaskCreate(bg_check_task, "bg_check", 16384, NULL, 5, NULL);
+        if (cret != pdPASS) {
+            s_bg_checking = false;
+            bg_check_popup_hide();
+        }
+    }
 }
 
 // 解锁时阻塞检查云端背景+音乐(公共库;四档:1齐全/0缺失/-2云端无/-1网络失败)
@@ -6353,6 +6596,7 @@ static void bg_check_task(void *arg) {
 // 新背景三键弹窗([更新下载]绿 [后台下载]蓝 [取消]灰;与角色更新弹窗同款)
 static void bg_update_popup_show(int64_t total) {
     if (s_bg_upd_popup) return;
+    dl_speed_reset(total);   /* 2026-10-06 速度统计窗口重置 */
     s_bg_upd_popup = lv_obj_create(lv_layer_top());
     lv_obj_set_size(s_bg_upd_popup, 340, 150);
     lv_obj_center(s_bg_upd_popup);
@@ -6407,6 +6651,12 @@ static void bg_update_popup_show(int64_t total) {
     lv_obj_center(bg_lbl);
     lv_obj_add_event_cb(bg_btn, [](lv_event_t* e) {
         /* 后台下载:顶部小条 + 锁定页面 */
+        if (s_bg_task_running) {   /* 2026-10-04 重入保护:下载已在跑,再点会起第二个任务
+                                      互相踩(判定中断);已在下载时只提示,继续等待原任务 */
+            if (s_bg_upd_popup) { lv_obj_del(s_bg_upd_popup); s_bg_upd_popup = NULL; }
+            ui_toast("下载已在进行中,请等待完成");
+            return;
+        }
         if (s_bg_upd_popup) { lv_obj_del(s_bg_upd_popup); s_bg_upd_popup = NULL; }
         pp_mini_show();
         dl_lock_buttons(true);
@@ -6442,8 +6692,8 @@ static void bg_fetch_task(void *arg) {
             if (s_pp_bar && lv_obj_is_valid(s_pp_bar)) lv_bar_set_value(s_pp_bar, pct, LV_ANIM_OFF);
             if (s_pp_mini_bar && lv_obj_is_valid(s_pp_mini_bar)) lv_bar_set_value(s_pp_mini_bar, pct, LV_ANIM_OFF);
             if (s_pp_mini_lbl && lv_obj_is_valid(s_pp_mini_lbl)) {
-                char pb[16];
-                snprintf(pb, sizeof(pb), "%d%%", pct);
+                char pb[32];
+                dl_speed_fmt(pct, pb, sizeof(pb));   /* 2026-10-06 xx% xxKB/s(32 字节满足 -Werror=format-truncation 最坏 27) */
                 lv_label_set_text(s_pp_mini_lbl, pb);
             }
         }
@@ -6738,9 +6988,16 @@ static void pd_anim_task(void*) {
                    首帧(新约能天使的枪在按钮栏附近被"切断"的根因:注释曾声称每帧拷入,
                    实现漏了)。768KB memcpy ~1-2ms,帧率影响可忽略。 */
                 if (s_pd_fb[2] && s_pd_fb[2] != cur) {
-                    memcpy(s_pd_fb[2], cur, 480 * 800 * 2);
-                    esp_cache_msync((void*)s_pd_fb[2], 480 * 800 * 2,
-                                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+                    /* 2026-10-06 加锁:bg_switch_task 持锁 pd_render(fb[2]) 与本循环
+                       memcpy 并发写同一缓冲(此前 memcpy 不持锁),数据竞争 →
+                       背景切换瞬间胶囊/UI 区读到撕裂混合帧(闪烁)。互斥后 fb[2]
+                       内容始终完整,胶囊逐帧失效看到的面板与底图一致 */
+                    if (s_pd_mutex && xSemaphoreTake(s_pd_mutex, portMAX_DELAY) == pdTRUE) {
+                        memcpy(s_pd_fb[2], cur, 480 * 800 * 2);
+                        esp_cache_msync((void*)s_pd_fb[2], 480 * 800 * 2,
+                                        ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+                        xSemaphoreGive(s_pd_mutex);
+                    }
                 }
                 /* 2026-09-13 修"上动下静"割裂:UI 保护区(半透明对话框/按钮列)的像素
                    只在 LVGL flush 时从 fb[2] 自拷——静止时无 invalidate 就不重绘,
@@ -6757,8 +7014,10 @@ static void pd_anim_task(void*) {
                    必须持 LVGL 锁:跨核无锁 invalidate 会破坏失效链表
                    (lv_inv_area 死循环 → IDLE1 饿死 WDT)。 */
                 if (s_batt_box && lvgl_port_lock(pdMS_TO_TICKS(4))) {
-                    if (s_batt_box && lv_obj_is_valid(s_batt_box))
+                    if (s_batt_box && lv_obj_is_valid(s_batt_box)) {
+                        if ((s_pdq_mode || s_standee_mode) != s_batt_land) batt_apply_orientation();   /* 2026-10-06 横屏跟随(含立牌) */
                         lv_obj_invalidate(s_batt_box);
+                    }
                     lvgl_port_unlock();
                 }
                 static int64_t s_inv_last = 0;
@@ -7918,32 +8177,37 @@ void bind_code_overlay_show(const lv_font_t *font, const char *code) {
     lv_label_set_text(title, "设备未绑定");
     lv_obj_set_style_text_color(title, lv_color_white(), 0);
     if (font) lv_obj_set_style_text_font(title, font, 0);
-    lv_obj_set_pos(title, 30, 160);
+    lv_obj_set_pos(title, 30, 90);
 
     lv_obj_t *code_lbl = lv_label_create(ovl);
     lv_label_set_text(code_lbl, code);
     lv_obj_set_style_text_color(code_lbl, lv_color_hex(0x7fd), 0);
     if (font) lv_obj_set_style_text_font(code_lbl, font, 0);
-    lv_obj_set_pos(code_lbl, 30, 260);
+    lv_obj_set_pos(code_lbl, 30, 150);
 
-    lv_obj_t *hint1 = lv_label_create(ovl);
-    lv_label_set_text(hint1, "打开下方网址,输入上方绑定码");
-    lv_obj_set_style_text_color(hint1, lv_color_hex(0xcccccc), 0);
-    if (font) lv_obj_set_style_text_font(hint1, font, 0);
-    lv_obj_set_pos(hint1, 30, 380);
+    /* 2026-10-05 二维码(bind_qr.h,login.png 生成 200x200) + 网址 */
+    lv_obj_t *qr = lv_image_create(ovl);
+    lv_image_set_src(qr, &bind_qr_img);
+    lv_obj_set_pos(qr, (480 - 200) / 2, 205);
 
-    // 2026-09-30 绑定网址(用户要求:新用户知道去哪绑定)
+    // 绑定网址(2026-09-30 用户要求:新用户知道去哪绑定;2026-10-05 与二维码内容一致)
     lv_obj_t *url_lbl = lv_label_create(ovl);
-    lv_label_set_text(url_lbl, "http://124.221.186.33/my");
+    lv_label_set_text(url_lbl, "http://124.221.186.33:88/login");
     lv_obj_set_style_text_color(url_lbl, lv_color_hex(0x7fd), 0);
     if (font) lv_obj_set_style_text_font(url_lbl, font, 0);
-    lv_obj_set_pos(url_lbl, 30, 435);
+    lv_obj_set_pos(url_lbl, 30, 430);
+
+    lv_obj_t *hint1 = lv_label_create(ovl);
+    lv_label_set_text(hint1, "请访问该网址或扫描二维码\n登录后选择【设备】填写六位码");
+    lv_obj_set_style_text_color(hint1, lv_color_hex(0xcccccc), 0);
+    if (font) lv_obj_set_style_text_font(hint1, font, 0);
+    lv_obj_set_pos(hint1, 30, 495);
 
     lv_obj_t *hint2 = lv_label_create(ovl);
     lv_label_set_text(hint2, "绑定成功后本页自动消失,\n无需重启设备");
     lv_obj_set_style_text_color(hint2, lv_color_hex(0x888888), 0);
     if (font) lv_obj_set_style_text_font(hint2, font, 0);
-    lv_obj_set_pos(hint2, 30, 510);
+    lv_obj_set_pos(hint2, 30, 620);
 
     s_bind_overlay = ovl;
     lvgl_port_unlock();

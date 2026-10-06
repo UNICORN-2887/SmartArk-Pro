@@ -2,6 +2,18 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+// ─── JPEG 解码互斥锁 ───
+// 2026-10-04 第二台设备封面播放第 70 帧崩溃：dma2d_hal_tx_reset_channel 忙等
+// （jpeg_decoder_process → dma2d_connect 死等复位 → IWDT 重启）。根因：多个 jpeg
+// 引擎（封面/缩略图双引擎/背景/长背景/立牌）并发使用 2D-DMA 通道，通道悬挂后
+// 任何后续引擎创建/解码的 dma2d_connect 都会忙等。所有 jpeg_new_decoder_engine /
+// jpeg_decoder_process / jpeg_del_decoder_engine 调用点必须持锁。
+// 2026-10-06 加超时(默认 3s)：悬挂时持锁任务可能永不返回，portMAX_DELAY 等待
+// 会让后续所有解码调用(菜单 profile/封面/背景)连锁卡死。超时返回 false，
+// 调用方走失败路径，不再死等。
+bool ppa_jpg_lock(uint32_t timeout_ms = 3000);
+void ppa_jpg_unlock(void);
+
 // 初始化PPA和缓冲区
 bool ppa_init(void);
 

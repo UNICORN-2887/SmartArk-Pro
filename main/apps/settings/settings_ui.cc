@@ -175,7 +175,7 @@ void settings_ui_show(void) {
     // ── 关闭按钮 ──
     lv_obj_t *close_btn = lv_btn_create(s_overlay);
     lv_obj_set_size(close_btn, 60, 30);
-    lv_obj_set_pos(close_btn, 405, 7);
+    lv_obj_set_pos(close_btn, 315, 7);   /* 2026-10-04 405→315:右移出电量胶囊区(396,0,480,32),防遮挡点不到 */
     lv_obj_set_style_bg_color(close_btn, lv_color_hex(0x555555), 0);
     lv_obj_set_style_radius(close_btn, 6, 0);
     lv_obj_t *close_lbl = lv_label_create(close_btn);

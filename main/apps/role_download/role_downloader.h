@@ -71,6 +71,9 @@ int role_download_check_public(const char *rel, int64_t *total_out);
 int role_download_fetch_public(const char *rel,
                                bool (*step_cb)(int pct, const char *file, void *ud), void *ud);
 
+/* ── 公共 Ur_Info 下载(2026-10-06 蟑螂派对默认照片/动图):0 成功 -1 失败 ── */
+int role_download_fetch_public_profile(const char *fname, const char *dst);
+
 /* ── 一键克隆(公共库角色→绑定用户仓库;服务器复制目录+建 agent 行) ──
  * 返回:0=成功 1=网络/其它失败 2=配额不足 3=已克隆过(直接进下载) 4=云端无此角色 */
 int role_download_clone(const char *voc, const char *star, const char *name);

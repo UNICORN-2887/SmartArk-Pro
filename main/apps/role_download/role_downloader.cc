@@ -28,13 +28,14 @@
 #include <cJSON.h>
 
 #include <esp_lvgl_port.h>
+#include <wifi_station.h>
 #include "system_info.h"
 
 #define TAG "RoleDownload"
 
 #define MAX_ROLES 200
 #define MAX_HTTP_BUF 8192
-#define BUF_SIZE 4096
+#define BUF_SIZE 16384   /* 2026-10-06 下载加速:4K→16K(esp_http_client 内部缓冲) */
 
 struct RoleInfo {
     std::string name, vocation, star;
@@ -75,6 +76,10 @@ static std::string url_host() {
         s_url_host = CONFIG_RESOURCE_SERVER;   // 如 http://124.221.186.33
 #endif
     }
+    /* 2026-10-05 裸前缀 "http://" 视为未配置:拼接出的 "http:///api/…" 解析出
+       空 host → getaddrinfo("") → lwip assert 整机崩溃 */
+    if (s_url_host == "http://" || s_url_host == "https://")
+        s_url_host.clear();
     return s_url_host;
 }
 
@@ -161,6 +166,27 @@ static std::string http_get(const std::string &url, std::string &body, int timeo
     /* 返回空字符串 = 成功;否则返回错误描述。
      * 注意:读循环缓冲只用 1KB 栈(esp_http_client 内部 8KB 解析缓冲是堆分配),
      * 调用本函数的任务栈 ≥10KB 即安全。 */
+    /* 2026-10-05 网络未就绪不发请求:新设备 WiFi 未配置时,lwip 的 TCP/IP
+       mbox 尚未创建,getaddrinfo 直接 assert(Invalid mbox)整机崩溃。
+       旧设备开机自动连 WiFi 所以正常,新设备必崩——这是根因。 */
+    if (!WifiStation::GetInstance().IsConnected()) {
+        return "network not ready";
+    }
+    /* 2026-10-05 空/非法 URL 防御:新设备未激活时 OTA 服务器地址为空,
+       getaddrinfo("") 触发 lwip assert(Invalid mbox)整机崩溃。
+       校验到 host 段:裸前缀 "http:///…" 也拦截(host 为空同样崩) */
+    bool _ok = false;
+    size_t _scheme = url.find("://");
+    if (_scheme != std::string::npos) {
+        size_t _hs = _scheme + 3;
+        size_t _he = url.find_first_of("/?#", _hs);
+        std::string _host = url.substr(_hs, _he == std::string::npos
+                                                ? std::string::npos : _he - _hs);
+        _ok = !_host.empty();
+    }
+    if (url.empty() || url.size() < 8 || !_ok) {
+        return "empty url";
+    }
     esp_http_client_config_t cfg = {};
     cfg.url = url.c_str();
     cfg.timeout_ms = timeout_ms;
@@ -228,11 +254,17 @@ static std::string http_download_ex(const std::string &url, const std::string &d
     FILE *f = fopen(dst.c_str(), append ? "ab" : "wb");
     if (!f) { esp_http_client_cleanup(client); return "SD 写入失败(卡满/未挂载?)"; }
 
-    char buf[1024];   // 小缓冲:4KB 栈缓冲曾让 10KB 栈的下载任务贴近溢出极限
+    /* 2026-10-06 下载加速:原 1KB 栈缓冲逐片读+写,实测仅 0.11MB/s——
+       每次 read 仅 1KB(TCP 吞吐低)+ fwrite 1KB 落盘(SD 4KB 块写放大)。
+       改 32KB 堆缓冲(栈缓冲曾让 10KB 栈下载任务贴近溢出极限)+ stdio
+       32KB 全缓冲,批量落盘,预期提速 10 倍以上 */
+    char *buf = (char*)malloc(32768);
+    if (!buf) { fclose(f); esp_http_client_cleanup(client); return "内存不足"; }
+    setvbuf(f, NULL, _IOFBF, 32768);
     int64_t done = 0;
     int last_pct = -1;
     while (true) {
-        int r = esp_http_client_read(client, buf, sizeof(buf));
+        int r = esp_http_client_read(client, buf, 32768);
         if (r <= 0) break;
         fwrite(buf, 1, r, f);
         done += r;
@@ -242,6 +274,7 @@ static std::string http_download_ex(const std::string &url, const std::string &d
             if (pct != last_pct) {
                 last_pct = pct;
                 if (!step_cb(pct, nullptr, ud)) {
+                    free(buf);
                     fclose(f);
                     esp_http_client_cleanup(client);
                     return "cancelled";   // 保留 .part(断点续传数据)
@@ -249,6 +282,7 @@ static std::string http_download_ex(const std::string &url, const std::string &d
             }
         }
     }
+    free(buf);
     fclose(f);
     esp_http_client_cleanup(client);
     return "";
@@ -341,7 +375,10 @@ int64_t role_download_probe(const char *voc, const char *star, const char *name)
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
     if (err.rfind("HTTP 404", 0) == 0) return -2;   // 云端资源未就绪(区别于网络失败)
-    if (!err.empty() || s_files.empty()) return -1;
+    /* 2026-10-06 清单为空(云端无包)也按 -2:曾误报"检查失败,请确认网络"
+       (已验收角色 OSS 清单异常时 files 为空,网络其实通着) */
+    if (s_files.empty()) return -2;
+    if (!err.empty()) return -1;
     int64_t total = 0;
     for (const FileItem &f : s_files) total += f.size;
     ESP_LOGI(TAG, "probe OK: %d 个文件, 共 %d KB", (int)s_files.size(), (int)(total / 1024));
@@ -636,6 +673,12 @@ int role_download_check_public(const char *rel, int64_t *total_out) {
 
 int role_download_fetch_public(const char *rel,
                                bool (*step_cb)(int pct, const char *file, void *ud), void *ud) {
+    /* 2026-10-05 资源服务器未配置(CONFIG_RESOURCE_SERVER 空)时直接失败:
+       url 会是 "/api/..." 无 host,再往下走 http_get 曾触发 lwip assert 整机崩溃 */
+    if (url_host().empty()) {
+        ESP_LOGW(TAG, "fetch_public: 资源服务器地址为空,跳过");
+        return -1;
+    }
     s_public_mode = true;
     s_public_rel = rel;
     int r = role_download_fetch("", "", "", step_cb, ud);
@@ -801,6 +844,14 @@ int role_download_clone(const char *voc, const char *star, const char *name) {
 void role_download_remove_dir(const char *path) {
     if (!path || !path[0]) return;
     remove_dir_r(path);
+}
+
+int role_download_fetch_public_profile(const char *fname, const char *dst) {
+    /* 2026-10-06 公共 Ur_Info 下载(蟑螂派对默认照片/动图):单文件无断点 */
+    if (url_host().empty()) return -1;   // 网络未就绪防护(曾触发 lwip assert)
+    std::string url = url_host() + "/api/public/user_profile?f=" + fname;
+    std::string err = http_download_ex(url, dst, NULL, NULL, 0);
+    return err.empty() ? 0 : -1;
 }
 
 int role_download_clear_operator(void) {

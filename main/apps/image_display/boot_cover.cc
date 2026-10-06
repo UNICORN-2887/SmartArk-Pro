@@ -114,6 +114,8 @@ static void boot_cover_timer_cb(lv_timer_t *t) {
 static void boot_cover_create_cb(lv_timer_t *t) {
     /* 延迟 3 秒:等启动流程/显示链路完全就绪(启动早期创建 LVGL 对象实测会崩) */
     boot_cover_show();
+    extern void boot_music_play(void);   /* 2026-10-04 开机音乐:封面显示后播生命流 */
+    boot_music_play();
     if (s_boot_count > 1 && s_boot_img) {
         s_boot_timer = lv_timer_create(boot_cover_timer_cb, 3000, NULL);
     }

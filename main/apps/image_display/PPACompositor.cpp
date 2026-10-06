@@ -7,6 +7,7 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -43,6 +44,22 @@ static jpeg_decoder_handle_t s_jpg_handle = NULL;
 static uint32_t s_last_decoded_size = 0;
 static jpeg_decode_engine_cfg_t s_jpg_eng_cfg = { .timeout_ms = 40 };
 static int s_decode_cool_down = 0;  // 解码失败后的提交冷却帧数（防 DMA2D 悬挂累积）
+
+// 2026-10-04 2D-DMA 通道互斥：所有 jpeg 引擎创建/解码/删除必须持锁。
+// 多引擎并发（封面 + 缩略图 A/B + 背景 + 长背景 + 立牌）会让 2D-DMA 通道悬挂，
+// 后续 dma2d_connect 忙等复位 → IWDT 重启（第二台设备封面第 70 帧实测）。
+static SemaphoreHandle_t s_jpg_mtx = NULL;
+/* 2026-10-06 加超时:解码悬挂(DMA 通道竞争)时持锁任务可能永不返回,
+   portMAX_DELAY 等待让后续所有解码调用(菜单 profile/封面/背景)连锁卡死。
+   超时拿不到锁返回 false,调用方走失败路径,不再死等 */
+bool ppa_jpg_lock(uint32_t timeout_ms) {
+    if (!s_jpg_mtx) s_jpg_mtx = xSemaphoreCreateMutex();
+    if (!s_jpg_mtx) return false;
+    return xSemaphoreTake(s_jpg_mtx, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
+}
+void ppa_jpg_unlock(void) {
+    if (s_jpg_mtx) xSemaphoreGive(s_jpg_mtx);
+}
 static jpeg_decode_cfg_t s_jpg_cfg_rgb = {
     .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
     .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
@@ -94,8 +111,15 @@ bool ppa_load_background(const char *path) {
         return false;
     }
 
+    if (!ppa_jpg_lock()) {   // 2026-10-06 超时不等待(悬挂保护)
+        free(tx_buf); free(s_bg_buf); s_bg_buf = NULL;
+        ESP_LOGE(TAG, "bg decode lock timeout (PSRAM free %u KB)",
+                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+        return false;
+    }
     jpeg_decoder_handle_t tmp_handle = NULL;
     if (jpeg_new_decoder_engine(&s_jpg_eng_cfg, &tmp_handle) != ESP_OK) {
+        ppa_jpg_unlock();
         free(tx_buf); free(s_bg_buf); s_bg_buf = NULL;
         ESP_LOGE(TAG, "bg engine create failed (PSRAM free %u KB)",
                  (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
@@ -105,6 +129,7 @@ bool ppa_load_background(const char *path) {
     uint32_t decoded_size;
     esp_err_t ret = jpeg_decoder_process(tmp_handle, &s_jpg_cfg_rgb, tx_buf, tx_size, s_bg_buf, out_size, &decoded_size);
     jpeg_del_decoder_engine(tmp_handle);
+    ppa_jpg_unlock();
     free(tx_buf);
     if (ret != ESP_OK) {
         free(s_bg_buf); s_bg_buf = NULL;
@@ -519,10 +544,12 @@ void ppa_wait_pending_preload(void) {
 }
 
 void ppa_release_jpeg_engine(void) {
+    if (!ppa_jpg_lock()) return;   // 2026-10-06 拿不到锁(解码悬挂)不等待,跳过删除
     if (s_jpg_handle) {
         jpeg_del_decoder_engine(s_jpg_handle);
         s_jpg_handle = NULL;
     }
+    ppa_jpg_unlock();
 }
 
 void ppa_restore_jpeg_engine(void) {
@@ -559,9 +586,11 @@ uint8_t* ppa_decode_jpeg_to_rgb565(const char *path, int *out_w, int *out_h) {
     if (!rgb_buf) { free(tx_buf); return NULL; }
 
     // 复用 PPA JPEG 引擎（需空闲，调用者保证视频已停）
+    if (!ppa_jpg_lock()) { free(tx_buf); free(rgb_buf); return NULL; }   // 2026-10-06 超时不等待
     jpeg_decoder_handle_t handle = NULL;
     jpeg_decode_engine_cfg_t eng_cfg = { .timeout_ms = 1000 };
     if (jpeg_new_decoder_engine(&eng_cfg, &handle) != ESP_OK) {
+        ppa_jpg_unlock();
         free(tx_buf); free(rgb_buf); return NULL;
     }
     jpeg_decode_cfg_t cfg = {
@@ -571,6 +600,7 @@ uint8_t* ppa_decode_jpeg_to_rgb565(const char *path, int *out_w, int *out_h) {
     uint32_t decoded;
     esp_err_t ret = jpeg_decoder_process(handle, &cfg, tx_buf, tx_size, rgb_buf, out_size, &decoded);
     jpeg_del_decoder_engine(handle);
+    ppa_jpg_unlock();
     free(tx_buf);
 
     if (ret != ESP_OK) { free(rgb_buf); return NULL; }
@@ -869,6 +899,15 @@ uint8_t* ppa_composite_frame(int frame_index) {
         jpg_data = s_jpg_cache[frame_index];
     }
 
+    // 2026-10-04 解码前校验 JPEG：坏帧/截断帧进硬件会让 2D-DMA 通道悬挂，
+    // 下一帧 dma2d_connect 忙等复位 → IWDT 重启（第二台设备封面第 70 帧实测崩溃）。
+    jpeg_decode_picture_info_t jinfo;
+    if (jpeg_decoder_get_info(jpg_data, jpg_size, &jinfo) != ESP_OK) {
+        ESP_LOGW(TAG, "corrupt jpeg frame %d (%u bytes), cooldown 30", frame_index, (unsigned)jpg_size);
+        s_decode_cool_down = 30;
+        return NULL;
+    }
+
     jpeg_decode_memory_alloc_cfg_t tx_cfg = { .buffer_direction = JPEG_DEC_ALLOC_INPUT_BUFFER };
     size_t tx_size;
     // 输入缓冲一次分配后复用（每帧 alloc/free 会造成 PSRAM 碎片化，
@@ -889,6 +928,10 @@ uint8_t* ppa_composite_frame(int frame_index) {
     memcpy(tx_buf, jpg_data, jpg_size);
     if (need_free) free(jpg_data);
 
+    if (!ppa_jpg_lock()) {   // 2026-10-06 超时不等待(悬挂保护)
+        ESP_LOGE(TAG, "cover decode lock timeout");
+        return NULL;
+    }
     if (!s_jpg_handle) {
         jpeg_new_decoder_engine(&s_jpg_eng_cfg, &s_jpg_handle);
     }
@@ -900,6 +943,7 @@ uint8_t* ppa_composite_frame(int frame_index) {
                                           tx_buf, tx_size,
                                           fg, FRAME_SIZE_RGB565,
                                           &decoded_size);
+    ppa_jpg_unlock();
     // tx_buf 为复用缓冲，不释放
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "JPEG decode failed: %s", esp_err_to_name(ret));
@@ -1038,6 +1082,7 @@ void ppa_free_standee_slot(void) {
 
 uint8_t* ppa_composite_standee_frame(int frame_index) {
     if (!s_comp_buf) return NULL;
+    if (s_decode_cool_down > 0) { s_decode_cool_down--; return NULL; }   // 2026-10-04 与主路径同款冷却
     if (frame_index < 0 || frame_index >= s_standee_count || !s_standee_cache[frame_index]) return NULL;
 
     // 双槽交替：本帧写 idx 槽，canvas 仍显示上一帧的另一个槽（与主路径同机制）
@@ -1060,6 +1105,11 @@ uint8_t* ppa_composite_standee_frame(int frame_index) {
     memcpy(s_tx_buf, jpg_data, jpg_size);
 
     // Step 3: JPEG 解码直通到 comp 槽（480×800 竖帧，与竖屏 cover 同构 → 18fps 同款性能）
+    if (!ppa_jpg_lock()) {   // 2026-10-06 超时不等待(悬挂保护)
+        ESP_LOGE(TAG, "standee decode lock timeout");
+        s_decode_cool_down = 30;
+        return NULL;
+    }
     if (!s_jpg_handle) jpeg_new_decoder_engine(&s_jpg_eng_cfg, &s_jpg_handle);
     int64_t t_decode0 = esp_timer_get_time();
     uint32_t decoded_size = 0;
@@ -1067,8 +1117,9 @@ uint8_t* ppa_composite_standee_frame(int frame_index) {
                                          s_tx_buf, jpg_size,
                                          comp, STANDEE_SIZE_RGB565,
                                          &decoded_size);
+    ppa_jpg_unlock();
     int64_t t_decode1 = esp_timer_get_time();
-    if (ret != ESP_OK) { ESP_LOGE(TAG, "standee decode fail: %s", esp_err_to_name(ret)); return NULL; }
+    if (ret != ESP_OK) { ESP_LOGE(TAG, "standee decode fail: %s", esp_err_to_name(ret)); s_decode_cool_down = 30; return NULL; }
     if (decoded_size != STANDEE_SIZE_RGB565) {
         ESP_LOGW(TAG, "standee frame size %u != %u（期望 PC 端转好 90° 的 480x800 竖帧导出）",
                  (unsigned)decoded_size, (unsigned)STANDEE_SIZE_RGB565);
@@ -1160,9 +1211,14 @@ int ppa_long_bg_decode(const char *path, int slot) {
     free(jpg_data);
 
     // 独立引擎 timeout 1000ms（480×800 需 30-55ms，1422×800 约 3 倍量，40ms 必超时）
+    if (!ppa_jpg_lock()) {   // 2026-10-06 超时不等待(悬挂保护)
+        ESP_LOGE(TAG, "long bg decode lock timeout");
+        return -1;
+    }
     jpeg_decoder_handle_t handle = NULL;
     jpeg_decode_engine_cfg_t eng_cfg = { .timeout_ms = 1000 };
     if (jpeg_new_decoder_engine(&eng_cfg, &handle) != ESP_OK) {
+        ppa_jpg_unlock();
         ESP_LOGE(TAG, "long bg engine create fail");
         return -1;
     }
@@ -1171,6 +1227,7 @@ int ppa_long_bg_decode(const char *path, int slot) {
                                          s_long_bg[slot].buf,
                                          LONG_BG_MAX_W * LONG_BG_MAX_H * 2, &decoded);
     jpeg_del_decoder_engine(handle);
+    ppa_jpg_unlock();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "long bg decode fail: %s (%s)", esp_err_to_name(ret), path);
         return -1;
@@ -1210,7 +1267,11 @@ void ppa_deinit(void) {
     }
     s_cache_count = 0;
     s_use_alpha = false;
-    if (s_jpg_handle) { jpeg_del_decoder_engine(s_jpg_handle); s_jpg_handle = NULL; }
+    /* 2026-10-06 超时不等待(悬挂保护):拿不到锁跳过引擎删除,其余清理照常 */
+    if (ppa_jpg_lock()) {
+        if (s_jpg_handle) { jpeg_del_decoder_engine(s_jpg_handle); s_jpg_handle = NULL; }
+        ppa_jpg_unlock();
+    }
     if (s_ppa_client) { ppa_unregister_client(s_ppa_client); s_ppa_client = NULL; }
     if (s_bg_buf) { free(s_bg_buf); s_bg_buf = NULL; }
     if (s_fg_buf) { free(s_fg_buf); s_fg_buf = NULL; }

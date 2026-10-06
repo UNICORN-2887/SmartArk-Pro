@@ -441,17 +441,9 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_color(network_label_, lv_color_white(), 0);   /* 2026-09-26 状态栏黑底白字 */
     lv_obj_set_style_margin_left(network_label_, 5, 0); // 添加左边距，与前面的元素分隔
 
-    battery_label_ = lv_label_create(status_bar_);
-    lv_label_set_text(battery_label_, "");
-    lv_obj_set_style_text_font(battery_label_, fonts_.icon_font, 0);
-    lv_obj_set_style_text_color(battery_label_, lv_color_white(), 0);   /* 2026-09-26 状态栏黑底白字 */
-    lv_obj_set_style_margin_left(battery_label_, 5, 0); // 添加左边距，与前面的元素分隔
-
-    battery_percent_label_ = lv_label_create(status_bar_);   /* 2026-10-02 电量百分比 */
-    lv_label_set_text(battery_percent_label_, "");
-    lv_obj_set_style_text_font(battery_percent_label_, fonts_.text_font, 0);
-    lv_obj_set_style_text_color(battery_percent_label_, lv_color_white(), 0);
-    lv_obj_set_style_margin_left(battery_percent_label_, 3, 0);
+    /* 2026-10-06 用户拍板:状态栏电量图案/百分比移除(与右上角胶囊电量显示重叠),
+       初始化页只保留 ImageDisplay 的 lv_layer_sys 胶囊。battery_label_/
+       battery_percent_label_ 保持 nullptr,UpdateBatteryStatus 的 null 检查兜底 */
 
     low_battery_popup_ = lv_obj_create(screen);
     lv_obj_set_scrollbar_mode(low_battery_popup_, LV_SCROLLBAR_MODE_OFF);
@@ -844,10 +836,8 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_font(mute_label_, fonts_.icon_font, 0);
     lv_obj_set_style_text_color(mute_label_, lv_color_white(), 0);   /* 2026-09-26 状态栏黑底白字 */
 
-    battery_label_ = lv_label_create(status_bar_);
-    lv_label_set_text(battery_label_, "");
-    lv_obj_set_style_text_font(battery_label_, fonts_.icon_font, 0);
-    lv_obj_set_style_text_color(battery_label_, lv_color_white(), 0);   /* 2026-09-26 状态栏黑底白字 */
+    /* 2026-10-06 用户拍板:状态栏电量移除(与右上角胶囊重叠),只保留 ImageDisplay
+       的 lv_layer_sys 胶囊。battery_label_ 保持 nullptr,UpdateBatteryStatus 有 null 检查 */
 
     low_battery_popup_ = lv_obj_create(screen);
     lv_obj_set_scrollbar_mode(low_battery_popup_, LV_SCROLLBAR_MODE_OFF);
