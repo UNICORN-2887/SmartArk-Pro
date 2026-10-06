@@ -1,360 +1,3 @@
-(brain) PS E:\Passport\espp4\sparepart\JC4880P443C_I_W\1-Demo\idf_examples\ESP-IDF\xiaozhi-esp32sp1> idf.py -p COM12 flash monitor
-Executing action: flash
-Running ninja in directory E:\Passport\espp4\sparepart\JC4880P443C_I_W\1-Demo\idf_examples\ESP-IDF\xiaozhi-esp32sp1\build
-Executing "ninja flash"...
-[1/5] C:\WINDOWS\system32\cmd.exe /C "cd /D E:\Passport\espp4\...-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/build/xiaozhi.bin 
-xiaozhi.bin binary size 0x4bfe40 bytes. Smallest app partition is 0x500000 bytes. 0x401c0 bytes (5%) free.
-[1/1] C:\WINDOWS\system32\cmd.exe /C "cd /D E:\Passport\espp4\...ples/ESP-IDF/xiaozhi-esp32sp1/build/bootloader/bootloader.bin 
-Bootloader binary size 0x4400 bytes. 0x1c00 bytes (29%) free.
-[4/5] C:\WINDOWS\system32\cmd.exe /C "cd /D E:\Passport\esp32\...32/v5.5.1/esp-idf/components/esptool_py/run_serial_tool.cmake 
-esptool.py --chip esp32p4 -p COM12 -b 460800 --before=default_reset --after=hard_reset write_flash --flash_mode dio --flash_freq 80m --flash_size 16MB 0x2000 bootloader/bootloader.bin 0x300000 xiaozhi.bin 0x8000 partition_table/partition-table.bin 0xd000 ota_data_initial.bin 0x10000 srmodels/srmodels.bin
-esptool.py v4.12.0
-Serial port COM12
-Connecting...
-Chip is ESP32-P4 (revision v1.3)
-Features: High-Performance MCU
-Crystal is 40MHz
-USB mode: USB-Serial/JTAG
-MAC: 30:ed:a0:e2:ea:b0
-Uploading stub...
-Running stub...
-Stub running...
-Changing baud rate to 460800
-Changed.
-Configuring flash size...
-Flash will be erased from 0x00002000 to 0x00006fff...
-Flash will be erased from 0x00300000 to 0x007bffff...
-Flash will be erased from 0x00008000 to 0x00008fff...
-Flash will be erased from 0x0000d000 to 0x0000efff...
-Flash will be erased from 0x00010000 to 0x002e5fff...
-SHA digest in image updated
-Compressed 17408 bytes to 12002...
-Writing at 0x00002000... (100 %)
-Wrote 17408 bytes (12002 compressed) at 0x00002000 in 0.3 seconds (effective 439.3 kbit/s)...
-Hash of data verified.
-Compressed 4980288 bytes to 2674458...
-Writing at 0x00300000... (0 %)
-Writing at 0x0030a8c4... (1 %)
-Writing at 0x0031659f... (1 %)
-Writing at 0x003249d6... (2 %)
-Writing at 0x003329bd... (3 %)
-Writing at 0x003409fc... (3 %)
-Writing at 0x0034d738... (4 %)
-Writing at 0x0035cd1e... (4 %)
-Writing at 0x00368da5... (5 %)
-Writing at 0x0036ce27... (6 %)
-Writing at 0x00370e71... (6 %)
-Writing at 0x00374ed5... (7 %)
-Writing at 0x00378f21... (7 %)
-Writing at 0x0037cf4c... (8 %)
-Writing at 0x00380f48... (9 %)
-Writing at 0x003857cf... (9 %)
-Writing at 0x0038f54c... (10 %)
-Writing at 0x0039dd26... (10 %)
-Writing at 0x003a6b5d... (11 %)
-Writing at 0x003b73dd... (12 %)
-Writing at 0x003c451f... (12 %)
-Writing at 0x003cdf35... (13 %)
-Writing at 0x003d6d1c... (14 %)
-Writing at 0x003ddcad... (14 %)
-Writing at 0x003e486c... (15 %)
-Writing at 0x003eb826... (15 %)
-Writing at 0x003f2ba8... (16 %)
-Writing at 0x003f9057... (17 %)
-Writing at 0x003ffc70... (17 %)
-Writing at 0x004063c2... (18 %)
-Writing at 0x0040c9ab... (18 %)
-Writing at 0x00413754... (19 %)
-Writing at 0x0041a5ee... (20 %)
-Writing at 0x00420dec... (20 %)
-Writing at 0x00427079... (21 %)
-Writing at 0x0042d82a... (21 %)
-Writing at 0x004332c9... (22 %)
-Writing at 0x00439c30... (23 %)
-Writing at 0x0044062c... (23 %)
-Writing at 0x004462dd... (24 %)
-Writing at 0x0044c665... (25 %)
-Writing at 0x00452e09... (25 %)
-Writing at 0x00458c87... (26 %)
-Writing at 0x0045ea9c... (26 %)
-Writing at 0x0046485e... (27 %)
-Writing at 0x0046a819... (28 %)
-Writing at 0x004711b5... (28 %)
-Writing at 0x0047781f... (29 %)
-Writing at 0x0047d893... (29 %)
-Writing at 0x00483fce... (30 %)
-Writing at 0x00489cc8... (31 %)
-Writing at 0x0048fad6... (31 %)
-Writing at 0x00495f4a... (32 %)
-Writing at 0x0049bf75... (32 %)
-Writing at 0x004a3704... (33 %)
-Writing at 0x004a9f32... (34 %)
-Writing at 0x004b0263... (34 %)
-Writing at 0x004b61d5... (35 %)
-Writing at 0x004bc7e1... (35 %)
-Writing at 0x004c27fc... (36 %)
-Writing at 0x004c8425... (37 %)
-Writing at 0x004ce967... (37 %)
-Writing at 0x004d44e8... (38 %)
-Writing at 0x004da686... (39 %)
-Writing at 0x004e0632... (39 %)
-Writing at 0x004e65aa... (40 %)
-Writing at 0x004ec245... (40 %)
-Writing at 0x004f1d02... (41 %)
-Writing at 0x004f7571... (42 %)
-Writing at 0x005113fc... (42 %)
-Writing at 0x0053b18a... (43 %)
-Writing at 0x0053face... (43 %)
-Writing at 0x00546118... (44 %)
-Writing at 0x0054ce05... (45 %)
-Writing at 0x00551a56... (45 %)
-Writing at 0x00556901... (46 %)
-Writing at 0x0055bd63... (46 %)
-Writing at 0x00563c9d... (47 %)
-Writing at 0x0057508d... (48 %)
-Writing at 0x0057d7eb... (48 %)
-Writing at 0x00587ffe... (49 %)
-Writing at 0x00593301... (50 %)
-Writing at 0x0059e20d... (50 %)
-Writing at 0x005a3d93... (51 %)
-Writing at 0x005aae89... (51 %)
-Writing at 0x005b1470... (52 %)
-Writing at 0x005b7f05... (53 %)
-Writing at 0x005be86b... (53 %)
-Writing at 0x005c4c19... (54 %)
-Writing at 0x005cbae8... (54 %)
-Writing at 0x005d28cc... (55 %)
-Writing at 0x005d9114... (56 %)
-Writing at 0x005de8e0... (56 %)
-Writing at 0x005e427a... (57 %)
-Writing at 0x005ea6f9... (57 %)
-Writing at 0x005f0c5e... (58 %)
-Writing at 0x005f7556... (59 %)
-Writing at 0x005fdb28... (59 %)
-Writing at 0x006031ae... (60 %)
-Writing at 0x00608752... (60 %)
-Writing at 0x0060da63... (61 %)
-Writing at 0x00612d68... (62 %)
-Writing at 0x00618252... (62 %)
-Writing at 0x0061d302... (63 %)
-Writing at 0x00622636... (64 %)
-Writing at 0x006276a3... (64 %)
-Writing at 0x0062ca46... (65 %)
-Writing at 0x0063379b... (65 %)
-Writing at 0x006393d6... (66 %)
-Writing at 0x0063eda5... (67 %)
-Writing at 0x00644576... (67 %)
-Writing at 0x0064b6e4... (68 %)
-Writing at 0x006519a0... (68 %)
-Writing at 0x0065989d... (69 %)
-Writing at 0x0065eeaa... (70 %)
-Writing at 0x00688ecc... (70 %)
-Writing at 0x0068ec08... (71 %)
-Writing at 0x00695171... (71 %)
-Writing at 0x0069b274... (72 %)
-Writing at 0x006a08d9... (73 %)
-Writing at 0x006a5c42... (73 %)
-Writing at 0x006ab69a... (74 %)
-Writing at 0x006b17b2... (75 %)
-Writing at 0x006b6f99... (75 %)
-Writing at 0x006bdc5a... (76 %)
-Writing at 0x006c340e... (76 %)
-Writing at 0x006c8850... (77 %)
-Writing at 0x006cf3db... (78 %)
-Writing at 0x006d9a49... (78 %)
-Writing at 0x006e14c5... (79 %)
-Writing at 0x006e8ede... (79 %)
-Writing at 0x006efa5c... (80 %)
-Writing at 0x006f66f4... (81 %)
-Writing at 0x006fc730... (81 %)
-Writing at 0x007024bc... (82 %)
-Writing at 0x00708794... (82 %)
-Writing at 0x0070e468... (83 %)
-Writing at 0x0071460e... (84 %)
-Writing at 0x0071b274... (84 %)
-Writing at 0x00721f8c... (85 %)
-Writing at 0x00728924... (85 %)
-Writing at 0x0072f30a... (86 %)
-Writing at 0x00734f3f... (87 %)
-Writing at 0x0073aae5... (87 %)
-Writing at 0x00740713... (88 %)
-Writing at 0x00746396... (89 %)
-Writing at 0x0074bedc... (89 %)
-Writing at 0x00751bd2... (90 %)
-Writing at 0x0075837f... (90 %)
-Writing at 0x0075fc80... (91 %)
-Writing at 0x007670b6... (92 %)
-Writing at 0x0076e608... (92 %)
-Writing at 0x00775e2b... (93 %)
-Writing at 0x0077cc6a... (93 %)
-Writing at 0x007840dc... (94 %)
-Writing at 0x0078a3a0... (95 %)
-Writing at 0x007903ef... (95 %)
-Writing at 0x00795dc8... (96 %)
-Writing at 0x0079c2fd... (96 %)
-Writing at 0x007a2d97... (97 %)
-Writing at 0x007a8e83... (98 %)
-Writing at 0x007af37b... (98 %)
-Writing at 0x007b5992... (99 %)
-Writing at 0x007bce43... (100 %)
-Wrote 4980288 bytes (2674458 compressed) at 0x00300000 in 39.9 seconds (effective 999.3 kbit/s)...
-Hash of data verified.
-Compressed 3072 bytes to 154...
-Writing at 0x00008000... (100 %)
-Wrote 3072 bytes (154 compressed) at 0x00008000 in 0.1 seconds (effective 478.3 kbit/s)...
-Hash of data verified.
-Compressed 8192 bytes to 31...
-Writing at 0x0000d000... (100 %)
-Wrote 8192 bytes (31 compressed) at 0x0000d000 in 0.1 seconds (effective 1044.0 kbit/s)...
-Hash of data verified.
-Compressed 2972412 bytes to 2354976...
-Writing at 0x00010000... (0 %)
-Writing at 0x00016378... (1 %)
-Writing at 0x0001a8c0... (2 %)
-Writing at 0x0001ecbd... (2 %)
-Writing at 0x000230aa... (3 %)
-Writing at 0x00028b14... (4 %)
-Writing at 0x0002d9e7... (4 %)
-Writing at 0x00032c2d... (5 %)
-Writing at 0x00037b3e... (6 %)
-Writing at 0x0003c942... (6 %)
-Writing at 0x00041916... (7 %)
-Writing at 0x000464c6... (8 %)
-Writing at 0x0004b161... (9 %)
-Writing at 0x000502ce... (9 %)
-Writing at 0x0005506a... (10 %)
-Writing at 0x00059b4f... (11 %)
-Writing at 0x0005e98b... (11 %)
-Writing at 0x00064263... (12 %)
-Writing at 0x00069ba2... (13 %)
-Writing at 0x0006efe8... (13 %)
-Writing at 0x00073f07... (14 %)
-Writing at 0x000788ad... (15 %)
-Writing at 0x0007d321... (15 %)
-Writing at 0x00082200... (16 %)
-Writing at 0x00086e37... (17 %)
-Writing at 0x0008b9d8... (18 %)
-Writing at 0x00090317... (18 %)
-Writing at 0x00094a62... (19 %)
-Writing at 0x00099206... (20 %)
-Writing at 0x0009e1c9... (20 %)
-Writing at 0x000a42e6... (21 %)
-Writing at 0x000a8bac... (22 %)
-Writing at 0x000ad58e... (22 %)
-Writing at 0x000b231f... (23 %)
-Writing at 0x000b705e... (24 %)
-Writing at 0x000bbee6... (25 %)
-Writing at 0x000c0e94... (25 %)
-Writing at 0x000c5c9a... (26 %)
-Writing at 0x000cabe0... (27 %)
-Writing at 0x000cfdec... (27 %)
-Writing at 0x000d4745... (28 %)
-Writing at 0x000d8f80... (29 %)
-Writing at 0x000dd755... (29 %)
-Writing at 0x000e1ff0... (30 %)
-Writing at 0x000e78ff... (31 %)
-Writing at 0x000ec857... (31 %)
-Writing at 0x000f15be... (32 %)
-Writing at 0x000f6427... (33 %)
-Writing at 0x000faf86... (34 %)
-Writing at 0x000ffd96... (34 %)
-Writing at 0x001042a2... (35 %)
-Writing at 0x00108807... (36 %)
-Writing at 0x0010d1c8... (36 %)
-Writing at 0x00111ab4... (37 %)
-Writing at 0x0011645a... (38 %)
-Writing at 0x0011b99c... (38 %)
-Writing at 0x001214c4... (39 %)
-Writing at 0x00126f8a... (40 %)
-Writing at 0x0012cb1b... (40 %)
-Writing at 0x0013265f... (41 %)
-Writing at 0x001380e3... (42 %)
-Writing at 0x0013dbac... (43 %)
-Writing at 0x00142907... (43 %)
-Writing at 0x001474a8... (44 %)
-Writing at 0x0014c696... (45 %)
-Writing at 0x00151113... (45 %)
-Writing at 0x00155942... (46 %)
-Writing at 0x00159efa... (47 %)
-Writing at 0x0015e70d... (47 %)
-Writing at 0x001635b3... (48 %)
-Writing at 0x00167fdb... (49 %)
-Writing at 0x0016d221... (50 %)
-Writing at 0x001718de... (50 %)
-Writing at 0x00176057... (51 %)
-Writing at 0x0017aaa6... (52 %)
-Writing at 0x0017fe21... (52 %)
-Writing at 0x00184bef... (53 %)
-Writing at 0x00189b2d... (54 %)
-Writing at 0x0018e408... (54 %)
-Writing at 0x00192b92... (55 %)
-Writing at 0x00197066... (56 %)
-Writing at 0x0019b461... (56 %)
-Writing at 0x001a06e3... (57 %)
-Writing at 0x001a5762... (58 %)
-Writing at 0x001aa4fa... (59 %)
-Writing at 0x001af344... (59 %)
-Writing at 0x001b437a... (60 %)
-Writing at 0x001bdfb1... (61 %)
-Writing at 0x001c85c5... (61 %)
-Writing at 0x001d31b6... (62 %)
-Writing at 0x001da823... (63 %)
-Writing at 0x001df6d7... (63 %)
-Writing at 0x001e45c2... (64 %)
-Writing at 0x001e90c1... (65 %)
-Writing at 0x001ed99f... (65 %)
-Writing at 0x001f22a3... (66 %)
-Writing at 0x001f6f53... (67 %)
-Writing at 0x001fbbf9... (68 %)
-Writing at 0x002008ee... (68 %)
-Writing at 0x0020574f... (69 %)
-Writing at 0x0020a55a... (70 %)
-Writing at 0x0020f4d5... (70 %)
-Writing at 0x002143c8... (71 %)
-Writing at 0x0021912f... (72 %)
-Writing at 0x0021df61... (72 %)
-Writing at 0x00222e9f... (73 %)
-Writing at 0x00227d55... (74 %)
-Writing at 0x0022c8d7... (75 %)
-Writing at 0x002315f7... (75 %)
-Writing at 0x00236851... (76 %)
-Writing at 0x0023b9f2... (77 %)
-Writing at 0x0024086b... (77 %)
-Writing at 0x00245b34... (78 %)
-Writing at 0x0024aa73... (79 %)
-Writing at 0x0024f22b... (79 %)
-Writing at 0x00253abd... (80 %)
-Writing at 0x00258b65... (81 %)
-Writing at 0x0025deb3... (81 %)
-Writing at 0x00262d9c... (82 %)
-Writing at 0x00267a4f... (83 %)
-Writing at 0x0026c65c... (84 %)
-Writing at 0x00271389... (84 %)
-Writing at 0x00276061... (85 %)
-Writing at 0x0027a6dd... (86 %)
-Writing at 0x0027ee24... (86 %)
-Writing at 0x00283cc1... (87 %)
-Writing at 0x00288c41... (88 %)
-Writing at 0x0028df2d... (88 %)
-Writing at 0x00292f47... (89 %)
-Writing at 0x00298515... (90 %)
-Writing at 0x0029fa62... (90 %)
-Writing at 0x002a49cb... (91 %)
-Writing at 0x002aa2d6... (92 %)
-Writing at 0x002aebd2... (93 %)
-Writing at 0x002b3242... (93 %)
-Writing at 0x002b7f82... (94 %)
-Writing at 0x002bd4be... (95 %)
-Writing at 0x002c2ac3... (95 %)
-Writing at 0x002c8565... (96 %)
-Writing at 0x002cdff9... (97 %)
-Writing at 0x002d2f2d... (97 %)
-Writing at 0x002d7823... (98 %)
-Writing at 0x002dc5a1... (99 %)
-Writing at 0x002e2195... (100 %)
-Wrote 2972412 bytes (2354976 compressed) at 0x00010000 in 24.9 seconds (effective 955.0 kbit/s)...
-Hash of data verified.
-
 Leaving...
 Hard resetting via RTS pin...
 Executing action: monitor
@@ -403,7 +46,7 @@ I (276) app_init: Application information:
 I (276) app_init: Project name:     xiaozhi
 I (279) app_init: App version:      1.8.55
 I (283) app_init: Compile time:     Oct  6 2026 14:50:57
-I (288) app_init: ELF file SHA256:  b8b86c1db...
+I (288) app_init: ELF file SHA256:  fa97daee4...
 I (293) app_init: ESP-IDF:          v5.5.1-dirty
 I (297) efuse_init: Min chip rev:     v0.1
 I (301) efuse_init: Max chip rev:     v1.99
@@ -412,7 +55,7 @@ I (309) heap_init: Initializing. RAM available for dynamic allocation:
 I (315) heap_init: At 4FF2A680 len 00010940 (66 KiB): RAM
 I (320) heap_init: At 4FF3AFC0 len 00004BF0 (18 KiB): RAM
 I (325) heap_init: At 4FF46B30 len 000594D0 (357 KiB): RAM
-I (331) heap_init: At 501080AC len 00007F54 (31 KiB): RTCRAM
+I (330) heap_init: At 501080AC len 00007F54 (31 KiB): RTCRAM
 I (336) heap_init: At 30100068 len 00001F98 (7 KiB): TCM
 I (341) esp_psram: Adding pool of 32768K of PSRAM memory to heap allocator
 W (348) spi_flash: Detected boya flash chip but using generic driver. For optimal functionality, enable `SPI_FLASH_SUPPORT_BOYA_CHIP` in menuconfig
@@ -458,7 +101,7 @@ Size: luMB
 CSD: ver=2, sector_size=512, capacity=15333376 read_bl_len=9
 SSR: bus_width=4
 I (1026) SD_TEST: Early preload: Kaltsit cover...
-E (1032) PPACompositor: Cannot open /sdcard/Arknights/main/operator/MEDIC/6STAR/Kaltsit/cover/kaltsit_cover.mjpeg
+E (1033) PPACompositor: Cannot open /sdcard/Arknights/main/operator/MEDIC/6STAR/Kaltsit/cover/kaltsit_cover.mjpeg
 I (1040) SD_TEST: Early preload done: 0 frames
 I (1044) SD_TEST: Preloading MOC3 model: /sdcard/Arknights/main/operator/CASTER/5STAR/Amiya/LIVE2D/Amiya.moc3
 I (1058) SD_TEST: Loading Amiya...
@@ -466,7 +109,7 @@ E (1062) LV2: no /sdcard/Arknights/main/operator/CASTER/5STAR/Amiya/LIVE2D/model
 W (1065) SD_TEST: Amiya load skipped
 I (1069) SD_TEST: 基底目录: /sdcard/Arknights
 I (1073) SD_TEST: 基底目录: /sdcard/Arknights/main
-I (1078) SD_TEST: 基底目录: /sdcard/Arknights/main/operator
+I (1079) SD_TEST: 基底目录: /sdcard/Arknights/main/operator
 I (1085) SD_TEST: 基底目录: /sdcard/Arknights/main/operator/INDEX
 I (1090) SD_TEST: 基底目录: /sdcard/Arknights/main/background
 I (1096) SD_TEST: 基底目录: /sdcard/Arknights/main/music
@@ -485,7 +128,7 @@ I (1183) AudioCodec: Set output enable to true
 I (1183) AudioCodec: Audio codec started
 I (1185) TTS: Initializing ESP-TTS from flash partition...
 I (1188) TTS: Voice partition: offset=0xd00000 size=0x300000
-I (1193) TTS: Voice data mmap'd at 0x404b0000
+I (1194) TTS: Voice data mmap'd at 0x404b0000
 init voice set:template
 ESP Chinese TTS v1.7 (Aug  5 2024 11:59:11, 1)
 I (1204) TTS: ESP-TTS ready (partition-based)
@@ -493,7 +136,7 @@ I (1208) AppImageDisplay: FWV=20261007-0010 (batt-screen-layer-fix + dlspeed-pct
 I (1218) AppImageDisplay: Initializing image display...
 I (1271) PPACompositor: PPA BLEND client registered
 I (1298) AppImageDisplay: Image display initialized (empty canvas)
-I (1301) BootCover: Boot cover: 3 张,起点 2,3s 后显示
+I (1301) BootCover: Boot cover: 3 张,起点 0,3s 后显示
 I (1304) BootCeremony: loading shown
 I (1919) eh_host_port_reset: reset done pin=54 parked=1
 I (1953) eh_host_port_sdio: Function 0 Blocksize: 512
@@ -506,7 +149,7 @@ I (2111) eh_init_evt: slave chip id: 0x0d (esp32c6)
 I (2111) eh_init_evt: capabilities: 0x0d
 I (2111) eh_init_evt: Features supported are:
 I (2112) eh_init_evt:    * WLAN over SDIO
-I (2116) eh_init_evt:      - HCI over SDIO
+I (2115) eh_init_evt:      - HCI over SDIO
 I (2119) eh_init_evt:      - BLE only
 I (2123) eh_raw_tp: raw TP inactive
 I (2126) eh_init_evt: Default RPC to V2
@@ -515,107 +158,139 @@ E (2136) eh_init_evt: major version mismatch — OTA coprocessor from host
 I (2143) eh_init_evt: CP without SDIO SW_AGGR; compatible streaming mode enabled
 I (2150) eh_init_evt: Missing SDIO_MODE TLV; Continue anyway.
 I (2155) eh_init_evt: chip=0x0d (esp32c6) fw=0x00020302 caps=0x0d ext=0x00000000
-I (2163) eh_auto_init: auto_init: found 1 descriptor(s)
+I (2162) eh_auto_init: auto_init: found 1 descriptor(s)
 I (2167) eh_auto_init: auto_init: initialising 'wifi' (priority 150)
 I (2173) eh_wifi_itwt: wifi iTWT ext init
 I (2469) eh_wifi: rx RPC WifiEventNoArgs id=2
 I (2473) eh_wifi: rx RPC WifiEventNoArgs id=43
 I (2502) eh_wifi: rx RPC WifiEventNoArgs id=2
-I (4878) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot3.bin
-I (4883) AppImageDisplay: boot music: Rhodes_Island wav 不存在,跳过
-I (4902) wifi: Found AP: CMCC-QK9E, BSSID: e0:d4:62:36:b2:b4, RSSI: -81, Channel: 6, Authmode: 4
-I (4903) eh_wifi: set_config iface=STA ssid="CMCC-QK9E" (9 bytes)
-I (7517) eh_wifi: rx RPC WifiEventNoArgs id=43
-I (8480) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot1.bin
-I (9080) eh_wifi: rx RPC StaDisconnected ssid="CMCC-QK9E" reason=8 rssi=-74
-I (9099) wifi: Reconnecting CMCC-QK9E (attempt 1 / 5)
-I (9298) BootCover: boot cover sync: 检查公共库 cover 目录(第 1 次)
-W (9298) RoleDownload: manifest 获取失败(第1次): network not ready
+I (4880) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot1.bin
+I (4885) AppImageDisplay: boot music: Rhodes_Island wav 不存在,跳过
+I (4903) wifi: Found AP: CMCC-QK9E, BSSID: e0:d4:62:36:b2:b4, RSSI: -82, Channel: 6, Authmode: 4
+I (4904) eh_wifi: set_config iface=STA ssid="CMCC-QK9E" (9 bytes)
+I (7373) eh_wifi: rx RPC StaDisconnected ssid="CMCC-QK9E" reason=201 rssi=-128
+I (7393) wifi: Reconnecting CMCC-QK9E (attempt 1 / 5)
+I (8476) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot2.bin
+I (9299) BootCover: boot cover sync: 检查公共库 cover 目录(第 1 次)
+W (9299) RoleDownload: manifest 获取失败(第1次): network not ready
+I (9799) eh_wifi: rx RPC StaDisconnected ssid="CMCC-QK9E" reason=201 rssi=-128
+I (9811) wifi: Reconnecting CMCC-QK9E (attempt 2 / 5)
 I (10496) BootCeremony: wake button ready
 W (11298) RoleDownload: thumbs 获取失败: network not ready
 W (11298) AppImageDisplay: thumbs sync: 云端清单获取失败
-W (11300) RoleDownload: manifest 获取失败(第2次): network not ready
-I (11482) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot2.bin
-I (11519) SystemInfo: free sram: 300099 minimal sram: 274531
-I (13024) esp_wifi_remote: esp_wifi_internal_reg_rxcb: sta: 0x40191754
---- 0x40191754: wifi_sta_receive at E:/Passport/esp32/v5.5.1/esp-idf/components/esp_wifi/src/wifi_netif.c:39
-W (13304) RoleDownload: manifest 获取失败(第3次): network not ready
-I (13324) BootCeremony: ceremony hidden
-I (13324) BootCover: Boot cover stopped and hidden
+W (11301) RoleDownload: manifest 获取失败(第2次): network not ready
+I (11477) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot3.bin
+I (11514) SystemInfo: free sram: 300059 minimal sram: 274507
+I (12369) eh_wifi: rx RPC WifiEventNoArgs id=43
+I (12593) esp_wifi_remote: esp_wifi_internal_reg_rxcb: sta: 0x401917f4
+--- 0x401917f4: wifi_sta_receive at E:/Passport/esp32/v5.5.1/esp-idf/components/esp_wifi/src/wifi_netif.c:39
+W (13305) RoleDownload: manifest 获取失败(第3次): network not ready
+I (14479) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot1.bin
+I (16161) wifi: Got IP: 192.168.1.109
+I (16161) esp_netif_handlers: sta ip: 192.168.1.109, mask: 255.255.255.0, gw: 192.168.1.1
 I (16184) AudioCodec: Set input enable to false
-I (16311) wifi: manual config mode, skip autoconnect
-I (16311) WifiStation: SCAN_DONE status=0 number=5 scan_id=129
-I (16313) WifiStation: get_ap_num ok n=5 (round 0)
-I (16323) WifiStation: ScanOnce got 5 APs (passive=0, round=0)
-I (16882) wifi: Got IP: 192.168.1.109
-I (16882) esp_netif_handlers: sta ip: 192.168.1.109, mask: 255.255.255.0, gw: 192.168.1.1
+I (17479) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot2.bin
 I (18184) AudioCodec: Set output enable to false
-I (19520) SsidManager: compare [royal7:6] [CMCC-QK9E:9]
-I (19520) SsidManager: compare [CMCC-QK9E:9] [CMCC-QK9E:9]
-W (19520) SsidManager: SSID CMCC-QK9E already exists, overwrite it
-I (19550) eh_wifi: rx RPC StaDisconnected ssid="CMCC-QK9E" reason=8 rssi=-75
-I (19571) wifi: Reconnecting CMCC-QK9E (attempt 1 / 5)
-I (19847) eh_wifi: set_config iface=STA ssid="CMCC-QK9E" (9 bytes)
-I (21216) SystemInfo: free sram: 290611 minimal sram: 274531
-I (22165) esp_wifi_remote: esp_wifi_internal_reg_rxcb: sta: 0x40191754
---- 0x40191754: wifi_sta_receive at E:/Passport/esp32/v5.5.1/esp-idf/components/esp_wifi/src/wifi_netif.c:39
-I (26221) wifi: Got IP: 192.168.1.109
-I (26221) esp_netif_handlers: sta ip: 192.168.1.109, mask: 255.255.255.0, gw: 192.168.1.1
-I (26241) AppImageDisplay: PPD交互按钮已创建 (ptr=0x4ff7072c)
-I (26246) AppImageDisplay: Chat overlay initialized (hidden)
-W (26247) AppImageDisplay: Indev touch listener attach FAILED (no active indev) → 2s 后重试
-I (26350) PPACompositor: Expendable caches released (active frames kept)
-I (26722) AppImageDisplay: Index: 427 agents scanned (156282 PSRAM bytes)
-I (26725) AppImageDisplay: Index: 427 agents, 1 pages
-I (26738) AppImageDisplay: Page 0: 0 cards shown
-I (26738) AppImageDisplay: Prefetch gen=1 done: 0 loaded (page 0, PSRAM free 25763 KB)
-I (26780) Application: STATE: activating
-I (26781) Ota: Current version: 1.8.55
-I (26805) Ota: OTA Request Body: {"application":{"version":"1.8.55","elf_sha256":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"},"board":{"type":"guition-jc4880p443","name":"guition-jc4880p443","ssid":"royal7","rssi":0},"mac_address":"9c:13:9e:dc:1e:f4","uuid":"4cc5ba94-4a7d-4f45-81bd-e84784314f7b","chip_model_name":"esp32p4","flash_size":16777216,"psram_size":0,"version":0,"chip_info":{"model":0,"cores":0,"revision":0,"features":0},"partition_table":[{"label":"","type":0,"subtype":0,"address":0,"size":0}]}
-I (27832) Ota: OTA Response: {"server_time":{"timestamp":1791299979183,"timezone_offset":480},"firmware":{"version":"1.8.47","url":"http://124.221.186.33:88/xiaozhi/ota/firmware"},"websocket":{"url":"ws://124.221.186.33:89/xiaozhi/v1/"}}
-I (27842) Ota: Websocket url: ws://124.221.186.33:89/xiaozhi/v1/
-I (27847) Ota: Got websocket configuration
-I (27851) Ota: Time synchronized: 369
-I (27854) Ota: Firmware version in response: 1.8.47
-I (27859) Ota: Firmware URL: http://124.221.186.33:88/xiaozhi/ota/firmware
-I (27866) Ota: Current is the latest version
-I (27870) Ota: Running partition: ota_0
-I (27879) AudioCodec: Set output enable to true
-E (27879) i2s_common: i2s_channel_disable(1218): the channel has not been enabled yet
-E (27885) i2s_common: i2s_channel_disable(1218): the channel has not been enabled yet
-W (27893) i2s_common: dma frame num is adjusted to 256 to align the dma buffer with 64, bufsize = 512
-I (27902) I2S_IF: STD: TX, data_bit: 16, slot_bit: 16, ws_width: 16, slot_mode: MONO, slot_mask: 0x1
-I (27910) I2S_IF: STD: TX, sample_rate_hz: 16000, mclk_multiple: 256, clk_src: 16
-W (27918) i2s_common: dma frame num is adjusted to 256 to align the dma buffer with 64, bufsize = 512
-I (27927) I2S_IF: STD: RX, data_bit: 16, slot_bit: 16, ws_width: 16, slot_mode: MONO, slot_mask: 0x1
-I (27935) I2S_IF: STD: RX, sample_rate_hz: 16000, mclk_multiple: 256, clk_src: 16
-I (27958) Adev_Codec: Open codec device OK
-I (27960) AudioForwarder: Announce task started
-I (27960) AudioForwarder: Started (announce port 50000)
-I (27960) AudioForwarder: Send task started
-W (28250) AppImageDisplay: Indev touch listener retry FAILED
-I (29000) AppImageDisplay: Prof filter: 5
-I (29373) AppImageDisplay: Index: 427 agents scanned (156282 PSRAM bytes)
-I (29374) AppImageDisplay: Filter: prof=5 rarity=0 → 60 agents, 5 pages
-I (30688) AppImageDisplay: Page 0: 12 cards shown
-I (30748) jc4880p443: batt: raw=1748 mv=1724 pct=-263 trend_chg=0
-I (30750) Application: Wake words from server: 23 commands, 8 agents
-I (30770) MCP: Add tool: self.get_device_status
-I (30771) MCP: Add tool: self.audio_speaker.set_volume
-I (30771) MCP: Add tool: self.voiceprint.set_enabled
-I (30773) MCP: Add tool: self.screen.set_brightness
-I (30778) MCP: Add tool: self.screen.set_theme
-I (30782) MCP: Add tool: self.camera.take_photo
-I (30787) MCP: Add tool: agent.start_task
-I (30790) MCP: Add tool: agent.get_progress
-I (30794) MCP: Add tool: agent.stop_task
-I (30798) Application: STATE: idle
-I (30802) MODEL_LOADER: The storage free size is 57664 KB
-I (30806) MODEL_LOADER: The partition size is 3008 KB
-I (30811) MODEL_LOADER: Successfully load srmodels
-I (30815) CustomWakeWord: multinet:mn7_cn_ac
+I (20476) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot3.bin
+I (21216) SystemInfo: free sram: 299163 minimal sram: 274507
+I (23478) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot1.bin
+I (26478) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot2.bin
+I (29477) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot3.bin
+I (31216) jc4880p443: batt: raw=1746 mv=1722 pct=-264 trend_chg=0
+I (31217) SystemInfo: free sram: 299163 minimal sram: 274507
+I (32477) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot1.bin
+I (35305) BootCover: boot cover sync: 检查公共库 cover 目录(第 2 次)
+I (35480) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot2.bin
+I (36435) RoleDownload: Download complete:  (0 下载 / 3 跳过)
+I (38545) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot3.bin
+I (41547) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot1.bin
+I (41592) SystemInfo: free sram: 303287 minimal sram: 274507
+I (45036) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot2.bin
+I (47544) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot3.bin
+I (50479) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot1.bin
+I (51217) SystemInfo: free sram: 303287 minimal sram: 274507
+I (52530) BootCeremony: ceremony hidden
+I (52530) BootCover: Boot cover stopped and hidden
+I (55370) WifiStation: SCAN_DONE status=0 number=5 scan_id=129
+I (55372) WifiStation: get_ap_num ok n=5 (round 0)
+I (55383) WifiStation: ScanOnce got 5 APs (passive=0, round=0)
+I (56900) SsidManager: compare [royal7:6] [CMCC-QK9E:9]
+I (56901) SsidManager: compare [CMCC-QK9E:9] [CMCC-QK9E:9]
+W (56901) SsidManager: SSID CMCC-QK9E already exists, overwrite it
+I (56931) eh_wifi: rx RPC StaDisconnected ssid="CMCC-QK9E" reason=8 rssi=-77
+I (56952) wifi: Reconnecting CMCC-QK9E (attempt 1 / 5)
+I (57229) eh_wifi: set_config iface=STA ssid="CMCC-QK9E" (9 bytes)
+I (60370) eh_wifi: rx RPC StaDisconnected ssid="CMCC-QK9E" reason=2 rssi=-78
+I (60390) wifi: Reconnecting CMCC-QK9E (attempt 1 / 5)
+I (61216) SystemInfo: free sram: 294659 minimal sram: 274507
+I (61608) jc4880p443: batt: raw=1746 mv=1722 pct=-264 trend_chg=0
+I (62796) eh_wifi: rx RPC StaDisconnected ssid="CMCC-QK9E" reason=205 rssi=-128
+I (62809) wifi: Reconnecting CMCC-QK9E (attempt 2 / 5)
+I (66226) eh_wifi: rx RPC StaDisconnected ssid="CMCC-QK9E" reason=2 rssi=-78
+I (66246) wifi: Reconnecting CMCC-QK9E (attempt 3 / 5)
+I (68652) eh_wifi: rx RPC StaDisconnected ssid="CMCC-QK9E" reason=205 rssi=-128
+I (68665) wifi: Reconnecting CMCC-QK9E (attempt 4 / 5)
+I (71071) eh_wifi: rx RPC StaDisconnected ssid="CMCC-QK9E" reason=201 rssi=-128
+I (71084) wifi: Reconnecting CMCC-QK9E (attempt 5 / 5)
+I (71216) SystemInfo: free sram: 294659 minimal sram: 274507
+I (73679) esp_wifi_remote: esp_wifi_internal_reg_rxcb: sta: 0x401917f4
+--- 0x401917f4: wifi_sta_receive at E:/Passport/esp32/v5.5.1/esp-idf/components/esp_wifi/src/wifi_netif.c:39
+I (76843) wifi: Got IP: 192.168.1.109
+I (76843) esp_netif_handlers: sta ip: 192.168.1.109, mask: 255.255.255.0, gw: 192.168.1.1
+I (76863) AppImageDisplay: PPD交互按钮已创建 (ptr=0x4ff6c734)
+I (76868) AppImageDisplay: Chat overlay initialized (hidden)
+W (76868) AppImageDisplay: Indev touch listener attach FAILED (no active indev) → 2s 后重试
+I (76972) PPACompositor: Expendable caches released (active frames kept)
+I (77347) AppImageDisplay: Index: 427 agents scanned (156282 PSRAM bytes)
+I (77350) AppImageDisplay: Index: 427 agents, 1 pages
+I (77363) AppImageDisplay: Page 0: 0 cards shown
+I (77364) AppImageDisplay: Prefetch gen=1 done: 0 loaded (page 0, PSRAM free 25763 KB)
+I (77406) Application: STATE: activating
+I (77407) Ota: Current version: 1.8.55
+I (77431) Ota: OTA Request Body: {"application":{"version":"1.8.55","elf_sha256":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"},"board":{"type":"guition-jc4880p443","name":"guition-jc4880p443","ssid":"royal7","rssi":0},"mac_address":"9c:13:9e:dc:1e:f4","uuid":"4cc5ba94-4a7d-4f45-81bd-e84784314f7b","chip_model_name":"esp32p4","flash_size":16777216,"psram_size":0,"version":0,"chip_info":{"model":0,"cores":0,"revision":0,"features":0},"partition_table":[{"label":"","type":0,"subtype":0,"address":0,"size":0}]}
+W (78872) AppImageDisplay: Indev touch listener retry FAILED
+I (81796) AppImageDisplay: Prof filter: 5
+I (82163) AppImageDisplay: Index: 427 agents scanned (156282 PSRAM bytes)
+I (82164) AppImageDisplay: Filter: prof=5 rarity=0 → 60 agents, 5 pages
+I (82335) Ota: OTA Response: {"server_time":{"timestamp":1791301246812,"timezone_offset":480},"firmware":{"version":"1.8.47","url":"http://124.221.186.33:88/xiaozhi/ota/firmware"},"websocket":{"url":"ws://124.221.186.33:89/xiaozhi/v1/"}}
+I (82346) Ota: Websocket url: ws://124.221.186.33:89/xiaozhi/v1/
+I (82351) Ota: Got websocket configuration
+I (82355) Ota: Time synchronized: 369
+I (82358) Ota: Firmware version in response: 1.8.47
+I (82363) Ota: Firmware URL: http://124.221.186.33:88/xiaozhi/ota/firmware
+I (82369) Ota: Current is the latest version
+I (82373) Ota: Running partition: ota_0
+I (82382) AudioCodec: Set output enable to true
+E (82382) i2s_common: i2s_channel_disable(1218): the channel has not been enabled yet
+E (82389) i2s_common: i2s_channel_disable(1218): the channel has not been enabled yet
+W (82396) i2s_common: dma frame num is adjusted to 256 to align the dma buffer with 64, bufsize = 512
+I (82406) I2S_IF: STD: TX, data_bit: 16, slot_bit: 16, ws_width: 16, slot_mode: MONO, slot_mask: 0x1
+I (82414) I2S_IF: STD: TX, sample_rate_hz: 16000, mclk_multiple: 256, clk_src: 16
+W (82421) i2s_common: dma frame num is adjusted to 256 to align the dma buffer with 64, bufsize = 512
+I (82430) I2S_IF: STD: RX, data_bit: 16, slot_bit: 16, ws_width: 16, slot_mode: MONO, slot_mask: 0x1
+I (82439) I2S_IF: STD: RX, sample_rate_hz: 16000, mclk_multiple: 256, clk_src: 16
+I (82464) Adev_Codec: Open codec device OK
+I (82465) AudioForwarder: Announce task started
+I (82465) AudioForwarder: Started (announce port 50000)
+I (82465) AudioForwarder: Send task started
+I (83482) AppImageDisplay: Page 0: 12 cards shown
+I (83544) Application: Wake words from server: 23 commands, 8 agents
+I (83548) MCP: Add tool: self.get_device_status
+I (83564) MCP: Add tool: self.audio_speaker.set_volume
+I (83565) MCP: Add tool: self.voiceprint.set_enabled
+I (83567) MCP: Add tool: self.screen.set_brightness
+I (83571) MCP: Add tool: self.screen.set_theme
+I (83575) MCP: Add tool: self.camera.take_photo
+I (83580) MCP: Add tool: agent.start_task
+I (83583) MCP: Add tool: agent.get_progress
+I (83587) MCP: Add tool: agent.stop_task
+I (83591) Application: STATE: idle
+I (83601) MODEL_LOADER: The storage free size is 57664 KB
+I (83601) MODEL_LOADER: The partition size is 3008 KB
+I (83604) MODEL_LOADER: Successfully load srmodels
+I (83608) CustomWakeWord: multinet:mn7_cn_ac
 Build fst from commands.
-I (31535) AppImageDisplay: Prefetch gen=2 done: 12 loaded (page 0, PSRAM free 21425 KB)
+I (84341) AppImageDisplay: Prefetch gen=2 done: 12 loaded (page 0, PSRAM free 21425 KB)
 Quantized MultiNet7:rnnt_ctc_2.0, name:mn7_cn_ac, (Aug 11 2025 15:21:16)
 Quantized MultiNet7 search method: 2, time out:2.0 s
 set det threshold to 0.100000
@@ -644,107 +319,106 @@ Command 20: luo ge si
 Command 21: ni hao xiao luo
 Command 22: ni hao te lei xi ya
 Command 23: te lei xi ya
-I (31705) CustomWakeWord: Wake words applied: 23 commands
-I (31710) CustomWakeWord: Custom wake word: ni hao kai er xi
-I (31716) AFE_CONFIG: Set WakeNet Model: wn9_nihaoxiaozhi_tts
+I (84503) CustomWakeWord: Wake words applied: 23 commands
+I (84509) CustomWakeWord: Custom wake word: ni hao kai er xi
+I (84514) AFE_CONFIG: Set WakeNet Model: wn9_nihaoxiaozhi_tts
 MC Quantized wakenet9: wakenet9l_tts1h8_你好小智_3_0.631_0.635, tigger:v4, mode:0, p:0, (Aug 11 2025 15:21:17)
-I (31747) CustomWakeWord: Audio detection task started, feed size: 512 fetch size: 512
-I (31754) AudioCodec: Set input enable to true
-I (31768) SystemInfo: free sram: 193451 minimal sram: 160143
-I (32420) AppImageDisplay: TOUCH PRESS (205,475) | page=1 building=0 | press=(0,0) moved=1 handled=0
-I (32596) AppImageDisplay: TOUCH RELEASE (83,465) | page=1 building=0 | press=(205,475) moved=1 handled=0
-I (32598) AppImageDisplay: Page 1: 12 cards shown
-I (32599) AppImageDisplay: CARD CLICKED blocked: moved flag (pt=83,465 press=205,475)
-I (33557) AppImageDisplay: TOUCH PRESS (58,247) | page=1 building=0 | press=(205,475) moved=0 handled=1
-I (33678) AppImageDisplay: TOUCH RELEASE (58,247) | page=1 building=0 | press=(58,247) moved=0 handled=0
-I (33679) AppImageDisplay: CARD CLICKED accepted (pt=58,247 press=58,247)
-I (33685) AppImageDisplay: Card selected: Logos (ai=244)
-I (33786) AgentTools: HTTP GET http://192.168.1.37:7863/agent/events?token=abf77554dd2a&since=-1
-I (33960) AppImageDisplay: Prefetch gen=3 done: 12 loaded (page 1, PSRAM free 20617 KB)
-I (34524) AppImageDisplay: Confirm switch: Logos (.done) → 核对云端清单…
-I (34534) RoleDownload: probe: http://124.221.186.33/api/user_repo/manifest?mac=9c%3A13%3A9e%3Adc%3A1e%3Af4&rel=Arknights%2Fmain%2Foperator%2FCASTER%2F6STAR%2FLogos
-I (35304) BootCover: boot cover sync: 检查公共库 cover 目录(第 2 次)
-I (40217) SystemInfo: free sram: 112811 minimal sram: 107687
-I (47959) AudioCodec: Set output enable to false
-I (50217) SystemInfo: free sram: 112831 minimal sram: 105215
-E (52593) EspTcp: Failed to connect to 192.168.1.37:7863
-E (52593) HttpClient: TCP connection failed
-W (52593) AgentTools: HTTP Open 失败（电脑桥可达性）
-I (55597) AgentTools: HTTP GET http://192.168.1.37:7863/agent/events?token=abf77554dd2a&since=-1
-I (60217) SystemInfo: free sram: 112807 minimal sram: 105215
-I (61020) RoleDownload: probe OK: 1770 个文件, 共 158988 KB
-I (61217) jc4880p443: batt: raw=1747 mv=1723 pct=-263 trend_chg=0
-I (61963) RoleDownload: check : 缺/异 PPD_Q.bak_rebuild/F_R_Eyebrow.ra%�H'
-I (61963) AppImageDisplay: update check(user repo): Logos r=0(0=有更新 -1=网络失败 -2=云端无包 1=齐全)
-I (61970) AppImageDisplay: update check: Logos 有更新资源 → 弹窗
-I (62492) RoleDownload: fetch PPD/back hair.raw: 清单大小=160000, 断点=0, part存在=0
-W (62760) RoleDownload: PPD/back hair.raw 下载失败(第1次): HTTP 404
-W (64560) RoleDownload: PPD/back hair.raw 下载失败(第2次): HTTP 404
-I (65063) AppImageDisplay: Indev touch listener removed (0 cb remain)
-I (65168) AppImageDisplay: chat_ovl HIDE ← 0x40032764
---- 0x40032764: cover_display_start(char const*) at E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/main/apps/image_display/ImageDisplay.cpp:749
-I (65168) PPACompositor: Background unloaded
-I (65168) AppImageDisplay: cover: preload wait done (has=0)
-I (65850) RoleDownload: Download complete: Logos (0 下载 / 3 跳过)
-I (65859) AppImageDisplay: dl: Logos 下载成功 → 进立绘
-W (67404) RoleDownload: boot1.bin 下载失败(第3次): HTTP 404
-I (68945) RoleDownload: fetch PPD/ears.raw: 清单大小=86924, 断点=0, part存在=0
-W (69588) RoleDownload: PPD/ears.raw 下载失败(第1次): HTTP 404
-I (70217) SystemInfo: free sram: 126167 minimal sram: 46655
-W (72767) RoleDownload: PPD/ears.raw 下载失败(第2次): HTTP 404
-E (74094) EspTcp: Failed to connect to 192.168.1.37:7863
-E (74094) HttpClient: TCP connection failed
-W (74094) AgentTools: HTTP Open 失败（电脑桥可达性）
-I (74528) PPACompositor: /sdcard/Arknights/main/operator/CASTER/6STAR/Logos/cover/Logos_RE03.mjpeg: 119/119 frames, 9356 KB PSRAM (streaming, 0 seek)
-I (74534) PPACompositor: Cover cached: 119 frames (/sdcard/Arknights/main/operator/CASTER/6STAR/Logos)
-I (74539) AppImageDisplay: cover: preload done 119 frames (Logos_RE03.mjpeg)
-I (74546) PPACompositor: Swapped cover (loc=2): 119 frames active, 0 in slot
-I (74558) AppImageDisplay: fashion scan: 1 套时装 (默认 Logos_RE03.mjpeg)
-I (74562) AppImageDisplay: Cover mode: /sdcard/Arknights/main/operator/CASTER/6STAR/Logos/cover/Logos_RE03.mjpeg (119 frames), neutral preloading
-E (74566) PPACompositor: Cannot open /sdcard/Arknights/main/operator/CASTER/6STAR/Logos/emoji/neutral.mjpeg
-I (74577) AppImageDisplay: Starting video playback at 30 FPS (total: 119 images)
-W (75204) RoleDownload: PPD/ears.raw 下载失败(第3次): HTTP 404
-I (75627) AppImageDisplay: FPS:16 [cover]
-I (76660) AppImageDisplay: FPS:15 [cover]
-I (76721) RoleDownload: fetch PPD/ears_2.raw: 清单大小=63504, 断点=0, part存在=0
-W (76818) RoleDownload: PPD/ears_2.raw 下载失败(第1次): HTTP 404
-I (77099) AgentTools: HTTP GET http://192.168.1.37:7863/agent/events?token=abf77554dd2a&since=-1
-I (77772) AppImageDisplay: FPS:17 [cover]
-W (78401) RoleDownload: PPD/ears_2.raw 下载失败(第2次): HTTP 404
-I (78788) AppImageDisplay: FPS:16 [cover]
-I (79829) AppImageDisplay: FPS:16 [cover]
-W (80148) RoleDownload: PPD/ears_2.raw 下载失败(第3次): HTTP 404
-I (80219) SystemInfo: free sram: 134479 minimal sram: 46655
-I (80861) AppImageDisplay: FPS:14 [cover]
-I (81679) RoleDownload: fetch PPD/earwear.raw: 清单大小=11012, 断点=0, part存在=0
-W (81875) RoleDownload: PPD/earwear.raw 下载失败(第1次): HTTP 404
-W (83463) RoleDownload: PPD/earwear.raw 下载失败(第2次): HTTP 404
-W (85447) RoleDownload: PPD/earwear.raw 下载失败(第3次): HTTP 404
-I (86959) RoleDownload: fetch �r���ՁQ���1�ciS���
-6�g[��`�@�s��9�5+��ķ��H#�0��5��F�: 清单大小=7804, 断点=0, part存在=0
-W (87078) RoleDownload: �r���ՁQ���1�ciS���
-6�g[��`�@�s��9�5+��ķ��H#�0��5��F� 下载失败(第1次): HTTP 404
-I (88136) PPACompositor: /sdcard/Arknights/main/operator/CASTER/6STAR/Logos/standee/Logos_RE03.mjpeg: 119/119 frames, 8058 KB PSRAM (streaming, 0 seek)
-I (88139) PPACompositor: Standee cached: 119 frames (/sdcard/Arknights/main/operator/CASTER/6STAR/Logos/standee/Logos_RE03.mjpeg)
-I (88152) AppImageDisplay: batt orient → 横屏 (pos 480,700)
-I (88238) AppImageDisplay: Starting video playback at 30 FPS (total: 119 images)
-I (88239) AppImageDisplay: Standee mode ON: /sdcard/Arknights/main/operator/CASTER/6STAR/Logos/standee/Logos_RE03.mjpeg (119 frames)
-I (89388) AppImageDisplay: FPS:10 [cover]
-W (89613) RoleDownload: �r���ՁQ���1�ciS���
-6�g[��`�@�s��9�5+��ķ��H#�0��5��F� 下载失败(第2次): HTTP 404
-I (90225) SystemInfo: free sram: 134263 minimal sram: 46655
-I (90470) AppImageDisplay: FPS:10 [cover]
-I (91446) PPACompositor: standee timing: decode 4 ms
-I (91563) AppImageDisplay: FPS:10 [cover]
-I (91563) jc4880p443: batt: raw=1745 mv=1721 pct=-264 trend_chg=0
-W (91876) RoleDownload: �r���ՁQ���1�ciS���
-6�g[��`�@�s��9�5+��ķ��H#�0��5��F� 下载失败(第3次): HTTP 404
-I (92616) AppImageDisplay: FPS:11 [cover]
-I (93389) RoleDownload: fetch PPD/eyebrow.raw: 清单大小=3844, 断点=0, part存在=0
-I (93697) AppImageDisplay: FPS:10 [cover]
-W (93718) RoleDownload: PPD/eyebrow.raw 下载失败(第1次): HTTP 404
-I (94495) PPACompositor: standee timing: decode 9 ms
-I (94803) AppImageDisplay: FPS:11 [cover]
+I (84546) CustomWakeWord: Audio detection task started, feed size: 512 fetch size: 512
+I (84553) AudioCodec: Set input enable to true
+I (84563) SystemInfo: free sram: 199331 minimal sram: 164651
+I (84706) AppImageDisplay: TOUCH PRESS (289,497) | page=1 building=0 | press=(0,0) moved=1 handled=0
+I (84827) AppImageDisplay: TOUCH RELEASE (195,474) | page=1 building=0 | press=(289,497) moved=1 handled=0
+I (84829) AppImageDisplay: Page 1: 12 cards shown
+I (84831) AppImageDisplay: CARD CLICKED blocked: moved flag (pt=195,474 press=289,497)
+I (85663) AppImageDisplay: Prefetch gen=3 done: 12 loaded (page 1, PSRAM free 20618 KB)
+I (86389) AppImageDisplay: TOUCH PRESS (66,191) | page=1 building=0 | press=(289,497) moved=0 handled=1
+I (86447) AppImageDisplay: TOUCH RELEASE (66,191) | page=1 building=0 | press=(66,191) moved=0 handled=0
+I (86448) AppImageDisplay: CARD CLICKED accepted (pt=66,191 press=66,191)
+I (86453) AppImageDisplay: Card selected: Logos (ai=244)
+I (86581) AgentTools: HTTP GET http://192.168.1.37:7863/agent/events?token=abf77554dd2a&since=-1
+I (87293) AppImageDisplay: Confirm switch: Logos (.done) → 核对云端清单…
+I (87303) RoleDownload: probe: http://124.221.186.33/api/user_repo/manifest?mac=9c%3A13%3A9e%3Adc%3A1e%3Af4&rel=Arknights%2Fmain%2Foperator%2FCASTER%2F6STAR%2FLogos
+I (91654) jc4880p443: batt: raw=1745 mv=1721 pct=-264 trend_chg=0
+I (93217) SystemInfo: free sram: 120115 minimal sram: 114815
+I (101465) AudioCodec: Set output enable to false
+I (102231) RoleDownload: probe OK: 921 个文件, 共 103119 KB
+I (103217) SystemInfo: free sram: 122375 minimal sram: 46827
+E (104719) EspTcp: Failed to connect to 192.168.1.37:7863
+E (104720) HttpClient: TCP connection failed
+W (104720) AgentTools: HTTP Open 失败（电脑桥可达性）
+I (106107) RoleDownload: check : 缺/异 PPD_Q/mesh.json
+I (106107) AppImageDisplay: update check(user repo): Logos r=0(0=有更新 -1=网络失败 -2=云端无包 1=齐全)
+I (106112) AppImageDisplay: update check: Logos 有更新资源 → 弹窗
+I (107724) AgentTools: HTTP GET http://192.168.1.37:7863/agent/events?token=abf77554dd2a&since=-1
+I (113217) SystemInfo: free sram: 131051 minimal sram: 46827
+I (115759) AppImageDisplay: Indev touch listener removed (0 cb remain)
+I (115865) AppImageDisplay: chat_ovl HIDE ← 0x4003280a
+--- 0x4003280a: cover_display_start(char const*) at E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/main/apps/image_display/ImageDisplay.cpp:757
+I (115865) PPACompositor: Background unloaded
+I (115865) AppImageDisplay: cover: preload wait done (has=0)
+I (121708) jc4880p443: batt: raw=1744 mv=1720 pct=-265 trend_chg=0
+I (123217) SystemInfo: free sram: 112227 minimal sram: 46827
+I (124090) PPACompositor: /sdcard/Arknights/main/operator/CASTER/6STAR/Logos/cover/Logos_RE03.mjpeg: 119/119 frames, 9356 KB PSRAM (streaming, 0 seek)
+I (124098) PPACompositor: Cover cached: 119 frames (/sdcard/Arknights/main/operator/CASTER/6STAR/Logos)
+I (124102) AppImageDisplay: cover: preload done 119 frames (Logos_RE03.mjpeg)
+I (124108) PPACompositor: Swapped cover (loc=2): 119 frames active, 0 in slot
+I (124121) AppImageDisplay: fashion scan: 1 套时装 (默认 Logos_RE03.mjpeg)
+I (124125) AppImageDisplay: Cover mode: /sdcard/Arknights/main/operator/CASTER/6STAR/Logos/cover/Logos_RE03.mjpeg (119 frames), neutral preloading
+I (124135) AppImageDisplay: Starting video playback at 30 FPS (total: 119 images)
+E (124139) PPACompositor: Cannot open /sdcard/Arknights/main/operator/CASTER/6STAR/Logos/emoji/neutral.mjpeg
+I (125229) AppImageDisplay: FPS:13 [cover]
+E (126220) EspTcp: Failed to connect to 192.168.1.37:7863
+E (126221) HttpClient: TCP connection failed
+W (126221) AgentTools: HTTP Open 失败（电脑桥可达性）
+I (126279) AppImageDisplay: FPS:12 [cover]
+I (127395) AppImageDisplay: FPS:6 [cover]
+I (128550) AppImageDisplay: FPS:8 [cover]
+I (129225) AgentTools: HTTP GET http://192.168.1.37:7863/agent/events?token=abf77554dd2a&since=-1
+I (129678) AppImageDisplay: FPS:10 [cover]
+I (130717) AppImageDisplay: FPS:6 [cover]
+I (131900) AppImageDisplay: FPS:10 [cover]
+I (132587) RoleDownload: fetch PPD_Q/mesh.json: 清单大小=5204259, 断点=1835008, part存在=1
+I (132606) RoleDownload: http_dl 续传: http://124.221.186.33/api/roles/file?v=CASTER&s=6STAR&n=Logos&p=PPD_Q%2Fmesh.json (Range: bytes=1835008-)
+I (132953) AppImageDisplay: FPS:9 [cover]
+I (133217) SystemInfo: free sram: 118599 minimal sram: 46827
+I (133982) AppImageDisplay: FPS:14 [cover]
+I (135015) AppImageDisplay: FPS:11 [cover]
+I (136029) AppImageDisplay: FPS:13 [cover]
+I (137205) AppImageDisplay: FPS:10 [cover]
+I (138238) AppImageDisplay: FPS:11 [cover]
+I (139244) AppImageDisplay: FPS:14 [cover]
+I (140300) AppImageDisplay: FPS:8 [cover]
+I (141363) AppImageDisplay: FPS:12 [cover]
+I (142497) AppImageDisplay: FPS:13 [cover]
+I (143217) SystemInfo: free sram: 118499 minimal sram: 46827
+I (143512) AppImageDisplay: FPS:12 [cover]
+I (144635) AppImageDisplay: FPS:10 [cover]
+I (145653) AppImageDisplay: FPS:12 [cover]
+I (146700) AppImageDisplay: FPS:10 [cover]
+E (147724) EspTcp: Failed to connect to 192.168.1.37:7863
+E (147725) HttpClient: TCP connection failed
+W (147725) AgentTools: HTTP Open 失败（电脑桥可达性）
+I (147746) AppImageDisplay: FPS:11 [cover]
+I (148865) AppImageDisplay: FPS:13 [cover]
+I (149994) AppImageDisplay: FPS:11 [cover]
+I (150729) AgentTools: HTTP GET http://192.168.1.37:7863/agent/events?token=abf77554dd2a&since=-1
+I (151054) AppImageDisplay: FPS:12 [cover]
+I (152217) jc4880p443: batt: raw=1744 mv=1720 pct=-265 trend_chg=0
+I (152281) AppImageDisplay: FPS:11 [cover]
+I (153217) SystemInfo: free sram: 118491 minimal sram: 46827
+I (153308) AppImageDisplay: FPS:11 [cover]
+I (154410) AppImageDisplay: FPS:13 [cover]
+I (155616) AppImageDisplay: FPS:11 [cover]
+I (156686) AppImageDisplay: FPS:14 [cover]
+I (157692) AppImageDisplay: FPS:11 [cover]
+I (158886) AppImageDisplay: FPS:12 [cover]
+I (159940) AppImageDisplay: FPS:11 [cover]
+I (160964) AppImageDisplay: FPS:14 [cover]
+I (162111) AppImageDisplay: FPS:12 [cover]
+I (163120) AppImageDisplay: FPS:10 [cover]
+I (163217) SystemInfo: free sram: 118491 minimal sram: 46827
+I (164249) AppImageDisplay: FPS:13 [cover]
+I (165345) AppImageDisplay: FPS:12 [cover]
 
 https://linx.qiniu.com/docs/xrobot/platform/
 https://linx.qiniu.com/docs/xrobot/platform/OTA
