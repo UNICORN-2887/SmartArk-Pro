@@ -456,6 +456,11 @@ static void battery_task(void *arg) {
     }
 }
 
+/* 2026-10-07 前向声明(定义在文件后部;开机预下载任务使用) */
+static void ur_info_public_fetch_task(void *arg);
+static void ur_info_fetch_task(void *arg);
+static int scan_bound_user_uid(void);
+
 bool image_display_init(void)
 {
     /* 2026-10-06 版本戳:用户核对烧录版本(电量横屏位置/立牌旋转/按钮恢复/Ur_Info 下载) */
@@ -530,9 +535,6 @@ bool image_display_init(void)
     /* 2026-10-07 蟑螂派对主页资源后台预下载(用户拍板:动图大,WiFi 后提前拉,
        不等到打开 profile 才下):
        公共 Ur_Info(默认照片/动图)+ 用户仓库 Ur_Info(用户上传的) */
-    static void ur_info_public_fetch_task(void *arg);   /* 前向声明(定义在文件后部) */
-    static void ur_info_fetch_task(void *arg);
-    static int scan_bound_user_uid(void);
     xTaskCreate([](void*) {
         vTaskDelay(pdMS_TO_TICKS(8000));   // 等网络起来 + 不与缩略图同步抢带宽
         ur_info_public_fetch_task(NULL);
