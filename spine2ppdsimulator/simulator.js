@@ -340,7 +340,7 @@ function applyView() {
 
 /* ---------------- 面板重建 ---------------- */
 
-function applyLoaded(cur, label) {
+function applyLoaded(cur, label, selDir) {
   st.current = cur;
   st.anim = null;
   st.t = 0;
@@ -348,9 +348,12 @@ function applyLoaded(cur, label) {
   st.hidden.clear();
   el.stageHint.style.display = 'none';
 
-  /* 2026-10-06 形态下拉:主场景时记录根形态列表;切到子形态后下拉保留
-     全部根形态(主场景+背面+基建),不再只剩"主场景"回不去 */
-  const isRoot = !label;
+  /* 2026-10-07 形态下拉修复:原 isRoot = !label 恒为 false(loadFrom 传的
+     显示文本恒非空)→ 根形态列表从不记录,切到背面后下拉只剩"主场景",
+     必须回正面才能切基建(用户报告)。改为显式传目录:主场景 selDir=''
+     时记录根形态;子形态时保留根列表并按目录选中当前形态
+     (原 el.formSel.value = label 拿显示文本当 value,选中永远失败) */
+  const isRoot = !selDir;
   if (isRoot) {
     st.rootBase = cur.base;
     st.rootForms = cur.forms ? cur.forms.forms.map(f => ({ name: f.name, dir: cur.base + f.dir })) : null;
@@ -362,7 +365,8 @@ function applyLoaded(cur, label) {
     const v = cur.base + f.dir;
     if (!st.rootForms || !st.rootForms.some(r => r.dir === v)) el.formSel.add(new Option(f.name, v));
   }
-  if (label) el.formSel.value = label;
+  if (selDir) el.formSel.value = selDir;
+  else if (el.formSel.options.length) el.formSel.selectedIndex = 0;
 
   // 动画下拉(mesh 模式动画在 mesh.animations)
   el.animSel.innerHTML = '';
@@ -438,7 +442,7 @@ async function loadFrom(vfs, subPath, sourceName) {
     const cur = await loadCharacter(vfs, subPath);
     st.vfs = vfs;
     st.sourceName = sourceName;
-    applyLoaded(cur, `${sourceName} · ${subPath || '主场景'}`);
+    applyLoaded(cur, `${sourceName} · ${subPath || '主场景'}`, subPath || '');
   } catch (e) {
     el.srcStatus.textContent = '加载失败: ' + e.message;
     el.srcStatus.classList.add('error');
