@@ -24,6 +24,7 @@
 #include "apps/settings/settings_ui.h"
 #include "apps/menu/menu_ui.h"
 #include "apps/role_download/role_downloader.h"
+#include "wifi_station.h"   // 2026-10-07 开机预下载前等待网络就绪(IsConnected)
 #include <esp_task_wdt.h>
 #include "esp_system.h"   // esp_random(2026-09-29 开机背景随机起点)
 #include <freertos/task.h>
@@ -380,19 +381,22 @@ static void batt_apply_orientation(void) {
         /* 2026-10-06 layer_sys 层的 transform 旋转不渲染(横屏看不到胶囊的根因):
            横屏时挂到 screen 层(与旋转按钮同层同规律),竖屏回 sys(全页面置顶) */
         lv_obj_set_parent(s_batt_box, lv_screen_active());
-        /* 2026-10-07 关键:竖屏 lv_obj_align 设置的是 align 样式(LVGL 9 持续生效),
-           布局重算会把对象拉回 (374,2) 覆盖 set_pos → 必须先清除 align */
-        lv_obj_set_style_align(s_batt_box, LV_ALIGN_DEFAULT, 0);
         lv_obj_set_size(s_batt_box, 32, 100);
         /* 2026-10-07 用户拍板:照抄 profile"动图"按钮的格式与位置
            (pos 475,713 rot 900,用户确认该按钮横屏位置正确);
-           胶囊用 (475,700) 使视觉 [443,475]×[700,800] 完全在屏内 */
-        lv_obj_set_pos(s_batt_box, 475, 700);
+           胶囊用 (475,700) 使视觉 [443,475]×[700,800] 完全在屏内。
+           2026-10-07 实测(烧录日志 pos=374,2 size=100x32):
+           "clear align + set_pos" 组合无效——LVGL 9 布局重算仍按旧
+           TOP_RIGHT 样式把对象拉回 (374,2) 且尺寸被打回竖屏值。
+           改为主动设置 align=TOP_LEFT + 偏移 (475,700):align 样式
+           显式存在,任何布局重算都只会把它放回 (475,700)——
+           化"拉回"为稳定锚点,不再依赖清除样式是否生效 */
+        lv_obj_align(s_batt_box, LV_ALIGN_TOP_LEFT, 475, 700);
         lv_obj_set_style_transform_pivot_x(s_batt_box, 0, 0);
         lv_obj_set_style_transform_pivot_y(s_batt_box, 0, 0);
         lv_obj_set_style_transform_rotation(s_batt_box, 900, 0);
         lv_obj_set_flex_flow(s_batt_box, LV_FLEX_FLOW_COLUMN);
-        /* 2026-10-07 诊断:set_pos 之后打印实际坐标 */
+        /* 2026-10-07 诊断:align 之后打印实际坐标 */
         ESP_LOGI(TAG, "batt land set: pos=%d,%d size=%dx%d parent=%p screen=%p",
                  lv_obj_get_x(s_batt_box), lv_obj_get_y(s_batt_box),
                  lv_obj_get_width(s_batt_box), lv_obj_get_height(s_batt_box),
@@ -418,6 +422,20 @@ static void batt_apply_orientation(void) {
 }
 
 static void batt_ui_tick(lv_timer_t *timer) {
+    /* 2026-10-07 兜底:横屏时若胶囊被任何布局重算拉离锚点/改回竖屏尺寸
+       (实测曾出现 pos=374,2 size=100x32),每 tick 强制复位到 (475,700) 32×100 */
+    if (s_batt_land && s_batt_box && lv_obj_is_valid(s_batt_box)) {
+        if (lv_obj_get_x(s_batt_box) != 475 || lv_obj_get_y(s_batt_box) != 700 ||
+            lv_obj_get_width(s_batt_box) != 32 || lv_obj_get_height(s_batt_box) != 100) {
+            static int warn_cnt = 0;
+            if (warn_cnt++ < 5)
+                ESP_LOGW(TAG, "batt 兜底复位: 实际 pos=%d,%d size=%dx%d → (475,700) 32x100",
+                         lv_obj_get_x(s_batt_box), lv_obj_get_y(s_batt_box),
+                         lv_obj_get_width(s_batt_box), lv_obj_get_height(s_batt_box));
+            lv_obj_set_size(s_batt_box, 32, 100);
+            lv_obj_align(s_batt_box, LV_ALIGN_TOP_LEFT, 475, 700);
+        }
+    }
     int level = 0;
     bool charging = false, discharging = false;
     if (!Board::GetInstance().GetBatteryLevel(level, charging, discharging)) {
@@ -467,7 +485,7 @@ static int scan_bound_user_uid(void);
 bool image_display_init(void)
 {
     /* 2026-10-06 版本戳:用户核对烧录版本(电量横屏位置/立牌旋转/按钮恢复/Ur_Info 下载) */
-    ESP_LOGI(TAG, "FWV=20261007-0010 (batt-screen-layer-fix + dlspeed-pct-reset + page-left + protect-rect)");
+    ESP_LOGI(TAG, "FWV=20261007-0011 (dl-concurrency-fix + batt-align-anchor + urinfo-wait-net + speed-0kbps)");
     ESP_LOGI(TAG, "Initializing image display...");
 
     if (!ppa_init()) {
@@ -2836,8 +2854,21 @@ static void profile_progress_cb(const char* stage, int percent) {
 /* 2026-10-06 用户仓库 Ur_Info 后台补下载(my.html 上传的横屏主页照片/视频);
    打开 profile 时本地缺失则拉取,下次打开生效(静默,不阻塞 UI) */
 static int scan_bound_user_uid(void);   // 前向声明(定义在文件后部)
+
+/* 2026-10-07 开机预下载修复:实测 WiFi 40s+ 才连上,8s 延迟时网络未就绪,
+   fetch 一次失败即静默放弃 → 用户进入后无预下载。先等网络就绪(最多 90s) */
+static bool ur_info_wait_network(void) {
+    for (int i = 0; i < 30; i++) {
+        if (WifiStation::GetInstance().IsConnected()) return true;
+        vTaskDelay(pdMS_TO_TICKS(3000));
+    }
+    ESP_LOGW(TAG, "ur_info 预下载: 等网络 90s 未就绪,放弃");
+    return false;
+}
+
 static void ur_info_fetch_task(void *arg) {
     int uid = (int)(intptr_t)arg;
+    if (!ur_info_wait_network()) { vTaskDelete(NULL); return; }
     int64_t total = 0;
     int missing = role_download_check_user(uid, "Ur_Info", &total);
     if (missing > 0) role_download_fetch_user(uid, "Ur_Info", NULL, NULL);
@@ -2848,6 +2879,7 @@ static void ur_info_fetch_task(void *arg) {
    蟑螂派对 JPG load failed 的根因):Profile.jpg + Profile.mjpeg 缺失则拉取 */
 void profile_show(void);   // 前向声明(下载完成重入显示)
 static void ur_info_public_fetch_task(void *arg) {
+    if (!ur_info_wait_network()) { vTaskDelete(NULL); return; }
     mkdir("/sdcard/User", 0777);            // 已存在时 EEXIST 忽略
     mkdir("/sdcard/User/Ur_Info", 0777);
     const char *files[2] = {"Profile.jpg", "Profile.mjpeg"};
@@ -2856,7 +2888,12 @@ static void ur_info_public_fetch_task(void *arg) {
         snprintf(dst, sizeof(dst), "/sdcard/User/Ur_Info/%s", files[i]);
         struct stat st;
         if (stat(dst, &st) == 0 && st.st_size > 0) continue;
-        role_download_fetch_public_profile(files[i], dst);
+        /* 2026-10-07 失败重试 3 次(网络抖动时曾一次失败就放弃) */
+        for (int attempt = 0; attempt < 3; attempt++) {
+            if (role_download_fetch_public_profile(files[i], dst) == 0) break;
+            ESP_LOGW(TAG, "ur_info 公共下载失败(第%d次): %s", attempt + 1, files[i]);
+            vTaskDelay(pdMS_TO_TICKS(2000));
+        }
     }
     /* 2026-10-06 下载完成:仍在等待遮罩 → 删遮罩并重入 profile_show 自动显示 */
     lvgl_port_lock(pdMS_TO_TICKS(2000));
@@ -3259,8 +3296,10 @@ static void dl_speed_fmt(int pct, char *out, size_t n) {
     /* 2026-10-07 速度入日志(用户要求:进度条不显示时可从串口判断) */
     if (kbps > 0) ESP_LOGI(TAG, "dl speed: %d%% %dKB/s", pct, kbps);
     /* 2026-10-06 -Werror=format-truncation 可证安全写法:
-       n>=28 才拼速度(最坏 27 字节),否则退化为纯百分比 */
-    if (kbps > 0 && n >= 28) snprintf(out, n, "%d%% %dKB/s", pct, kbps);
+       n>=28 才拼速度(最坏 27 字节),否则退化为纯百分比。
+       2026-10-07 窗口建立后无条件拼速度(kbps 可为 0):
+       下载停滞时显示 "0KB/s" 比空白更能判断卡死 vs 慢 */
+    if (s_dl_speed_ts > 0 && n >= 28) snprintf(out, n, "%d%% %dKB/s", pct, kbps);
     else snprintf(out, n, "%d%%", pct);
 }
 static lv_obj_t *s_pp_popup = NULL, *s_pp_title = NULL, *s_pp_bar = NULL; // 前台进度弹窗(lv_layer_top)

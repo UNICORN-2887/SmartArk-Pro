@@ -26,6 +26,9 @@
 #include <esp_http_client.h>
 #include <esp_tls.h>
 #include <cJSON.h>
+#include <freertos/FreeRTOS.h>   // 2026-10-07 xSemaphoreCreateMutex(下载并发互斥)
+#include <freertos/semphr.h>
+#include <freertos/task.h>
 
 #include <esp_lvgl_port.h>
 #include <wifi_station.h>
@@ -57,7 +60,8 @@ static lv_obj_t *s_status_label = nullptr;
 static lv_obj_t *s_confirm_box = nullptr;   // 确认框(下载/取消)
 static lv_obj_t *s_confirm_lbl = nullptr;
 static std::vector<RoleInfo> s_roles;
-static std::vector<FileItem> s_files;
+static std::vector<FileItem> s_files;   // 2026-10-07 仅作 parse 输出缓冲(锁内写、拷局部读)
+static std::vector<FileItem> s_music_missing;   // 背景音乐缺失列表(check 写 / fetch 读,锁保护)
 static bool s_busy = false;       // 列表加载/下载中
 static bool s_quit = false;       // 页面关闭/下载取消
 static int s_confirm_idx = -1;    // 确认框指向的角色下标
@@ -89,51 +93,68 @@ static std::string url_host() {
 
 /* 用户仓库模式:接口走 /api/user_repo(服务器按 mac 定位 uid),
  * rel = 用户根下相对路径,落位 /sdcard/_users/u<uid>/<rel>/。
- * 页面互斥保证同一时刻只有一路下载,静态模式与 s_files 同一约定。 */
+ * 2026-10-07 并发防护:cover 同步/角色下载/主页下载多任务曾共用全局
+ * s_files/s_user_mode/s_public_rel,互相覆盖引发三类故障:
+ *  - fetch 循环持 s_files[i] 引用,他任务 clear+重建 → 悬空引用 → 乱码文件名(URL 里二进制)
+ *  - probe_public("cover") 改全局 rel,角色 fetch 的 file_url_for 读到 "cover" → 404
+ *  - 双下载任务并发 → 取消一个另一个仍在跑
+ * 方案:mode/rel 全部显式传参(impl 系列,不读全局);s_files 仅作解析缓冲,
+ * parse 临界区加锁 + 调用方立即拷贝局部列表;fetch 同一时刻只允许一个任务 */
 static std::string url_encode(const std::string &v);   // 定义在本文件稍后
-static bool s_user_mode = false;
-static int s_user_uid = 0;
-static std::string s_user_rel;   // 用户根下相对路径(Arknights 角色或 other/OC)
-static bool s_public_mode = false;
-static std::string s_public_rel;   // 公共共享资源 rel(background/music 等,相对 Arknights/main)
 
-static std::string manifest_url_for(const char *voc, const char *star, const char *name) {
-    if (s_user_mode) {
+static SemaphoreHandle_t s_dl_mutex = NULL;
+static void dl_lock(void) {
+    if (!s_dl_mutex) s_dl_mutex = xSemaphoreCreateMutex();
+    if (s_dl_mutex) xSemaphoreTake(s_dl_mutex, portMAX_DELAY);
+}
+static void dl_unlock(void) {
+    if (s_dl_mutex) xSemaphoreGive(s_dl_mutex);
+}
+static bool s_fetching = false;   // 防重入:同一时刻只允许一个下载任务
+
+static std::string manifest_url_for(const char *voc, const char *star, const char *name,
+                                    bool umode, int uid, const std::string &urel,
+                                    bool pmode, const std::string &prel) {
+    if (umode) {
         return url_host() + "/api/user_repo/manifest?mac=" +
-               url_encode(SystemInfo::GetMacAddress()) + "&rel=" + url_encode(s_user_rel);
+               url_encode(SystemInfo::GetMacAddress()) + "&rel=" + url_encode(urel);
     }
-    if (s_public_mode) {
-        return url_host() + "/api/public/manifest?rel=" + url_encode(s_public_rel);
+    if (pmode) {
+        return url_host() + "/api/public/manifest?rel=" + url_encode(prel);
     }
     return url_host() + "/api/roles/" + url_encode(voc) + "/" +
            url_encode(star) + "/" + url_encode(name) + "/manifest";
 }
 
 static std::string file_url_for(const char *voc, const char *star, const char *name,
-                                const std::string &frel) {
-    if (s_user_mode) {
+                                const std::string &frel,
+                                bool umode, int uid, const std::string &urel,
+                                bool pmode, const std::string &prel) {
+    if (umode) {
         return url_host() + "/api/user_repo/file?mac=" + url_encode(SystemInfo::GetMacAddress()) +
-               "&rel=" + url_encode(s_user_rel) + "&p=" + url_encode(frel);
+               "&rel=" + url_encode(urel) + "&p=" + url_encode(frel);
     }
-    if (s_public_mode) {
-        return url_host() + "/api/public/file?rel=" + url_encode(s_public_rel) +
+    if (pmode) {
+        return url_host() + "/api/public/file?rel=" + url_encode(prel) +
                "&p=" + url_encode(frel);
     }
     return url_host() + "/api/roles/file?v=" + url_encode(voc) +
            "&s=" + url_encode(star) + "&n=" + url_encode(name) + "&p=" + url_encode(frel);
 }
 
-static std::string role_local_base(const char *voc, const char *star, const char *name) {
-    if (s_user_mode) {
-        if (s_user_rel.rfind("Arknights/", 0) == 0) {
+static std::string role_local_base(const char *voc, const char *star, const char *name,
+                                   bool umode, int uid, const std::string &urel,
+                                   bool pmode, const std::string &prel) {
+    if (umode) {
+        if (urel.rfind("Arknights/", 0) == 0) {
             /* 统一文件系统(2026-09-10):Arknights 类落位 /sdcard/<rel>/,不分用户 */
-            return "/sdcard/" + s_user_rel + "/";
+            return "/sdcard/" + urel + "/";
         }
         /* OC(other/...)保留用户隔离 */
-        return "/sdcard/_users/u" + std::to_string(s_user_uid) + "/" + s_user_rel + "/";
+        return "/sdcard/_users/u" + std::to_string(uid) + "/" + urel + "/";
     }
-    if (s_public_mode) {
-        return "/sdcard/Arknights/main/" + s_public_rel + "/";
+    if (pmode) {
+        return "/sdcard/Arknights/main/" + prel + "/";
     }
     return "/sdcard/Arknights/main/operator/" + std::string(voc) + "/" +
            std::string(star) + "/" + std::string(name) + "/";
@@ -141,12 +162,14 @@ static std::string role_local_base(const char *voc, const char *star, const char
 
 /* __index__ 条目落位:公共库重定向到 INDEX 缩略图目录;用户库直接落在角色目录内 */
 static std::string file_dst_for(const char *voc, const char *star, const char *name,
-                                const std::string &rel) {
-    if (!s_user_mode && !s_public_mode && rel.rfind("__index__/", 0) == 0) {
+                                const std::string &rel,
+                                bool umode, int uid, const std::string &urel,
+                                bool pmode, const std::string &prel) {
+    if (!umode && !pmode && rel.rfind("__index__/", 0) == 0) {
         return "/sdcard/Arknights/main/operator/INDEX/" + std::string(voc) + "_108x228/" +
                std::string(star) + "/" + std::string(name) + ".jpg";
     }
-    return role_local_base(voc, star, name) + rel;
+    return role_local_base(voc, star, name, umode, uid, urel, pmode, prel) + rel;
 }
 
 /* URL 编码(设备/角色名/路径可能含中文与特殊字符) */
@@ -368,26 +391,44 @@ static bool parse_manifest(const std::string &body) {
 
 /* ---------- 下载核心(下载页/索引页弹窗共用) ---------- */
 
-int64_t role_download_probe(const char *voc, const char *star, const char *name) {
-    std::string murl = manifest_url_for(voc, star, name);
+/* 2026-10-07 清单总字节统计(局部文件列表用) */
+static int64_t sum_files(const std::vector<FileItem> &files) {
+    int64_t total = 0;
+    for (const FileItem &f : files) total += f.size;
+    ESP_LOGI(TAG, "probe OK: %d 个文件, 共 %d KB", (int)files.size(), (int)(total / 1024));
+    return total;
+}
+
+static int64_t probe_impl(const char *voc, const char *star, const char *name,
+                          bool umode, int uid, const std::string &urel,
+                          bool pmode, const std::string &prel,
+                          std::vector<FileItem> *files_out) {
+    std::string murl = manifest_url_for(voc, star, name, umode, uid, urel, pmode, prel);
     ESP_LOGI(TAG, "probe: %s", murl.c_str());
     std::string body, err;
     for (int attempt = 0; attempt < 3; attempt++) {
         err = http_get(murl, body);
-        if (err.empty() && parse_manifest(body)) break;
-        if (err.rfind("HTTP 404", 0) == 0) break;   // 云端无此角色包(立绘未就绪):重试无意义
+        if (err.empty()) {
+            /* 解析临界区:全局 s_files 是共享缓冲,拷局部后解锁(并发任务安全) */
+            dl_lock();
+            bool ok = parse_manifest(body);
+            std::vector<FileItem> files = s_files;
+            dl_unlock();
+            if (ok && files_out) *files_out = files;
+            if (ok) return files.empty() ? -2 : sum_files(files);
+            err = "parse fail";
+        }
+        if (err.rfind("HTTP 404", 0) == 0) return -2;   // 云端无此角色包:重试无意义
         ESP_LOGW(TAG, "probe manifest 失败(第%d次): %s", attempt + 1, err.c_str());
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
     if (err.rfind("HTTP 404", 0) == 0) return -2;   // 云端资源未就绪(区别于网络失败)
-    /* 2026-10-06 清单为空(云端无包)也按 -2:曾误报"检查失败,请确认网络"
-       (已验收角色 OSS 清单异常时 files 为空,网络其实通着) */
-    if (s_files.empty()) return -2;
     if (!err.empty()) return -1;
-    int64_t total = 0;
-    for (const FileItem &f : s_files) total += f.size;
-    ESP_LOGI(TAG, "probe OK: %d 个文件, 共 %d KB", (int)s_files.size(), (int)(total / 1024));
-    return total;
+    return -1;
+}
+
+int64_t role_download_probe(const char *voc, const char *star, const char *name) {
+    return probe_impl(voc, star, name, false, 0, "", false, "", NULL);
 }
 
 int role_download_estimate_minutes(int64_t total_bytes) {
@@ -397,16 +438,19 @@ int role_download_estimate_minutes(int64_t total_bytes) {
     return m < 1 ? 1 : m;
 }
 
-int role_download_check(const char *voc, const char *star, const char *name, int64_t *total_out) {
-    int64_t total = role_download_probe(voc, star, name);
+static int check_impl(const char *voc, const char *star, const char *name,
+                      bool umode, int uid, const std::string &urel,
+                      bool pmode, const std::string &prel, int64_t *total_out) {
+    std::vector<FileItem> files;
+    int64_t total = probe_impl(voc, star, name, umode, uid, urel, pmode, prel, &files);
     if (total_out) *total_out = (total >= 0 ? total : -1);
     if (total == -2) return -2;   // 云端无此角色(手工角色):按齐全处理,直接展示
     if (total < 0) return -1;     // 网络失败:未知
-    for (const FileItem &f : s_files) {
+    for (const FileItem &f : files) {
         /* 2026-09-26:__index__ 缩略图缺失不判"有更新"——缩略图由索引页 thumbs
            同步静默补,不该因缺一张缩略图弹"更新资源"弹窗(资源本体齐全即齐全) */
         if (f.rel.rfind("__index__/", 0) == 0) continue;
-        std::string p = file_dst_for(voc, star, name, f.rel);
+        std::string p = file_dst_for(voc, star, name, f.rel, umode, uid, urel, pmode, prel);
         struct stat st;
         if (stat(p.c_str(), &st) != 0 || st.st_size != f.size) {
             ESP_LOGI(TAG, "check %s: 缺/异 %s", name, f.rel.c_str());
@@ -429,6 +473,10 @@ int role_download_check(const char *voc, const char *star, const char *name, int
         }
     }
     return 1;   // 齐全
+}
+
+int role_download_check(const char *voc, const char *star, const char *name, int64_t *total_out) {
+    return check_impl(voc, star, name, false, 0, "", false, "", total_out);
 }
 
 int role_download_list(std::vector<CloudRole> &out) {
@@ -518,18 +566,31 @@ int role_download_thumb(const char *voc, const char *star, const char *name) {
     return 1;
 }
 
-int role_download_fetch(const char *voc, const char *star, const char *name,
-                        bool (*step_cb)(int pct, const char *file, void *ud), void *ud) {
-    /* 1. manifest */
-    std::string murl = manifest_url_for(voc, star, name);
+static int fetch_impl(const char *voc, const char *star, const char *name,
+                      bool umode, int uid, const std::string &urel,
+                      bool pmode, const std::string &prel,
+                      bool (*step_cb)(int pct, const char *file, void *ud), void *ud) {
+    /* 1. manifest(URL 由显式参数构造,不受并发任务影响) */
+    std::string murl = manifest_url_for(voc, star, name, umode, uid, urel, pmode, prel);
     std::string body, err;
     for (int attempt = 0; attempt < 3; attempt++) {
         err = http_get(murl, body);
-        if (err.empty() && parse_manifest(body)) break;
+        if (err.empty()) {
+            dl_lock();
+            bool ok = parse_manifest(body);
+            dl_unlock();
+            if (ok) { err = ""; break; }
+            err = "parse fail";
+        }
         ESP_LOGW(TAG, "manifest 获取失败(第%d次): %s", attempt + 1, err.c_str());
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
-    if (!err.empty() || s_files.empty()) return 1;
+    if (!err.empty()) return 1;
+    /* 文件列表局部拷贝:循环内引用绝不悬空(他任务 parse 不再影响本任务) */
+    dl_lock();
+    std::vector<FileItem> files = s_files;
+    dl_unlock();
+    if (files.empty()) return 1;
 
     /* 2. 逐文件增量下载:
      *    - 已存在且大小与清单一致 → 跳过(增量)
@@ -538,14 +599,14 @@ int role_download_fetch(const char *voc, const char *star, const char *name,
      *    旧文件在失败/取消时保持原样(不再整体搬备份区);.done 只在全部就绪时写。 */
     int ok = 0, skip = 0, fail = 0;
     bool cancelled = false;
-    size_t total_files = s_files.size();
+    size_t total_files = files.size();
     for (size_t i = 0; i < total_files; i++) {
-        const FileItem &f = s_files[i];
+        const FileItem &f = files[i];
         if (step_cb && !step_cb((int)(i * 100 / total_files), f.rel.c_str(), ud)) {
             cancelled = true;
             break;
         }
-        std::string dst = file_dst_for(voc, star, name, f.rel);
+        std::string dst = file_dst_for(voc, star, name, f.rel, umode, uid, urel, pmode, prel);
         struct stat st;
         if (stat(dst.c_str(), &st) == 0 && st.st_size == f.size) {
             /* 2026-09-17:mesh.ppdq 坏文件(下载中断残留,大小一致 magic 错)→ 不跳过,强制重下 */
@@ -562,7 +623,7 @@ int role_download_fetch(const char *voc, const char *star, const char *name,
             }
             ESP_LOGW(TAG, "fetch: %s magic 坏 → 重下", f.rel.c_str());
         }
-        std::string durl = file_url_for(voc, star, name, f.rel);
+        std::string durl = file_url_for(voc, star, name, f.rel, umode, uid, urel, pmode, prel);
 
         /* 目录不存在时 mkdirs(根目录在第 1 个文件时创建) */
         std::string dir = dst;
@@ -616,7 +677,7 @@ int role_download_fetch(const char *voc, const char *star, const char *name,
         return 2;
     }
     if (fail == 0) {
-        FILE *df = fopen((role_local_base(voc, star, name) + ".done").c_str(), "w");
+        FILE *df = fopen((role_local_base(voc, star, name, umode, uid, urel, pmode, prel) + ".done").c_str(), "w");
         if (df) {
             fprintf(df, "ok");
             fclose(df);
@@ -629,52 +690,55 @@ int role_download_fetch(const char *voc, const char *star, const char *name,
     return 1;
 }
 
-/* ---------- 用户仓库三件套(复用公共库逻辑,URL 与落位走 _users/<rel>) ---------- */
-
-int64_t role_download_probe_user(int uid, const char *rel) {
-    s_user_mode = true;
-    s_user_uid = uid;
-    s_user_rel = rel;
-    int64_t r = role_download_probe("", "", "");
-    s_user_mode = false;
+/* 2026-10-07 防重入:双下载任务并发会互相踩 s_files(引用悬空→乱码 URL),
+   且"取消一个另一个仍在跑";同一时刻只允许一个下载任务 */
+static int fetch_guarded(const char *voc, const char *star, const char *name,
+                         bool umode, int uid, const std::string &urel,
+                         bool pmode, const std::string &prel,
+                         bool (*step_cb)(int pct, const char *file, void *ud), void *ud) {
+    dl_lock();
+    if (s_fetching) {
+        dl_unlock();
+        ESP_LOGW(TAG, "已有下载任务进行中,忽略新请求");
+        return 3;
+    }
+    s_fetching = true;
+    dl_unlock();
+    int r = fetch_impl(voc, star, name, umode, uid, urel, pmode, prel, step_cb, ud);
+    dl_lock();
+    s_fetching = false;
+    dl_unlock();
     return r;
 }
 
+int role_download_fetch(const char *voc, const char *star, const char *name,
+                        bool (*step_cb)(int pct, const char *file, void *ud), void *ud) {
+    return fetch_guarded(voc, star, name, false, 0, "", false, "", step_cb, ud);
+}
+
+/* ---------- 用户仓库三件套(复用公共库逻辑,URL 与落位走 _users/<rel>) ---------- */
+
+int64_t role_download_probe_user(int uid, const char *rel) {
+    return probe_impl("", "", "", true, uid, rel, false, "", NULL);
+}
+
 int role_download_check_user(int uid, const char *rel, int64_t *total_out) {
-    s_user_mode = true;
-    s_user_uid = uid;
-    s_user_rel = rel;
-    int r = role_download_check("", "", "", total_out);
-    s_user_mode = false;
-    return r;
+    return check_impl("", "", "", true, uid, rel, false, "", total_out);
 }
 
 int role_download_fetch_user(int uid, const char *rel,
                              bool (*step_cb)(int pct, const char *file, void *ud), void *ud) {
-    s_user_mode = true;
-    s_user_uid = uid;
-    s_user_rel = rel;
-    int r = role_download_fetch("", "", "", step_cb, ud);
-    s_user_mode = false;
-    return r;
+    return fetch_guarded("", "", "", true, uid, rel, false, "", step_cb, ud);
 }
 
 /* ---------- 公共共享资源三件套(背景/音乐等,2026-09-10;rel 相对 Arknights/main) ---------- */
 
 int64_t role_download_probe_public(const char *rel) {
-    s_public_mode = true;
-    s_public_rel = rel;
-    int64_t r = role_download_probe("", "", "");
-    s_public_mode = false;
-    return r;
+    return probe_impl("", "", "", false, 0, "", true, rel, NULL);
 }
 
 int role_download_check_public(const char *rel, int64_t *total_out) {
-    s_public_mode = true;
-    s_public_rel = rel;
-    int r = role_download_check("", "", "", total_out);
-    s_public_mode = false;
-    return r;
+    return check_impl("", "", "", false, 0, "", true, rel, total_out);
 }
 
 int role_download_fetch_public(const char *rel,
@@ -685,18 +749,14 @@ int role_download_fetch_public(const char *rel,
         ESP_LOGW(TAG, "fetch_public: 资源服务器地址为空,跳过");
         return -1;
     }
-    s_public_mode = true;
-    s_public_rel = rel;
-    int r = role_download_fetch("", "", "", step_cb, ud);
-    s_public_mode = false;
-    return r;
+    return fetch_guarded("", "", "", false, 0, "", true, rel, step_cb, ud);
 }
 
 /* ---------- 背景音乐清单检查/下载(2026-09-11) ---------- */
 
 int role_download_check_music_missing(void) {
     /* 拉 /api/public/music_manifest,对比本地 /sdcard/Arknights/main/music 目录下的 wav。
-       返回:≥0=缺失首数(缺失文件名写入 s_files 供下载) -1=网络失败/清单不可用 */
+       返回:≥0=缺失首数(缺失文件名写入 s_music_missing 供下载) -1=网络失败/清单不可用 */
     std::string body, err;
     for (int attempt = 0; attempt < 3; attempt++) {
         err = http_get(url_host() + "/api/public/music_manifest", body);
@@ -720,7 +780,8 @@ int role_download_check_music_missing(void) {
     cJSON *root = cJSON_Parse(body.c_str());
     if (!root) return -1;
     int missing = 0;
-    s_files.clear();
+    dl_lock();
+    s_music_missing.clear();
     cJSON *tracks = cJSON_GetObjectItem(root, "tracks");
     if (tracks && cJSON_IsArray(tracks)) {
         int n = cJSON_GetArraySize(tracks);
@@ -734,22 +795,26 @@ int role_download_check_music_missing(void) {
             std::string dst = "/sdcard/Arknights/main/music/" + fi.rel;
             struct stat st;
             if (stat(dst.c_str(), &st) != 0 || st.st_size == 0) {
-                s_files.push_back(fi);
+                s_music_missing.push_back(fi);
                 missing++;
             }
         }
     }
+    dl_unlock();
     cJSON_Delete(root);
     ESP_LOGI(TAG, "music check: 缺失 %d 首", missing);
     return missing;
 }
 
 int role_download_fetch_music_missing(bool (*step_cb)(int pct, const char *file, void *ud), void *ud) {
-    /* 下载 s_files 中记录的缺失 wav(本地已存在且 >0 跳过;无断点,单曲小文件) */
-    size_t total_files = s_files.size();
+    /* 下载 s_music_missing 中记录的缺失 wav(本地已存在且 >0 跳过;无断点,单曲小文件) */
+    dl_lock();
+    std::vector<FileItem> files = s_music_missing;
+    dl_unlock();
+    size_t total_files = files.size();
     int ok = 0, fail = 0;
     for (size_t i = 0; i < total_files; i++) {
-        const FileItem &f = s_files[i];
+        const FileItem &f = files[i];
         if (step_cb && !step_cb((int)(i * 100 / total_files), f.rel.c_str(), ud)) return 2;
         std::string dst = "/sdcard/Arknights/main/music/" + f.rel;
         struct stat st;
@@ -979,8 +1044,12 @@ static void download_task(void *arg) {
             return true;
         }, nullptr);
 
-    bool has_thumb = false;   // manifest 是否带 INDEX 缩略图(fetch 后 s_files 已是本次清单)
-    for (const FileItem &f : s_files)
+    /* manifest 是否带 INDEX 缩略图(2026-10-07 锁内拷局部:他任务 probe 会改 s_files) */
+    dl_lock();
+    std::vector<FileItem> files_after = s_files;
+    dl_unlock();
+    bool has_thumb = false;
+    for (const FileItem &f : files_after)
         if (f.rel.rfind("__index__/", 0) == 0) has_thumb = true;
 
     if (r == 0) {
@@ -988,6 +1057,8 @@ static void download_task(void *arg) {
                             : "已下载,但缺角色页缩略图");
     } else if (r == 2) {
         ui_status("已取消");
+    } else if (r == 3) {
+        ui_status("已有下载任务进行中,请稍候");   // 2026-10-07 防重入
     } else {
         ui_status("下载失败,原角色已恢复,可重试");
     }
