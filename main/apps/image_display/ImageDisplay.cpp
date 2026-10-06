@@ -380,22 +380,20 @@ static void batt_apply_orientation(void) {
         /* 2026-10-06 layer_sys 层的 transform 旋转不渲染(横屏看不到胶囊的根因):
            横屏时挂到 screen 层(与旋转按钮同层同规律),竖屏回 sys(全页面置顶) */
         lv_obj_set_parent(s_batt_box, lv_screen_active());
-        /* 2026-10-07 诊断:打印父对象指针与屏幕尺寸,核对层级与坐标 */
-        {
-            lv_obj_t *par = lv_obj_get_parent(s_batt_box);
-            ESP_LOGI(TAG, "batt parent=%p screen=%p parent_size=%dx%d batt_pos=%d,%d",
-                     (void*)par, (void*)lv_screen_active(),
-                     lv_obj_get_width(par), lv_obj_get_height(par),
-                     lv_obj_get_x(s_batt_box), lv_obj_get_y(s_batt_box));
-        }
         lv_obj_set_size(s_batt_box, 32, 100);
-        /* 2026-10-06 用户拍板:横屏放横屏视觉右上角 = 逻辑(竖屏)右下角,
-           rot 900 后视觉 x∈[448,480] y∈[700,800] */
-        lv_obj_set_pos(s_batt_box, 480, 700);
+        /* 2026-10-07 用户拍板:照抄 profile"动图"按钮的格式与位置
+           (pos 475,713 rot 900,用户确认该按钮横屏位置正确);
+           胶囊用 (475,700) 使视觉 [443,475]×[700,800] 完全在屏内 */
+        lv_obj_set_pos(s_batt_box, 475, 700);
         lv_obj_set_style_transform_pivot_x(s_batt_box, 0, 0);
         lv_obj_set_style_transform_pivot_y(s_batt_box, 0, 0);
         lv_obj_set_style_transform_rotation(s_batt_box, 900, 0);
         lv_obj_set_flex_flow(s_batt_box, LV_FLEX_FLOW_COLUMN);
+        /* 2026-10-07 诊断:set_pos 之后打印实际坐标 */
+        ESP_LOGI(TAG, "batt land set: pos=%d,%d size=%dx%d parent=%p screen=%p",
+                 lv_obj_get_x(s_batt_box), lv_obj_get_y(s_batt_box),
+                 lv_obj_get_width(s_batt_box), lv_obj_get_height(s_batt_box),
+                 (void*)lv_obj_get_parent(s_batt_box), (void*)lv_screen_active());
     } else {
         lv_obj_set_parent(s_batt_box, lv_layer_sys());
         lv_obj_set_size(s_batt_box, 100, 32);
@@ -3205,6 +3203,7 @@ static char s_dl_user_rel[160];       // 用户根下 rel(Arknights/main/operato
 static bool s_dl_user_mode = false;   // 探测命中的下载模式(true=用户仓库)
 // ── 下载中状态:统一进度弹窗 / 顶部小条(后台下载) / 页面锁定 ──
 static bool s_dl_locked = false;                                          // 下载中:禁止切换页面
+static int64_t s_upd_total = 0;   /* 2026-10-07 更新下载总量(速度统计用) */
 
 /* 2026-10-06 下载速度统计(pct 驱动,1 秒窗口):下载框显示 xx% · xxKB/s,
    用户可判断是网络慢还是真卡死(速度持续为 0 = 卡死) */
@@ -4638,6 +4637,7 @@ static void index_update_check_task(void *arg) {
     s_index_building = false;   // 检查完成,索引页恢复手势
     if (r == 0) {
         /* 有更新:弹更新提示(索引页保留),由用户选更新/后台下载/取消 */
+        s_upd_total = total;   /* 2026-10-07 速度统计总量 */
         snprintf(s_dl_path, sizeof(s_dl_path), "/sdcard/Arknights/main/operator/%s/%s/%s",
                  voc, star, name);
         ESP_LOGI(TAG, "update check: %s 有更新资源 → 弹窗", name);
@@ -4746,6 +4746,7 @@ static void index_update_popup_show(const char* name, const char* voc, const cha
 }
 
 static void index_dl_fetch_task(void *arg) {
+    dl_speed_reset(s_upd_total);   /* 2026-10-07 更新下载也要速度统计(曾恒 0 不显示) */
     auto step_cb = [](int pct, const char *file, void *ud) -> bool {
         if (s_dl_cancel) return false;
         if (!lvgl_port_lock(pdMS_TO_TICKS(100))) return true;
