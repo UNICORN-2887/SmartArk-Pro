@@ -380,6 +380,11 @@ static void batt_apply_orientation(void) {
         /* 2026-10-06 layer_sys 层的 transform 旋转不渲染(横屏看不到胶囊的根因):
            横屏时挂到 screen 层(与旋转按钮同层同规律),竖屏回 sys(全页面置顶) */
         lv_obj_set_parent(s_batt_box, lv_screen_active());
+        /* 2026-10-07 诊断:打印父对象与屏幕尺寸,核对层级与坐标 */
+        ESP_LOGI(TAG, "batt parent=%s parent_size=%dx%d",
+                 lv_obj_get_type(lv_obj_get_parent(s_batt_box)),
+                 lv_obj_get_width(lv_obj_get_parent(s_batt_box)),
+                 lv_obj_get_height(lv_obj_get_parent(s_batt_box)));
         lv_obj_set_size(s_batt_box, 32, 100);
         /* 2026-10-06 用户拍板:横屏放横屏视觉右上角 = 逻辑(竖屏)右下角,
            rot 900 后视觉 x∈[448,480] y∈[700,800] */
@@ -3225,6 +3230,8 @@ static void dl_speed_fmt(int pct, char *out, size_t n) {
     }
     s_dl_speed_ts = now;
     s_dl_speed_last_pct = pct;
+    /* 2026-10-07 速度入日志(用户要求:进度条不显示时可从串口判断) */
+    if (kbps > 0) ESP_LOGI(TAG, "dl speed: %d%% %dKB/s", pct, kbps);
     /* 2026-10-06 -Werror=format-truncation 可证安全写法:
        n>=28 才拼速度(最坏 27 字节),否则退化为纯百分比 */
     if (kbps > 0 && n >= 28) snprintf(out, n, "%d%% %dKB/s", pct, kbps);

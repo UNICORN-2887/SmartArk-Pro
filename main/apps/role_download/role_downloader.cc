@@ -590,7 +590,8 @@ int role_download_fetch(const char *voc, const char *star, const char *name,
             derr = http_download_ex(durl, part, step_cb, ud, offset);
             if (derr.empty()) break;
             if (derr == "cancelled") { cancelled = true; break; }
-            ESP_LOGW(TAG, "%s 下载失败(第%d次): %s", f.rel.c_str(), attempt + 1, derr.c_str());
+            ESP_LOGW(TAG, "%s 下载失败(第%d次): %s | URL: %s", f.rel.c_str(), attempt + 1,
+                     derr.c_str(), durl.c_str());   /* 2026-10-07 URL 入日志(排查 404/400) */
             vTaskDelay(pdMS_TO_TICKS(1500));
             if (stat(part.c_str(), &st) == 0 && st.st_size > offset)
                 offset = st.st_size;   // 重试从新进度续传
