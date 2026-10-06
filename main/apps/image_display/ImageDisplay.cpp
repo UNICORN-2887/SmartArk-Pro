@@ -380,6 +380,9 @@ static void batt_apply_orientation(void) {
         /* 2026-10-06 layer_sys 层的 transform 旋转不渲染(横屏看不到胶囊的根因):
            横屏时挂到 screen 层(与旋转按钮同层同规律),竖屏回 sys(全页面置顶) */
         lv_obj_set_parent(s_batt_box, lv_screen_active());
+        /* 2026-10-07 关键:竖屏 lv_obj_align 设置的是 align 样式(LVGL 9 持续生效),
+           布局重算会把对象拉回 (374,2) 覆盖 set_pos → 必须先清除 align */
+        lv_obj_set_style_align(s_batt_box, 0, 0);
         lv_obj_set_size(s_batt_box, 32, 100);
         /* 2026-10-07 用户拍板:照抄 profile"动图"按钮的格式与位置
            (pos 475,713 rot 900,用户确认该按钮横屏位置正确);
@@ -3233,31 +3236,26 @@ static int64_t s_upd_total = 0;   /* 2026-10-07 更新下载总量(速度统计�
 
 /* 2026-10-06 下载速度统计(pct 驱动,1 秒窗口):下载框显示 xx% · xxKB/s,
    用户可判断是网络慢还是真卡死(速度持续为 0 = 卡死) */
-static int64_t s_dl_speed_bytes_total = 0;
+/* 2026-10-07 速度统计改真实累计字节(role_downloader 的 g_dl_bytes_done):
+   多文件下载 pct 按单文件重置,曾按 总量×pct 算出假速度 100MB/s */
+extern int64_t g_dl_bytes_done;
+static int64_t s_dl_speed_last_bytes = 0;
 static int64_t s_dl_speed_ts = 0;
-static int s_dl_speed_last_pct = 0;
 static void dl_speed_reset(int64_t total) {
-    s_dl_speed_bytes_total = total;
+    (void)total;
+    s_dl_speed_last_bytes = g_dl_bytes_done;
     s_dl_speed_ts = 0;
-    s_dl_speed_last_pct = 0;
 }
 static void dl_speed_fmt(int pct, char *out, size_t n) {
     int kbps = 0;
     int64_t now = esp_timer_get_time();
-    /* 2026-10-06 修复:多文件下载每个文件 pct 从 0 重新开始,pct 回退
-       (新文件开始)时重置窗口,否则 bytes 为负 → 速度永久不显示。
-       后台下载切回进度条同理:窗口持续滚动,不依赖弹窗重建 */
-    if (pct < s_dl_speed_last_pct) {
-        s_dl_speed_ts = now;
-        s_dl_speed_last_pct = pct;
-    }
-    if (s_dl_speed_ts > 0 && now > s_dl_speed_ts && s_dl_speed_bytes_total > 0) {
-        int64_t bytes = (int64_t)(pct - s_dl_speed_last_pct) * s_dl_speed_bytes_total / 100;
+    if (s_dl_speed_ts > 0 && now > s_dl_speed_ts) {
+        int64_t bytes = g_dl_bytes_done - s_dl_speed_last_bytes;
         kbps = (int)(bytes * 1000000 / (now - s_dl_speed_ts) / 1024);
         if (kbps < 0) kbps = 0;
     }
     s_dl_speed_ts = now;
-    s_dl_speed_last_pct = pct;
+    s_dl_speed_last_bytes = g_dl_bytes_done;
     /* 2026-10-07 速度入日志(用户要求:进度条不显示时可从串口判断) */
     if (kbps > 0) ESP_LOGI(TAG, "dl speed: %d%% %dKB/s", pct, kbps);
     /* 2026-10-06 -Werror=format-truncation 可证安全写法:
@@ -4378,7 +4376,11 @@ static void pp_popup_show(void) {
     lv_obj_set_style_text_color(cn_lbl, lv_color_white(), 0);
     lv_obj_set_style_text_font(cn_lbl, s_chat_font, 0);
     lv_obj_center(cn_lbl);
+    static int64_t s_pp_popup_ts = 0;
+    s_pp_popup_ts = esp_timer_get_time();
     lv_obj_add_event_cb(cn_btn, [](lv_event_t* e) {
+        /* 2026-10-07 防点击穿透:弹窗刚创建 800ms 内的点击视为穿透忽略 */
+        if (esp_timer_get_time() - s_pp_popup_ts < 800000) return;
         s_dl_cancel = true;   // 下载任务回调检测后中止;收尾恢复锁
     }, LV_EVENT_CLICKED, NULL);
     lv_obj_move_foreground(s_pp_popup);
@@ -4405,12 +4407,13 @@ static void pp_mini_show(void) {
     lv_obj_set_style_text_font(s_pp_mini_lbl, s_chat_font, 0);
     lv_obj_align(s_pp_mini_lbl, LV_ALIGN_RIGHT_MID, -8, 0);
     lv_obj_add_event_cb(s_pp_mini, [](lv_event_t* e) {
-        /* 点小条 → 展开完整弹窗 */
+        /* 点小条 → 展开完整弹窗(2026-10-07 延迟到下一事件循环:
+           点击事件可能穿透到刚弹出的"取消下载"按钮,曾展开即中断下载) */
         if (s_pp_mini) {
             lv_obj_del(s_pp_mini);
             s_pp_mini = s_pp_mini_bar = s_pp_mini_lbl = NULL;
         }
-        pp_popup_show();
+        lv_async_call([](void*) { pp_popup_show(); }, NULL);
     }, LV_EVENT_CLICKED, NULL);
     lv_obj_move_foreground(s_pp_mini);
 }

@@ -37,6 +37,10 @@
 #define MAX_HTTP_BUF 8192
 #define BUF_SIZE 16384   /* 2026-10-06 下载加速:4K→16K(esp_http_client 内部缓冲) */
 
+/* 2026-10-07 全局累计下载字节(ImageDisplay 速度显示用;多文件下载 pct 按单文件重置,
+   按总字节×pct 会算出假速度 100MB/s,真实字节计数才准) */
+int64_t g_dl_bytes_done = 0;
+
 struct RoleInfo {
     std::string name, vocation, star;
     bool incomplete = false;
@@ -268,6 +272,7 @@ static std::string http_download_ex(const std::string &url, const std::string &d
         if (r <= 0) break;
         fwrite(buf, 1, r, f);
         done += r;
+        g_dl_bytes_done += r;   /* 2026-10-07 速度统计真实字节 */
         int64_t full = base + total;   // 206 时 total=剩余部分
         if (full > 0 && step_cb) {
             int pct = (int)((base + done) * 100 / full);
