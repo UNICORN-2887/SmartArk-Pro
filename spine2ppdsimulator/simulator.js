@@ -471,6 +471,10 @@ el.btnPickDir.onclick = () => {
 
 el.btnDemo.onclick = () => loadFrom(new MapVFS(makeDemoFiles()), '', '内置演示数据（合成，经真实 .raw 解码路径）');
 
+/* 2026-10-07b 版本标记:形态下拉修复(50b1215)后用户需确认加载了新代码
+   (file:// 下浏览器可能缓存旧 simulator.js → 形态切换"依然没解决") */
+el.srcStatus.textContent = 'sim 2026-10-07b(形态下拉修复版)';
+
 el.formSel.onchange = () => {
   if (!st.vfs) return;
   loadFrom(st.vfs, el.formSel.value, st.sourceName);
