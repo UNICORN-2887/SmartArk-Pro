@@ -453,7 +453,7 @@ static void battery_task(void *arg) {
 bool image_display_init(void)
 {
     /* 2026-10-06 版本戳:用户核对烧录版本(电量横屏位置/立牌旋转/按钮恢复/Ur_Info 下载) */
-    ESP_LOGI(TAG, "FWV=20261006-2200 (batt-landscape-v2 + standee-rotate + orig-pos + urinfo-public)");
+    ESP_LOGI(TAG, "FWV=20261007-0010 (batt-screen-layer-fix + dlspeed-pct-reset + page-left + protect-rect)");
     ESP_LOGI(TAG, "Initializing image display...");
 
     if (!ppa_init()) {
