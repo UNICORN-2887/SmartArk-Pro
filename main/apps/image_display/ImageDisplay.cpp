@@ -382,7 +382,7 @@ static void batt_apply_orientation(void) {
         lv_obj_set_parent(s_batt_box, lv_screen_active());
         /* 2026-10-07 关键:竖屏 lv_obj_align 设置的是 align 样式(LVGL 9 持续生效),
            布局重算会把对象拉回 (374,2) 覆盖 set_pos → 必须先清除 align */
-        lv_obj_set_style_align(s_batt_box, 0, 0);
+        lv_obj_set_style_align(s_batt_box, LV_ALIGN_DEFAULT, 0);
         lv_obj_set_size(s_batt_box, 32, 100);
         /* 2026-10-07 用户拍板:照抄 profile"动图"按钮的格式与位置
            (pos 475,713 rot 900,用户确认该按钮横屏位置正确);
