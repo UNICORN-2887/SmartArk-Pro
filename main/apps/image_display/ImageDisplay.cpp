@@ -3211,6 +3211,13 @@ static void dl_speed_reset(int64_t total) {
 static void dl_speed_fmt(int pct, char *out, size_t n) {
     int kbps = 0;
     int64_t now = esp_timer_get_time();
+    /* 2026-10-06 修复:多文件下载每个文件 pct 从 0 重新开始,pct 回退
+       (新文件开始)时重置窗口,否则 bytes 为负 → 速度永久不显示。
+       后台下载切回进度条同理:窗口持续滚动,不依赖弹窗重建 */
+    if (pct < s_dl_speed_last_pct) {
+        s_dl_speed_ts = now;
+        s_dl_speed_last_pct = pct;
+    }
     if (s_dl_speed_ts > 0 && now > s_dl_speed_ts && s_dl_speed_bytes_total > 0) {
         int64_t bytes = (int64_t)(pct - s_dl_speed_last_pct) * s_dl_speed_bytes_total / 100;
         kbps = (int)(bytes * 1000000 / (now - s_dl_speed_ts) / 1024);
