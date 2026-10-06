@@ -4332,6 +4332,10 @@ var spine;
 				name = attachmentName;
 			var typeIndex = input.readByte();
 			var type = SkeletonBinary.AttachmentTypeValues[typeIndex];
+			if (globalThis.__attdbg === undefined) globalThis.__attdbg = {};
+			var _tn = attachmentName || name;
+			globalThis.__attdbg[_tn] = (globalThis.__attdbg[_tn] || 0) + 1;
+			globalThis.__attdbg[_tn + '#type'] = typeIndex;
 			switch (type) {
 				case spine.AttachmentType.Region: {
 					var path = input.readStringRef();
@@ -4346,8 +4350,11 @@ var spine;
 					if (path == null)
 						path = name;
 					var region = this.attachmentLoader.newRegionAttachment(skin, name, path);
-					if (region == null)
+					if (region == null) {
+						if (globalThis.__missreg === undefined) globalThis.__missreg = [];
+						if (globalThis.__missreg.length < 12) globalThis.__missreg.push(name + ' -> ' + path);
 						return null;
+					}
 					region.path = path;
 					region.x = x * scale;
 					region.y = y * scale;
@@ -8037,6 +8044,10 @@ var spine;
 			offset[RegionAttachment.OY4] = localYCos + localX2Sin;
 		};
 		RegionAttachment.prototype.setRegion = function (region) {
+			/* 2026-10-07 修复:官方 3.8 此函数 return this;本文件缺失 →
+			   new RegionAttachment(n).setRegion(r) 返回 undefined,
+			   readAttachment 里 region == null 判定(JS undefined==null)误判
+			   → 全部 Region 附件被丢弃(Ceobe 等 17 角色缺脸/缺腿根因!) */
 			this.region = region;
 			var uvs = this.uvs;
 			if (region.rotate) {
@@ -8058,6 +8069,7 @@ var spine;
 				uvs[5] = region.v;
 				uvs[6] = region.u2;
 				uvs[7] = region.v2;
+				return this;
 			}
 		};
 		RegionAttachment.prototype.computeWorldVertices = function (bone, worldVertices, offset, stride) {
