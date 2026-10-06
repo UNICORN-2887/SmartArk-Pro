@@ -313,7 +313,14 @@ const mesh = {
     animations: {},
 };
 
-mesh.base = collectFrame(defaultAnim, 0);
+/* 2026-10-07 base 帧修复:原 collectFrame(defaultAnim, 0) 里 applyPose 跳过
+   Default(历史原因:Default 曾把隐藏链移出屏幕),base 帧实际是 setup 姿势;
+   bbox 却用 Default 姿势 → setup 顶点在 Default bbox 映射下飞出屏幕
+   (Ceobe 斧子实测 base 顶点 y=-28、x 到 549 出屏 → 用户看到斧子飞左上)。
+   改用 Idle 首帧:与动作循环一致、武器 detach 正确、静态图与动作无缝衔接;
+   无 Idle 的角色回退 Default(保持旧行为) */
+const baseAnim = data.animations.find(a => a.name === 'Idle') || defaultAnim;
+mesh.base = collectFrame(baseAnim, 0);
 for (const anim of data.animations) {
     if (anim.name === 'Default') continue;
     /* 2026-10-06 与 export_anims 同步:片段过滤(瞬时变体不转) */
