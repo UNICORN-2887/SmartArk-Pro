@@ -490,7 +490,7 @@ static int scan_bound_user_uid(void);
 bool image_display_init(void)
 {
     /* 2026-10-06 版本戳:用户核对烧录版本(电量横屏位置/立牌旋转/按钮恢复/Ur_Info 下载) */
-    ESP_LOGI(TAG, "FWV=20261007-0014 (batt-100x32-rot900 + dl-free-psram + urinfo-reenter)");
+    ESP_LOGI(TAG, "FWV=20261007-0015 (batt-manual-pos + cp-ota-public + dl-free-psram)");
     ESP_LOGI(TAG, "Initializing image display...");
 
     if (!ppa_init()) {
