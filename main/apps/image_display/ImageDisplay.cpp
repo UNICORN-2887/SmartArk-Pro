@@ -381,23 +381,15 @@ static void batt_apply_orientation(void) {
         /* 2026-10-06 layer_sys 层的 transform 旋转不渲染(横屏看不到胶囊的根因):
            横屏时挂到 screen 层(与旋转按钮同层同规律),竖屏回 sys(全页面置顶) */
         lv_obj_set_parent(s_batt_box, lv_screen_active());
-        lv_obj_set_size(s_batt_box, 32, 100);
-        /* 2026-10-07 用户拍板:照抄 profile"动图"按钮的格式与位置
-           (pos 475,713 rot 900,用户确认该按钮横屏位置正确);
-           胶囊用 (475,700) 使视觉 [443,475]×[700,800] 完全在屏内。
-           2026-10-07 实测(烧录日志 pos=374,2 size=100x32):
-           "clear align + set_pos" 组合无效——LVGL 9 布局重算仍按旧
-           TOP_RIGHT 样式把对象拉回 (374,2) 且尺寸被打回竖屏值。
-           改为主动设置 align=TOP_LEFT + 偏移 (475,700):align 样式
-           显式存在,任何布局重算都只会把它放回 (475,700)——
-           化"拉回"为稳定锚点,不再依赖清除样式是否生效 */
+        /* 2026-10-07 方向修正(用户对照"动图"按钮 80x45+rot900 物理横):
+           横屏画面旋转 90° 显示,逻辑横条不旋转 → 物理竖条。因此横屏
+           保持 100x32 横尺寸 + rot 900(与按钮同规律)→ 物理 100x32 横。
+           旧方案 32x100+rot900 在物理上恰为竖条(用户多次报告"竖着") */
+        lv_obj_set_size(s_batt_box, 100, 32);
+        /* 位置:照抄"动图"按钮(475,713)附近;rot 900 绕中心,视觉与按钮同区 */
         lv_obj_align(s_batt_box, LV_ALIGN_TOP_LEFT, 475, 700);
-        /* 2026-10-07 与"动图"按钮完全对齐:按钮仅 set_style_transform_rotation(900)
-           (默认中心 pivot)即正确显示。胶囊曾加 pivot(0,0)(绕左上角旋转 → 位置
-           偏移出屏/渲染异常),去掉 pivot 与按钮一致;旋转后视觉位置约为
-           (441,716) 仍在屏内 */
         lv_obj_set_style_transform_rotation(s_batt_box, 900, 0);
-        lv_obj_set_flex_flow(s_batt_box, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_flow(s_batt_box, LV_FLEX_FLOW_ROW);
         /* 2026-10-07 诊断:打印旋转样式值(用户报告胶囊仍竖着,确认 rotation 是否落上) */
         ESP_LOGI(TAG, "batt land set: pos=%d,%d size=%dx%d rot=%d parent=%p screen=%p",
                  lv_obj_get_x(s_batt_box), lv_obj_get_y(s_batt_box),
@@ -416,8 +408,7 @@ static void batt_apply_orientation(void) {
     lv_label_set_text(s_batt_icon, "");
     s_batt_pct = lv_label_create(s_batt_box);
     lv_label_set_text(s_batt_pct, "");
-    if (land) lv_obj_set_size(s_batt_pct, 32, 64);   /* 视觉=旋转后 64×32,"100%" 不折行 */
-    else lv_obj_set_width(s_batt_pct, 64);
+    lv_obj_set_width(s_batt_pct, 64);   /* 2026-10-07 横竖屏同为 100x32 横条,统一 64 宽 */
     lv_obj_set_style_text_align(s_batt_pct, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(s_batt_pct,
         Board::GetInstance().GetDisplay()->GetTextFont(), 0);
@@ -425,17 +416,17 @@ static void batt_apply_orientation(void) {
 }
 
 static void batt_ui_tick(lv_timer_t *timer) {
-    /* 2026-10-07 兜底:横屏时若胶囊被任何布局重算拉离锚点/改回竖屏尺寸
-       (实测曾出现 pos=374,2 size=100x32),每 tick 强制复位到 (475,700) 32×100 */
+    /* 2026-10-07 兜底:横屏时若胶囊被任何布局重算拉离锚点/改回尺寸
+       (实测曾出现 pos=374,2 size=100x32),每 tick 强制复位到 (475,700) 100×32 */
     if (s_batt_land && s_batt_box && lv_obj_is_valid(s_batt_box)) {
         if (lv_obj_get_x(s_batt_box) != 475 || lv_obj_get_y(s_batt_box) != 700 ||
-            lv_obj_get_width(s_batt_box) != 32 || lv_obj_get_height(s_batt_box) != 100) {
+            lv_obj_get_width(s_batt_box) != 100 || lv_obj_get_height(s_batt_box) != 32) {
             static int warn_cnt = 0;
             if (warn_cnt++ < 5)
-                ESP_LOGW(TAG, "batt 兜底复位: 实际 pos=%d,%d size=%dx%d → (475,700) 32x100",
+                ESP_LOGW(TAG, "batt 兜底复位: 实际 pos=%d,%d size=%dx%d → (475,700) 100x32",
                          lv_obj_get_x(s_batt_box), lv_obj_get_y(s_batt_box),
                          lv_obj_get_width(s_batt_box), lv_obj_get_height(s_batt_box));
-            lv_obj_set_size(s_batt_box, 32, 100);
+            lv_obj_set_size(s_batt_box, 100, 32);
             lv_obj_align(s_batt_box, LV_ALIGN_TOP_LEFT, 475, 700);
         }
     }
@@ -488,7 +479,7 @@ static int scan_bound_user_uid(void);
 bool image_display_init(void)
 {
     /* 2026-10-06 版本戳:用户核对烧录版本(电量横屏位置/立牌旋转/按钮恢复/Ur_Info 下载) */
-    ESP_LOGI(TAG, "FWV=20261007-0013 (dl-pause-cover + batt-no-pivot-rot-diag)");
+    ESP_LOGI(TAG, "FWV=20261007-0014 (batt-100x32-rot900 + dl-free-psram + urinfo-reenter)");
     ESP_LOGI(TAG, "Initializing image display...");
 
     if (!ppa_init()) {
@@ -2877,6 +2868,16 @@ static void ur_info_fetch_task(void *arg) {
        原条件 missing>0(齐全)才下载 → 缺失时从不下载(蟑螂派对一直不更新上传内容的根因) */
     int missing = role_download_check_user(uid, "Ur_Info", &total);
     if (missing == 0) role_download_fetch_user(uid, "Ur_Info", NULL, NULL);
+    /* 2026-10-07 下载完成且主页打开中 → 关闭重开刷新(曾:新图下载完成
+       但页面仍显示旧图,用户以为没更新;profile_show 有 overlay 重入保护,
+       故 hide 后再 show) */
+    lvgl_port_lock(pdMS_TO_TICKS(2000));
+    bool open = s_profile_overlay && lv_obj_is_valid(s_profile_overlay);
+    lvgl_port_unlock();
+    if (open && missing == 0) {
+        profile_hide();
+        profile_show();
+    }
     vTaskDelete(NULL);
 }
 
@@ -4483,6 +4484,9 @@ static void index_dl_start(void) {
     dl_lock_buttons(true);
     video_playback_stop();   /* 2026-10-07 下载优先:暂停封面播放(30FPS JPEG 解码
                                 抢 PSRAM/CPU,实测下载仅 20KB/s;恢复在 fetch 收尾) */
+    ppa_release_expendable_caches();   /* 2026-10-07 实测下载前 PSRAM 仅剩 1.4MB
+                                          (largest 557KB)→ 任务/缓冲分配失败卡死;
+                                          释放可牺牲缓存给下载让路 */
     xTaskCreate(index_dl_fetch_task, "dl_fetch", 16384, NULL, 5, NULL);
 }
 
@@ -4786,6 +4790,7 @@ static void index_update_popup_show(const char* name, const char* voc, const cha
         pp_popup_show();
         dl_lock_buttons(true);
         video_playback_stop();
+        ppa_release_expendable_caches();   // 2026-10-07 PSRAM 让路(见 index_dl_start)
         xTaskCreate(index_dl_fetch_task, "dl_upd", 16384, NULL, 5, NULL);
     }, LV_EVENT_CLICKED, NULL);
 
@@ -4809,6 +4814,7 @@ static void index_update_popup_show(const char* name, const char* voc, const cha
         dl_lock_buttons(true);
         s_dl_cancel = false;
         video_playback_stop();
+        ppa_release_expendable_caches();   // 2026-10-07 PSRAM 让路(见 index_dl_start)
         xTaskCreate(index_dl_fetch_task, "dl_upd_bg", 16384, NULL, 5, NULL);
     }, LV_EVENT_CLICKED, NULL);
 
@@ -4934,6 +4940,7 @@ static void index_clone_start(void) {
     pp_popup_show();
     dl_lock_buttons(true);
     video_playback_stop();   // 2026-10-07 下载优先(恢复在 fetch 收尾)
+    ppa_release_expendable_caches();   // 2026-10-07 PSRAM 让路(见 index_dl_start)
     xTaskCreate(index_clone_fetch_task, "dl_clone", 16384, NULL, 5, NULL);
 }
 
