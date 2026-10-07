@@ -2848,6 +2848,7 @@ static void profile_progress_cb(const char* stage, int percent) {
 /* 2026-10-06 用户仓库 Ur_Info 后台补下载(my.html 上传的横屏主页照片/视频);
    打开 profile 时本地缺失则拉取,下次打开生效(静默,不阻塞 UI) */
 static int scan_bound_user_uid(void);   // 前向声明(定义在文件后部)
+void profile_show(void);   // 2026-10-07 前向声明(ur_info_fetch_task 下载后重开主页)
 
 /* 2026-10-07 开机预下载修复:实测 WiFi 40s+ 才连上,8s 延迟时网络未就绪,
    fetch 一次失败即静默放弃 → 用户进入后无预下载。先等网络就绪(最多 90s) */
