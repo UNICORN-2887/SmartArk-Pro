@@ -46,6 +46,7 @@ void lv2_test_show(void);  // 供 menu_ui 调用
 static void lv2_test_hide(void);
 
 #include "PPACompositor.h"
+extern void mjpeg_free_buffer(void);   // 2026-10-07 MjpegPlayer 预读缓冲彻底释放(PSRAM 让路)
 #include "bind_qr.h"   /* 2026-10-05 六位码绑定页二维码(200x200 RGB565) */
 #include "driver/jpeg_decode.h"
 #include "driver/jpeg_decode.h"
