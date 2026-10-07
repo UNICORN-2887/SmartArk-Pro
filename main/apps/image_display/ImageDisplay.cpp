@@ -392,14 +392,17 @@ static void batt_apply_orientation(void) {
            显式存在,任何布局重算都只会把它放回 (475,700)——
            化"拉回"为稳定锚点,不再依赖清除样式是否生效 */
         lv_obj_align(s_batt_box, LV_ALIGN_TOP_LEFT, 475, 700);
-        lv_obj_set_style_transform_pivot_x(s_batt_box, 0, 0);
-        lv_obj_set_style_transform_pivot_y(s_batt_box, 0, 0);
+        /* 2026-10-07 与"动图"按钮完全对齐:按钮仅 set_style_transform_rotation(900)
+           (默认中心 pivot)即正确显示。胶囊曾加 pivot(0,0)(绕左上角旋转 → 位置
+           偏移出屏/渲染异常),去掉 pivot 与按钮一致;旋转后视觉位置约为
+           (441,716) 仍在屏内 */
         lv_obj_set_style_transform_rotation(s_batt_box, 900, 0);
         lv_obj_set_flex_flow(s_batt_box, LV_FLEX_FLOW_COLUMN);
-        /* 2026-10-07 诊断:align 之后打印实际坐标 */
-        ESP_LOGI(TAG, "batt land set: pos=%d,%d size=%dx%d parent=%p screen=%p",
+        /* 2026-10-07 诊断:打印旋转样式值(用户报告胶囊仍竖着,确认 rotation 是否落上) */
+        ESP_LOGI(TAG, "batt land set: pos=%d,%d size=%dx%d rot=%d parent=%p screen=%p",
                  lv_obj_get_x(s_batt_box), lv_obj_get_y(s_batt_box),
                  lv_obj_get_width(s_batt_box), lv_obj_get_height(s_batt_box),
+                 (int)lv_obj_get_style_transform_rotation(s_batt_box, 0),
                  (void*)lv_obj_get_parent(s_batt_box), (void*)lv_screen_active());
     } else {
         lv_obj_set_parent(s_batt_box, lv_layer_sys());
@@ -485,7 +488,7 @@ static int scan_bound_user_uid(void);
 bool image_display_init(void)
 {
     /* 2026-10-06 版本戳:用户核对烧录版本(电量横屏位置/立牌旋转/按钮恢复/Ur_Info 下载) */
-    ESP_LOGI(TAG, "FWV=20261007-0012 (bg-btn-no-cancel + popup-speed + speed-window-cache + urinfo-cond)");
+    ESP_LOGI(TAG, "FWV=20261007-0013 (dl-pause-cover + batt-no-pivot-rot-diag)");
     ESP_LOGI(TAG, "Initializing image display...");
 
     if (!ppa_init()) {
@@ -4478,6 +4481,8 @@ static void index_dl_start(void) {
     s_dl_cancel = false;
     pp_popup_show();
     dl_lock_buttons(true);
+    video_playback_stop();   /* 2026-10-07 下载优先:暂停封面播放(30FPS JPEG 解码
+                                抢 PSRAM/CPU,实测下载仅 20KB/s;恢复在 fetch 收尾) */
     xTaskCreate(index_dl_fetch_task, "dl_fetch", 16384, NULL, 5, NULL);
 }
 
@@ -4775,11 +4780,12 @@ static void index_update_popup_show(const char* name, const char* voc, const cha
     lv_obj_set_style_text_font(yes_lbl, s_chat_font, 0);
     lv_obj_center(yes_lbl);
     lv_obj_add_event_cb(yes_btn, [](lv_event_t* e) {
-        /* 前台下载:进度弹窗 + 锁定页面 */
+        /* 前台下载:进度弹窗 + 锁定页面 + 暂停封面(下载优先) */
         if (s_upd_popup) { lv_obj_del(s_upd_popup); s_upd_popup = NULL; }
         s_dl_cancel = false;
         pp_popup_show();
         dl_lock_buttons(true);
+        video_playback_stop();
         xTaskCreate(index_dl_fetch_task, "dl_upd", 16384, NULL, 5, NULL);
     }, LV_EVENT_CLICKED, NULL);
 
@@ -4795,13 +4801,14 @@ static void index_update_popup_show(const char* name, const char* voc, const cha
     lv_obj_set_style_text_font(bg_lbl, s_chat_font, 0);
     lv_obj_center(bg_lbl);
     lv_obj_add_event_cb(bg_btn, [](lv_event_t* e) {
-        /* 后台下载:展示立绘(旧资源) + 顶部小条 + 锁定页面 */
+        /* 后台下载:顶部小条 + 锁定页面。2026-10-07 不再切立绘(重载 cover
+           抢 PSRAM/CPU 拖慢下载,实测 20KB/s),并暂停封面播放(下载优先);
+           下载完成收尾自动进新立绘 */
         if (s_upd_popup) { lv_obj_del(s_upd_popup); s_upd_popup = NULL; }
-        agent_index_hide();
-        cover_display_start_async(s_dl_path);
         pp_mini_show();
         dl_lock_buttons(true);
         s_dl_cancel = false;
+        video_playback_stop();
         xTaskCreate(index_dl_fetch_task, "dl_upd_bg", 16384, NULL, 5, NULL);
     }, LV_EVENT_CLICKED, NULL);
 
@@ -4874,10 +4881,11 @@ static void index_dl_fetch_task(void *arg) {
             agent_index_hide();                    // 索引页已关时无害
             cover_display_start_async(s_dl_path);
         } else if (r == 1) {
-            /* 失败:解锁 + 提示(.part 保留,下次续传) */
+            /* 失败:解锁 + 提示(.part 保留,下次续传);恢复封面播放(下载期暂停) */
             ESP_LOGE(TAG, "dl: %s 失败(.part 保留可续传)", s_dl_name);
             pp_hide_all();
             dl_lock_buttons(false);
+            video_playback_start(30);   // 2026-10-07 下载期暂停的封面恢复
             lv_obj_t* tip = lv_label_create(lv_layer_top());
             lv_label_set_text(tip, "下载失败,请检查网络\n(已下载部分已保留)");
             lv_obj_set_style_bg_color(tip, lv_color_hex(0x222222), 0);
@@ -4902,10 +4910,11 @@ static void index_dl_fetch_task(void *arg) {
             vTaskDelete(NULL);
             return;
         } else {
-            /* r==2 取消:解锁,留在当前页面(索引页或立绘) */
+            /* r==2 取消:解锁,留在当前页面(索引页或立绘);恢复封面播放 */
             ESP_LOGI(TAG, "dl: %s 已取消(.part 保留可续传)", s_dl_name);
             pp_hide_all();
             dl_lock_buttons(false);
+            video_playback_start(30);   // 2026-10-07 下载期暂停的封面恢复
         }
         lvgl_port_unlock();
     }
@@ -4924,6 +4933,7 @@ static void index_clone_start(void) {
     s_dl_user_mode = true;
     pp_popup_show();
     dl_lock_buttons(true);
+    video_playback_stop();   // 2026-10-07 下载优先(恢复在 fetch 收尾)
     xTaskCreate(index_clone_fetch_task, "dl_clone", 16384, NULL, 5, NULL);
 }
 
@@ -5007,6 +5017,7 @@ static void index_clone_fetch_task(void *arg) {
             ESP_LOGE(TAG, "clone+dl: %s 下载失败(.part 保留)", s_dl_name);
             pp_hide_all();
             dl_lock_buttons(false);
+            video_playback_start(30);   // 2026-10-07 下载期暂停的封面恢复
             lv_obj_t* tip = lv_label_create(lv_layer_top());
             lv_label_set_text(tip, "下载失败,请检查网络\n(克隆已完成,可直接重试下载)");
             lv_obj_set_style_bg_color(tip, lv_color_hex(0x222222), 0);
@@ -5032,6 +5043,7 @@ static void index_clone_fetch_task(void *arg) {
         } else {
             pp_hide_all();   // r==2 取消
             dl_lock_buttons(false);
+            video_playback_start(30);   // 2026-10-07 下载期暂停的封面恢复
         }
         lvgl_port_unlock();
     }
