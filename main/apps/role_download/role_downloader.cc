@@ -598,84 +598,122 @@ static int fetch_impl(const char *voc, const char *star, const char *name,
     dl_unlock();
     if (files.empty()) return 1;
 
-    /* 2. 逐文件增量下载:
+    /* 2. 逐文件增量下载(2026-10-07 并发版):
      *    - 已存在且大小与清单一致 → 跳过(增量)
      *    - 先下到 <目标>.part(断点续传载体),完成后再改名落位
      *    - .part 已有部分数据 → HTTP Range 续传
-     *    旧文件在失败/取消时保持原样(不再整体搬备份区);.done 只在全部就绪时写。 */
+     *    旧文件在失败/取消时保持原样;.done 只在全部就绪时写。
+     *    并发:esp-hosted 链路单连接往返延迟 ~1.5s,串行吞吐仅 10-40KB/s;
+     *    文件级 3 路并行(不同连接互不阻塞),总吞吐约 3 倍 */
     int ok = 0, skip = 0, fail = 0;
     bool cancelled = false;
     size_t total_files = files.size();
-    for (size_t i = 0; i < total_files; i++) {
-        const FileItem &f = files[i];
-        if (step_cb && !step_cb((int)(i * 100 / total_files), f.rel.c_str(), ud)) {
+    int NW = (total_files < 12) ? 1 : 3;
+    struct DLW {   /* worker 参数与本地统计(worker 结束后主循环汇总) */
+        const std::vector<FileItem> *files;
+        const char *voc, *star, *name;
+        bool umode; int uid; std::string urel; bool pmode; std::string prel;
+        size_t i0, i1;
+        volatile bool cancelled = false;   /* 共享取消标志(多读者,单写者=主循环) */
+        volatile int done = 0;             /* 本 worker 完成文件数 */
+        volatile bool finished = false;
+        SemaphoreHandle_t cnt;             /* 每完成一个文件 give 一次(主循环计数) */
+        int ok = 0, skip = 0, fail = 0;
+    } args[3];
+    SemaphoreHandle_t cnt = xSemaphoreCreateCounting((UBaseType_t)total_files, 0);
+    for (int w = 0; w < NW; w++) {
+        args[w].files = &files;
+        args[w].voc = voc; args[w].star = star; args[w].name = name;
+        args[w].umode = umode; args[w].uid = uid; args[w].urel = urel;
+        args[w].pmode = pmode; args[w].prel = prel;
+        args[w].i0 = total_files * w / NW;
+        args[w].i1 = total_files * (w + 1) / NW;
+        args[w].cnt = cnt;
+    }
+    for (int w = 0; w < NW; w++) {
+        xTaskCreate([](void *p) {
+            auto *a = (DLW *)p;
+            for (size_t i = a->i0; i < a->i1 && !a->cancelled; i++) {
+                const FileItem &f = (*a->files)[i];
+                std::string dst = file_dst_for(a->voc, a->star, a->name, f.rel,
+                                               a->umode, a->uid, a->urel, a->pmode, a->prel);
+                struct stat st;
+                bool skip_one = false;
+                if (stat(dst.c_str(), &st) == 0 && st.st_size == f.size) {
+                    skip_one = true;
+                    if (f.rel.size() >= 9 && f.rel.compare(f.rel.size() - 9, 9, "mesh.ppdq") == 0) {
+                        FILE *ff = fopen(dst.c_str(), "rb");
+                        char mg[4] = {0, 0, 0, 0};
+                        if (!ff || fread(mg, 1, 4, ff) != 4 || memcmp(mg, "PPDQ", 4) != 0) skip_one = false;
+                        if (ff) fclose(ff);
+                    }
+                }
+                if (skip_one) { a->skip++; a->done++; xSemaphoreGive(a->cnt); continue; }
+                std::string durl = file_url_for(a->voc, a->star, a->name, f.rel,
+                                                a->umode, a->uid, a->urel, a->pmode, a->prel);
+                std::string dir = dst;
+                size_t slash = dir.rfind('/');
+                if (slash != std::string::npos) mkdirs(dir.substr(0, slash));
+                std::string part = dst + ".part";
+                int64_t offset = 0;
+                if (stat(part.c_str(), &st) == 0) {
+                    if (st.st_size == f.size) {
+                        if (rename_overwrite(part.c_str(), dst.c_str())) { a->ok++; a->done++; xSemaphoreGive(a->cnt); continue; }
+                        unlink(part.c_str());
+                    } else if (st.st_size > f.size) {
+                        unlink(part.c_str());
+                    } else {
+                        offset = st.st_size;
+                    }
+                }
+                ESP_LOGI(TAG, "fetch %s: 清单大小=%d, 断点=%d",
+                         f.rel.c_str(), (int)f.size, (int)offset);
+                std::string derr;
+                for (int attempt = 0; attempt < 3 && !a->cancelled; attempt++) {
+                    derr = http_download_ex(durl, part, NULL, NULL, offset);
+                    if (derr.empty()) break;
+                    if (derr == "cancelled") { a->cancelled = true; break; }
+                    ESP_LOGW(TAG, "%s 下载失败(第%d次): %s | URL: %s", f.rel.c_str(), attempt + 1,
+                             derr.c_str(), durl.c_str());
+                    vTaskDelay(pdMS_TO_TICKS(1500));
+                    if (stat(part.c_str(), &st) == 0 && st.st_size > offset)
+                        offset = st.st_size;
+                }
+                if (derr.empty()) {
+                    if (rename_overwrite(part.c_str(), dst.c_str())) a->ok++;
+                    else a->fail++;
+                } else if (derr != "cancelled") {
+                    a->fail++;   // .part 保留,下次续传
+                } else {
+                    a->cancelled = true;
+                }
+                a->done++;
+                xSemaphoreGive(a->cnt);
+            }
+            a->finished = true;
+            vTaskDelete(NULL);
+        }, "dl_w", 12288, &args[w], 5, NULL);
+    }
+    /* 主循环:按完成文件数推进进度;取消时置共享标志,worker 尽快退出 */
+    size_t done = 0;
+    while (done < total_files) {
+        if (!xSemaphoreTake(cnt, pdMS_TO_TICKS(60000))) {
+            if (cancelled) break;
+            /* 超时且无取消:个别 worker 卡死(网络极端),继续等 */
+        }
+        done++;
+        if (step_cb && !step_cb((int)(done * 100 / total_files), nullptr, ud)) {
             cancelled = true;
+            for (int w = 0; w < NW; w++) args[w].cancelled = true;
             break;
         }
-        std::string dst = file_dst_for(voc, star, name, f.rel, umode, uid, urel, pmode, prel);
-        struct stat st;
-        if (stat(dst.c_str(), &st) == 0 && st.st_size == f.size) {
-            /* 2026-09-17:mesh.ppdq 坏文件(下载中断残留,大小一致 magic 错)→ 不跳过,强制重下 */
-            bool bad_ppdq = false;
-            if (f.rel.size() >= 9 && f.rel.compare(f.rel.size() - 9, 9, "mesh.ppdq") == 0) {
-                FILE *ff = fopen(dst.c_str(), "rb");
-                char mg[4] = {0, 0, 0, 0};
-                if (!ff || fread(mg, 1, 4, ff) != 4 || memcmp(mg, "PPDQ", 4) != 0) bad_ppdq = true;
-                if (ff) fclose(ff);
-            }
-            if (!bad_ppdq) {
-                skip++;   // 已一致:不重复下载
-                continue;
-            }
-            ESP_LOGW(TAG, "fetch: %s magic 坏 → 重下", f.rel.c_str());
-        }
-        std::string durl = file_url_for(voc, star, name, f.rel, umode, uid, urel, pmode, prel);
-
-        /* 目录不存在时 mkdirs(根目录在第 1 个文件时创建) */
-        std::string dir = dst;
-        size_t slash = dir.rfind('/');
-        if (slash != std::string::npos) {
-            dir = dir.substr(0, slash);
-            if (!mkdirs(dir)) {
-                ESP_LOGW(TAG, "mkdirs fail: %s", dir.c_str());
-            }
-        }
-        std::string part = dst + ".part";
-        int64_t offset = 0;
-        if (stat(part.c_str(), &st) == 0) {
-            if (st.st_size == f.size) {   // 上次已下完未改名:直接落位
-                if (rename_overwrite(part.c_str(), dst.c_str())) { ok++; continue; }
-                ESP_LOGW(TAG, "%s .part 改名失败,重下", f.rel.c_str());
-                unlink(part.c_str());
-            } else if (st.st_size > f.size) {
-                unlink(part.c_str());     // 异常:比目标还大,作废重下
-            } else {
-                offset = st.st_size;      // 断点续传
-            }
-        }
-
-        ESP_LOGI(TAG, "fetch %s: 清单大小=%d, 断点=%d, part存在=%d",
-                 f.rel.c_str(), (int)f.size, (int)offset,
-                 (int)(stat(part.c_str(), &st) == 0));
-        std::string derr;
-        for (int attempt = 0; attempt < 3; attempt++) {
-            derr = http_download_ex(durl, part, step_cb, ud, offset);
-            if (derr.empty()) break;
-            if (derr == "cancelled") { cancelled = true; break; }
-            ESP_LOGW(TAG, "%s 下载失败(第%d次): %s | URL: %s", f.rel.c_str(), attempt + 1,
-                     derr.c_str(), durl.c_str());   /* 2026-10-07 URL 入日志(排查 404/400) */
-            vTaskDelay(pdMS_TO_TICKS(1500));
-            if (stat(part.c_str(), &st) == 0 && st.st_size > offset)
-                offset = st.st_size;   // 重试从新进度续传
-        }
-        if (cancelled) break;
-        if (derr.empty()) {
-            if (rename_overwrite(part.c_str(), dst.c_str())) ok++;
-            else { ESP_LOGW(TAG, "rename .part 失败: %s", dst.c_str()); fail++; }
-        } else {
-            fail++;   // .part 保留,下次续传
-        }
     }
+    /* 汇总(等 worker 全部退出) */
+    for (int w = 0; w < NW; w++)
+        while (!args[w].finished) vTaskDelay(pdMS_TO_TICKS(10));
+    ok = 0; skip = 0; fail = 0;
+    for (int w = 0; w < NW; w++) { ok += args[w].ok; skip += args[w].skip; fail += args[w].fail; }
+    vSemaphoreDelete(cnt);
 
     /* 3. 收尾:全部就绪(下载+跳过)写 .done;失败/取消保留 .part 与旧 .done(角色按旧数据仍完整) */
     if (cancelled) {
