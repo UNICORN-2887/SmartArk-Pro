@@ -411,11 +411,11 @@ static void show_error(void) {
     lv_label_set_text(l, "连接失败:密码错误或信号弱");   /* 连接失败:密码错误或信号弱 */
     set_font(l);
     lv_obj_set_style_text_color(l, lv_color_hex(0xFF6B6B), 0);
-    lv_obj_align(l, LV_ALIGN_CENTER, 0, -30);
+    lv_obj_align(l, LV_ALIGN_CENTER, 0, -90);
 
     lv_obj_t *b1 = lv_btn_create(s_page);
-    lv_obj_set_size(b1, 180, 46);
-    lv_obj_align(b1, LV_ALIGN_CENTER, -100, 30);
+    lv_obj_set_size(b1, 200, 46);
+    lv_obj_align(b1, LV_ALIGN_CENTER, 0, -20);
     lv_obj_set_style_bg_color(b1, lv_color_hex(0x00AA55), 0);
     lv_obj_t *t1 = lv_label_create(b1);
     lv_label_set_text(t1, "重试");   /* 重试 */
@@ -427,9 +427,24 @@ static void show_error(void) {
         else show_pwd_page();
     }, LV_EVENT_CLICKED, NULL);
 
+    /* 2026-10-07 用户要求:密码输错后能改密码重连(曾只有重试/返回列表,
+       改不了密码只能返回列表再进,密码还残留) */
+    lv_obj_t *b1b = lv_btn_create(s_page);
+    lv_obj_set_size(b1b, 200, 46);
+    lv_obj_align(b1b, LV_ALIGN_CENTER, 0, 44);
+    lv_obj_set_style_bg_color(b1b, lv_color_hex(0x2b6cb0), 0);
+    lv_obj_t *t1b = lv_label_create(b1b);
+    lv_label_set_text(t1b, "重新输入密码");   /* 重新输入密码 */
+    set_font(t1b);
+    lv_obj_center(t1b);
+    lv_obj_add_event_cb(b1b, [](lv_event_t *e) {
+        s_pwd_len = 0;   // 清掉旧密码,重新输入
+        show_pwd_page();
+    }, LV_EVENT_CLICKED, NULL);
+
     lv_obj_t *b2 = lv_btn_create(s_page);
-    lv_obj_set_size(b2, 180, 46);
-    lv_obj_align(b2, LV_ALIGN_CENTER, 100, 30);
+    lv_obj_set_size(b2, 200, 46);
+    lv_obj_align(b2, LV_ALIGN_CENTER, 0, 108);
     lv_obj_set_style_bg_color(b2, lv_color_hex(0x3a3f4b), 0);
     lv_obj_t *t2 = lv_label_create(b2);
     lv_label_set_text(t2, "返回列表");   /* 返回列表 */
