@@ -390,8 +390,8 @@ static void batt_apply_orientation(void) {
         lv_obj_align(s_batt_box, LV_ALIGN_TOP_LEFT, 475, 700);
         lv_obj_set_style_transform_rotation(s_batt_box, 900, 0);
         /* 2026-10-07 空框修复:rot+flex 组合在 LVGL 9 布局异常(图标/数字不渲染),
-           横屏禁用 flex,子对象手动定位 */
-        lv_obj_set_flex_flow(s_batt_box, LV_FLEX_FLOW_NONE);
+           横屏禁用 flex(LV_LAYOUT_NONE),子对象手动定位 */
+        lv_obj_set_layout(s_batt_box, LV_LAYOUT_NONE);
         /* 2026-10-07 诊断:打印旋转样式值(用户报告胶囊仍竖着,确认 rotation 是否落上) */
         ESP_LOGI(TAG, "batt land set: pos=%d,%d size=%dx%d rot=%d parent=%p screen=%p",
                  lv_obj_get_x(s_batt_box), lv_obj_get_y(s_batt_box),
@@ -403,6 +403,7 @@ static void batt_apply_orientation(void) {
         lv_obj_set_size(s_batt_box, 100, 32);
         lv_obj_set_pos(s_batt_box, 0, 0);
         lv_obj_set_style_transform_rotation(s_batt_box, 0, 0);
+        lv_obj_set_layout(s_batt_box, LV_LAYOUT_FLEX);   // 2026-10-07 横屏曾置 NONE,回竖屏恢复
         lv_obj_set_flex_flow(s_batt_box, LV_FLEX_FLOW_ROW);
         lv_obj_align(s_batt_box, LV_ALIGN_TOP_RIGHT, -6, 2);
     }
