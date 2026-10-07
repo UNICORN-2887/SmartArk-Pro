@@ -116,3 +116,13 @@ void mjpeg_close(void)
     s_last_index = -1;
     s_ra_pos = s_ra_size = 0;
 }
+
+/* 2026-10-07 彻底释放预读缓冲(PPD 交互/主页打开前 PSRAM 紧张时调用;
+   close 保留缓冲本为 cover 秒切,9.3MB 帧缓冲曾致交互时仅 6.6MB、
+   蟑螂派对仅 132KB → 纹理分配失败/解码失败) */
+void mjpeg_free_buffer(void)
+{
+    if (s_ra_buf) { free(s_ra_buf); s_ra_buf = NULL; }
+    s_ra_pos = s_ra_size = 0;
+    s_ra_file_start = 0;
+}

@@ -16,3 +16,4 @@ int mjpeg_get_frame_count(void);
 
 // 关闭文件，释放资源
 void mjpeg_close(void);
+void mjpeg_free_buffer(void);   // 2026-10-07 彻底释放预读缓冲(PSRAM 紧张场景)

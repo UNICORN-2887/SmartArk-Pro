@@ -2961,6 +2961,7 @@ void profile_show(void) {
     // 释放可牺牲缓存（pending/streaming/mask/cover槽，保留 active 帧缓存），
     // 给 Profile JPG 解码让路——退出 profile 时 cover 仍可秒切
     ppa_release_expendable_caches();
+    mjpeg_free_buffer();   // 2026-10-07 主页打开前帧缓冲让路(曾致 PSRAM 仅 132KB 解码失败)
 
     // ① 立刻显示 JPG 占位（LVGL 顶层 canvas）
     /* 2026-10-06 用户仓库 Ur_Info 优先(my.html 上传的横屏主页照片);
@@ -7640,7 +7641,8 @@ static void pd_interaction_task(void* arg) {
 
     video_playback_stop();
     vTaskDelay(pdMS_TO_TICKS(100));
-    ppa_release_playback_caches();   // MJPEG 播放缓存让路（退出时自动重载）
+    ppa_release_playback_caches();   //
+    mjpeg_free_buffer();   // 2026-10-07 9.3MB 帧缓冲一并让路(曾致 PSRAM 仅 6.6MB 分配失败) MJPEG 播放缓存让路（退出时自动重载）
     ppa_close_mjpeg();
     ppa_release_jpeg_engine();
     /* Live2D 常驻(模型+纹理+fb ≈ 8~11MB)让路——PPD 大图层(handwear/objects 等 1MB+/张)
@@ -8737,7 +8739,8 @@ void pd_test_show(void) {
     }
     video_playback_stop();
     vTaskDelay(pdMS_TO_TICKS(100));
-    ppa_release_playback_caches();   // cover/emoji/mask 等播放缓存让路（退出时自动重载）
+    ppa_release_playback_caches();   //
+    mjpeg_free_buffer();   // 2026-10-07 9.3MB 帧缓冲一并让路(曾致 PSRAM 仅 6.6MB 分配失败) cover/emoji/mask 等播放缓存让路（退出时自动重载）
     ppa_close_mjpeg();
     ppa_release_jpeg_engine();       // 下次 composite 时 lazy 重建（与索引页同款序列）
     ESP_LOGI("PD", "after release: PSRAM free=%u largest=%u",
