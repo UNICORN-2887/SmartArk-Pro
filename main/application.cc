@@ -715,6 +715,13 @@ void Application::Start() {
         wifi_power_save_off();
     }
 
+    /* 2026-10-07 CP 固件自动 OTA(C6 出厂 2.3.2 无 SW_AGGR → 流模式 ~20KB/s;
+       版本落后则下载 3.0.9 官方固件经 SDIO 写入并整机重启,匹配则跳过) */
+    {
+        extern void cp_ota_task(void *arg);
+        xTaskCreate(cp_ota_task, "cp_ota", 8192, NULL, 2, NULL);
+    }
+
     /* 2026-09-26 索引页提前:WiFi 连接成功立即显示角色选择页(黑底),
        后续 OTA 检查/协议连接只更新顶部状态栏,不再出现"白屏→检查新版本→待命→
        版本通知"的跳页过程(用户拍板:连 WiFi 后直接是角色选择页) */

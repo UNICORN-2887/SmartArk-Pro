@@ -88,3 +88,8 @@ int role_download_fetch_music_missing(bool (*step_cb)(int pct, const char *file,
 /* ── 目录清空(换绑用户清理;2026-09-10) ── */
 void role_download_remove_dir(const char *path);   // 递归删除(包装静态 remove_dir_r)
 int role_download_clear_operator(void);            // 清 operator 保留 INDEX;0=完成 1=目录不存在 -1=部分失败
+
+/* ── CP(协处理器)固件自动 OTA(2026-10-07) ──
+ * C6 出厂 2.3.2 无 SW_AGGR → 流模式吞吐 ~20KB/s;开机网络就绪后自动
+ * 下载官方 3.0.9 预编译固件 → SDIO OTA → 整机重启。版本匹配则静默跳过。 */
+void cp_ota_task(void *arg);

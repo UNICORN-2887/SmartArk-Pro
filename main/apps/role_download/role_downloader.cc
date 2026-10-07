@@ -25,6 +25,8 @@
 #include <esp_log.h>
 #include <esp_http_client.h>
 #include <esp_tls.h>
+#include <esp_heap_caps.h>   // 2026-10-07 cp_ota 固件 PSRAM 缓冲
+#include <esp_system.h>      // 2026-10-07 cp_ota 完成后 esp_restart
 #include <cJSON.h>
 #include <freertos/FreeRTOS.h>   // 2026-10-07 xSemaphoreCreateMutex(下载并发互斥)
 #include <freertos/semphr.h>
@@ -923,6 +925,102 @@ int role_download_fetch_public_profile(const char *fname, const char *dst) {
     std::string url = url_host() + "/api/public/user_profile?f=" + fname;
     std::string err = http_download_ex(url, dst, NULL, NULL, 0);
     return err.empty() ? 0 : -1;
+}
+
+/* ---------- CP(协处理器)固件自动 OTA(2026-10-07) ----------
+ * C6 出厂固件 2.3.2 无 SDIO SW_AGGR → 兼容流模式 → WiFi 吞吐 ~20KB/s
+ * (换热点不变、PC 同链路 1MB/s,瓶颈确在板内 SDIO 通道)。
+ * 开机网络就绪后检查 CP 版本,低于 host 3.0.9 则从资源服务器下载官方
+ * 预编译固件(esphome/esp-hosted-firmware v3.0.9,服务器侧已 SHA256 校验),
+ * 经 SDIO OTA 写入后整机重启(开机流程自动复位 CP 跑新固件)。
+ * 失败安全:任何一步失败 → 下次开机自动重试;版本已匹配 → 静默跳过。 */
+#include "eh_host_cp_ota.h"   // feature include 在组件公开路径
+
+/* transport 头不在公开 include 路径,extern 声明即可(符号随 esp_hosted 链接) */
+extern "C" uint32_t eh_host_mcu_transport_get_fw_version(void);
+
+/* host 组件版本 3.0.9(与 esp_hosted 组件 idf_component.yml 一致;
+   打包格式 major<<16|minor<<8|patch,与 eh_common_fw_version.h 相同) */
+#define CP_OTA_HOST_VER 0x030009u
+#define CP_OTA_CHUNK 1536u   /* EH_RPC_OTA_CHUNK_MAX */
+
+static bool cp_ota_download(uint8_t **buf_out, size_t *len_out) {
+    if (url_host().empty()) return false;
+    std::string url = url_host() + "/api/public/file?rel=main&p=cp_fw.bin";
+    esp_http_client_config_t cfg = {};
+    cfg.url = url.c_str();
+    cfg.timeout_ms = 120000;
+    cfg.buffer_size = 4096;
+    cfg.user_agent = "szfz-device/1.0";
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if (!client) return false;
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err != ESP_OK) { esp_http_client_cleanup(client); return false; }
+    int64_t total = esp_http_client_fetch_headers(client);
+    int status = esp_http_client_get_status_code(client);
+    if (status != 200 || total <= 0 || total > 4 * 1024 * 1024) {
+        esp_http_client_cleanup(client);
+        return false;
+    }
+    uint8_t *buf = (uint8_t*)heap_caps_malloc((size_t)total, MALLOC_CAP_SPIRAM);
+    if (!buf) { esp_http_client_cleanup(client); return false; }
+    int64_t done = 0;
+    while (done < total) {
+        int r = esp_http_client_read(client, (char*)buf + done, (int)(total - done));
+        if (r <= 0) break;
+        done += r;
+    }
+    esp_http_client_cleanup(client);
+    if (done != total) { heap_caps_free(buf); return false; }
+    *buf_out = buf;
+    *len_out = (size_t)total;
+    return true;
+}
+
+void cp_ota_task(void *arg) {
+    /* 等网络就绪(实测 WiFi 40s+ 才连上,OTA 需完整下载) */
+    for (int i = 0; i < 90 && !WifiStation::GetInstance().IsConnected(); i++)
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    if (!WifiStation::GetInstance().IsConnected()) {
+        vTaskDelete(NULL);
+        return;
+    }
+    uint32_t cp_ver = eh_host_mcu_transport_get_fw_version();
+    if (cp_ver == 0 || cp_ver >= CP_OTA_HOST_VER) {
+        ESP_LOGI("CpOta", "cp fw 0x%06x 已匹配 host 0x%06x,跳过", (unsigned)cp_ver, (unsigned)CP_OTA_HOST_VER);
+        vTaskDelete(NULL);
+        return;
+    }
+    ESP_LOGW("CpOta", "cp fw 0x%06x 落后 host 0x%06x → 自动 OTA", (unsigned)cp_ver, (unsigned)CP_OTA_HOST_VER);
+    uint8_t *fw = NULL;
+    size_t fw_len = 0;
+    if (!cp_ota_download(&fw, &fw_len)) {
+        ESP_LOGE("CpOta", "固件下载失败,下次开机重试");
+        vTaskDelete(NULL);
+        return;
+    }
+    ESP_LOGI("CpOta", "固件 %u 字节已下载,开始 SDIO OTA", (unsigned)fw_len);
+    bool ok = (eh_host_cp_ota_begin() == ESP_OK);
+    size_t off = 0;
+    while (ok && off < fw_len) {
+        size_t n = (fw_len - off > CP_OTA_CHUNK) ? CP_OTA_CHUNK : (fw_len - off);
+        if (eh_host_cp_ota_write(fw + off, (uint32_t)n) != ESP_OK) {
+            ok = false;
+            break;
+        }
+        off += n;
+        vTaskDelay(pdMS_TO_TICKS(5));   // CP 写内部闪存,每块稍作停顿
+        if ((off & 0x1FFFF) == 0) ESP_LOGI("CpOta", "OTA %u/%u", (unsigned)off, (unsigned)fw_len);
+    }
+    heap_caps_free(fw);
+    if (!ok || eh_host_cp_ota_end() != ESP_OK || eh_host_cp_ota_activate() != ESP_OK) {
+        ESP_LOGE("CpOta", "OTA 传输失败,下次开机重试");
+        vTaskDelete(NULL);
+        return;
+    }
+    ESP_LOGW("CpOta", "OTA 完成 → 1 秒后整机重启应用新固件");
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    esp_restart();
 }
 
 int role_download_clear_operator(void) {
