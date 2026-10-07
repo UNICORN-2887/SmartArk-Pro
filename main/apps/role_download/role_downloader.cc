@@ -946,7 +946,10 @@ extern "C" uint32_t eh_host_mcu_transport_get_fw_version(void);
 
 static bool cp_ota_download(uint8_t **buf_out, size_t *len_out) {
     if (url_host().empty()) return false;
-    std::string url = url_host() + "/api/public/file?rel=main&p=cp_fw.bin";
+    /* 固件放用户仓库 Ur_Info(与 Profile 同目录,复用 user_repo 通道,
+       服务器零代码改动;设备 Ur_Info 检查会跳过同大小文件,无副作用) */
+    std::string url = url_host() + "/api/user_repo/file?mac=" +
+                      url_encode(SystemInfo::GetMacAddress()) + "&rel=Ur_Info&p=cp_fw.bin";
     esp_http_client_config_t cfg = {};
     cfg.url = url.c_str();
     cfg.timeout_ms = 120000;

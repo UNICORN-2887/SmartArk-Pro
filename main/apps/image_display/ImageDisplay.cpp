@@ -389,7 +389,9 @@ static void batt_apply_orientation(void) {
         /* 位置:照抄"动图"按钮(475,713)附近;rot 900 绕中心,视觉与按钮同区 */
         lv_obj_align(s_batt_box, LV_ALIGN_TOP_LEFT, 475, 700);
         lv_obj_set_style_transform_rotation(s_batt_box, 900, 0);
-        lv_obj_set_flex_flow(s_batt_box, LV_FLEX_FLOW_ROW);
+        /* 2026-10-07 空框修复:rot+flex 组合在 LVGL 9 布局异常(图标/数字不渲染),
+           横屏禁用 flex,子对象手动定位 */
+        lv_obj_set_flex_flow(s_batt_box, LV_FLEX_FLOW_NONE);
         /* 2026-10-07 诊断:打印旋转样式值(用户报告胶囊仍竖着,确认 rotation 是否落上) */
         ESP_LOGI(TAG, "batt land set: pos=%d,%d size=%dx%d rot=%d parent=%p screen=%p",
                  lv_obj_get_x(s_batt_box), lv_obj_get_y(s_batt_box),
@@ -408,7 +410,15 @@ static void batt_apply_orientation(void) {
     lv_label_set_text(s_batt_icon, "");
     s_batt_pct = lv_label_create(s_batt_box);
     lv_label_set_text(s_batt_pct, "");
-    lv_obj_set_width(s_batt_pct, 64);   /* 2026-10-07 横竖屏同为 100x32 横条,统一 64 宽 */
+    if (land) {
+        /* 2026-10-07 横屏手动定位(rot+flex 组合曾不渲染内容):图标左、数字右 */
+        lv_obj_set_pos(s_batt_icon, 6, 4);
+        lv_obj_set_width(s_batt_icon, 24);
+        lv_obj_set_pos(s_batt_pct, 32, 4);
+        lv_obj_set_size(s_batt_pct, 62, 24);
+    } else {
+        lv_obj_set_width(s_batt_pct, 64);   /* 2026-10-07 横竖屏同为 100x32 横条,统一 64 宽 */
+    }
     lv_obj_set_style_text_align(s_batt_pct, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(s_batt_pct,
         Board::GetInstance().GetDisplay()->GetTextFont(), 0);
