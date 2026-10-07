@@ -971,6 +971,9 @@ static bool cp_ota_download(uint8_t **buf_out, size_t *len_out) {
         int r = esp_http_client_read(client, (char*)buf + done, (int)(total - done));
         if (r <= 0) break;
         done += r;
+        /* 2026-10-07 进度日志:下载 ~70 秒无日志被误判卡死(用户报告) */
+        if ((done & 0x1FFFF) == 0 || done == total)
+            ESP_LOGI("CpOta", "下载 %u/%u KB", (unsigned)(done / 1024), (unsigned)(total / 1024));
     }
     esp_http_client_cleanup(client);
     if (done != total) { heap_caps_free(buf); return false; }
