@@ -298,6 +298,10 @@ static std::string http_download_ex(const std::string &url, const std::string &d
         fwrite(buf, 1, r, f);
         done += r;
         g_dl_bytes_done += r;   /* 2026-10-07 速度统计真实字节 */
+        /* 2026-10-07 下载节流:SDIO 接收缓冲(DMA 内部池)曾在全速下载时
+           耗尽(dma_alloc failed → dropping read → RPC 超时 → 掉速回 20KB/s)。
+           每读一轮让出 5ms 给 SDIO 排空缓冲(上限 ~6.4MB/s,实测 160KB/s 无感) */
+        vTaskDelay(pdMS_TO_TICKS(5));
         int64_t full = base + total;   // 206 时 total=剩余部分
         if (full > 0 && step_cb) {
             int pct = (int)((base + done) * 100 / full);
