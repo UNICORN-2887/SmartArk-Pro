@@ -3,6 +3,7 @@
  * 扫描/连接放独立任务(esp_wifi 阻塞调用不进 LVGL 任务);UI 操作持 LVGL 锁。
  * 已存 SSID 置顶标 ✓;信号三档 ●●●;加密/开放文字标注(字体不含 emoji)。 */
 #include "wifi_ui.h"
+#include "system_info.h"   // 2026-10-19 底部显示绑定码
 
 #include <string>
 #include <vector>
@@ -228,6 +229,14 @@ static void page_reset(void) {
     if (!s_page) return;
     lv_obj_clean(s_page);
     s_pwd_ta = NULL;
+    /* 2026-10-19 底部居中显示本机绑定码(用户核对用,不必下载角色后进设置;
+       密码页键盘后加会盖住它,不影响列表/失败页核对场景) */
+    lv_obj_t *code = lv_label_create(s_page);
+    std::string text = "本机绑定码: " + SystemInfo::GetBindCode();
+    lv_label_set_text(code, text.c_str());
+    set_font(code);
+    lv_obj_set_style_text_color(code, lv_color_hex(0x7FBFDF), 0);
+    lv_obj_align(code, LV_ALIGN_BOTTOM_MID, 0, -8);
 }
 
 static void show_list_page(void) {
