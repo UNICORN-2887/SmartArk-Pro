@@ -155,6 +155,25 @@ void boot_cover_init(void) {
         vTaskDelete(NULL);
     }, "bootsync", 4096, NULL, 2, NULL);
 
+    /* 2026-10-21 开机曲自动下载:首次联网下载 Rhodes_Island.wav(断点续传),
+       未下完下次开机继续;本次开机若缺文件,音乐播放静默跳过 */
+    extern int role_download_fetch_music_boot(void);
+    extern int role_download_fetch_ime_dict(void);   /* 2026-10-26 键盘词组库 */
+    xTaskCreate([](void *arg) {
+        vTaskDelay(pdMS_TO_TICKS(12000));   // 让位启动流程与网络(晚于 cover 任务)
+        for (int i = 0; i < 3; i++) {
+            int r = role_download_fetch_music_boot();
+            if (r == 0) break;
+            vTaskDelay(pdMS_TO_TICKS(20000));   // 失败等 20s 再试
+        }
+        for (int i = 0; i < 3; i++) {
+            int r = role_download_fetch_ime_dict();
+            if (r == 0) break;
+            vTaskDelay(pdMS_TO_TICKS(20000));
+        }
+        vTaskDelete(NULL);
+    }, "bootmusic", 4096, NULL, 2, NULL);
+
     const char *dir = "/sdcard/Arknights/main/cover";
     DIR *d = opendir(dir);
     if (!d) return;

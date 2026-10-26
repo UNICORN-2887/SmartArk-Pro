@@ -43,10 +43,15 @@ set(SOURCES "audio/audio_codec.cc"
             "apps/settings/settings_ui.cc"
             "apps/menu/menu_ui.cc"
             "apps/role_download/role_downloader.cc"
+            "apps/radar/radar_ble.cc"
+            "apps/radar/radar_ftm.cc"
+            "apps/radar/radar_ui.cc"
+            "apps/radar/esp_now_hosted.cpp"
+            "apps/radar/radar_esnow.cc"
             "apps/wifi_ui/wifi_ui.cc"
             )
 
-set(INCLUDE_DIRS "." "display" "audio" "protocols" "apps/image_display" "apps/live2d" "apps/beads" "apps/loading" "apps/settings" "apps/menu" "apps/role_download" "apps/wifi_ui")
+set(INCLUDE_DIRS "." "display" "audio" "protocols" "apps/image_display" "apps/live2d" "apps/beads" "apps/loading" "apps/settings" "apps/menu" "apps/role_download" "apps/radar" "apps/wifi_ui")
 
 # 添加板级公共文件
 file(GLOB BOARD_COMMON_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/boards/common/*.cc)

@@ -12,6 +12,7 @@
 
 #include <esp_log.h>
 #include <esp_wifi.h>
+#include <esp_netif.h>
 #include <esp_lvgl_port.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
@@ -74,10 +75,34 @@ static std::string saved_pwd(const char *ssid) {
 }
 
 /* ── 连接(独立任务;结果经事件组) ── */
+/* 2026-10-21 esp-hosted 下 IP_EVENT_STA_GOT_IP 从不 post、ap_info 关联中也
+   失败:连接判定 = STA netif 拿到的非零 IP(断开事件由 WifiBoard 注册的
+   handler 主动清零 netif IP,无 stale 误判) */
+static bool sta_has_ip(void) {
+    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (!sta) return false;
+    esp_netif_ip_info_t ip;
+    if (esp_netif_get_ip_info(sta, &ip) != ESP_OK) return false;
+    return ip.ip.addr != 0;
+}
+
 static void conn_task(void *arg) {
     auto &w = WifiStation::GetInstance();
     w.ConnectTo(s_sel_ssid, s_conn_pwd);
-    if (w.WaitForConnected(20000)) {
+    int waited = 0;
+    bool ok = false;
+    while (waited < 20000) {
+        if (sta_has_ip()) {
+            /* 2026-10-21 连上即重关省电(重连后 C6 侧恢复 MIN_MODEM → 1Mbps) */
+            extern void wifi_power_save_off(void);
+            wifi_power_save_off();
+            ok = true;
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(200));
+        waited += 200;
+    }
+    if (ok) {
         xEventGroupSetBits(s_done_evt, BIT_CONNECTED);
     } else if (lvgl_port_lock(pdMS_TO_TICKS(3000))) {
         s_connecting = false;
@@ -298,7 +323,7 @@ static void show_list_page(void) {
     }, LV_EVENT_CLICKED, NULL);
 
     s_list = lv_obj_create(s_page);
-    lv_obj_set_size(s_list, 464, 700);
+    lv_obj_set_size(s_list, 464, 670);   /* 2026-10-21 高 700→670:底部让出绑定码一行(原 76+700=776 盖住码上部) */
     lv_obj_align(s_list, LV_ALIGN_TOP_MID, 0, 76);
     lv_obj_set_style_bg_color(s_list, lv_color_hex(0x14161c), 0);
     lv_obj_set_style_border_width(s_list, 0, 0);
@@ -486,7 +511,17 @@ bool wifi_ui_show(void) {
     s_connecting = false;
     s_scanning = false;   /* 残留 scan_task(若有)写局部缓冲,不冲突;它退出时再置 false 无碍 */
 
-    if (lvgl_port_lock(pdMS_TO_TICKS(5000))) {
+    /* 2026-10-21 锁重试:开机时索引页/封面渲染任务(prio 4)持续持锁,
+       单次 5s 超时经常抢不到 → 直接落 AP 兜底(用户报 40% 概率跳热点)。
+       改为最多 30 次 × 500ms 重试,渲染总会有间隙 */
+    int lock_tries = 0;
+    while (!lvgl_port_lock(pdMS_TO_TICKS(500))) {
+        if (++lock_tries >= 60) {
+            ESP_LOGW("wifi_ui", "LVGL 锁 30s 仍不可得,跳过列表页");
+            return false;
+        }
+    }
+    {
         s_aps.clear();   /* 共享 s_aps 只在锁内读写 */
         /* 2026-09-26 底图层完全照抄角色选择页(用户拍板:同样的创建序列/样式):
            create → size → pos → 纯黑 → 不透明 → 无边框 → 无内边距 */
@@ -498,8 +533,6 @@ bool wifi_ui_show(void) {
         lv_obj_set_style_border_width(s_page, 0, 0);
         lv_obj_set_style_pad_all(s_page, 0, 0);
         lvgl_port_unlock();
-    } else {
-        return false;
     }
 
     /* 确保 station 模式。2026-09-21:P4 LP 核 Stop→Start 会永久卡死(扫描恒
@@ -514,11 +547,17 @@ bool wifi_ui_show(void) {
 
     /* 2026-09-21:show_list_page 必须在 lvgl_port_lock 内——此板 LVGL 渲染跑在
        独立任务(prio 4 > main),渲染期间 rendering_in_progress=true;main 裸调
-       LVGL API 会被抢占后触发 LV_ASSERT(Invalidate during rendering)死循环 */
-    if (lvgl_port_lock(pdMS_TO_TICKS(5000))) {
-        show_list_page();
-        lvgl_port_unlock();
+       LVGL API 会被抢占后触发 LV_ASSERT(Invalidate during rendering)死循环。
+       2026-10-21 锁重试同上(渲染密集时单次 5s 抢不到) */
+    lock_tries = 0;
+    while (!lvgl_port_lock(pdMS_TO_TICKS(500))) {
+        if (++lock_tries >= 60) {
+            ESP_LOGW("wifi_ui", "LVGL 锁 30s 仍不可得,跳过列表页");
+            return false;
+        }
     }
+    show_list_page();
+    lvgl_port_unlock();
     if (!s_scanning) {
         s_scanning = true;
         xTaskCreate(scan_task, "wifi_scan", 10240, NULL, 3, NULL);

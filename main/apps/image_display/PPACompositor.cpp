@@ -42,7 +42,7 @@ static inline void ppa_prog(const char* s, int p) { if (s_ppa_prog_cb) s_ppa_pro
 // JPEG decoder config
 static jpeg_decoder_handle_t s_jpg_handle = NULL;
 static uint32_t s_last_decoded_size = 0;
-static jpeg_decode_engine_cfg_t s_jpg_eng_cfg = { .timeout_ms = 40 };
+static jpeg_decode_engine_cfg_t s_jpg_eng_cfg = { .timeout_ms = 1000 };   /* 2026-10-26 40→1000:解码偶发超时 abort 后通道残留 → dma2d_connect 悬挂 panic;放宽到 1s 让解码完成,真悬挂才 abort */
 static int s_decode_cool_down = 0;  // 解码失败后的提交冷却帧数（防 DMA2D 悬挂累积）
 
 // 2026-10-04 2D-DMA 通道互斥：所有 jpeg 引擎创建/解码/删除必须持锁。
@@ -117,18 +117,21 @@ bool ppa_load_background(const char *path) {
                  (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
         return false;
     }
-    jpeg_decoder_handle_t tmp_handle = NULL;
-    if (jpeg_new_decoder_engine(&s_jpg_eng_cfg, &tmp_handle) != ESP_OK) {
-        ppa_jpg_unlock();
-        free(tx_buf); free(s_bg_buf); s_bg_buf = NULL;
-        ESP_LOGE(TAG, "bg engine create failed (PSRAM free %u KB)",
-                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
-        return false;
+    /* 2026-10-26 统一共享引擎:per-call new/del 的引擎每次 del 都
+       dma2d_release_pool 重建;改为复用 s_jpg_handle,失败不重建不 del
+       (重建时 dma2d_connect 在硬件未完全释放时会死等复位) */
+    if (!s_jpg_handle) {
+        if (jpeg_new_decoder_engine(&s_jpg_eng_cfg, &s_jpg_handle) != ESP_OK) {
+            ppa_jpg_unlock();
+            free(tx_buf); free(s_bg_buf); s_bg_buf = NULL;
+            ESP_LOGE(TAG, "bg engine create failed (PSRAM free %u KB)",
+                     (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+            return false;
+        }
     }
 
     uint32_t decoded_size;
-    esp_err_t ret = jpeg_decoder_process(tmp_handle, &s_jpg_cfg_rgb, tx_buf, tx_size, s_bg_buf, out_size, &decoded_size);
-    jpeg_del_decoder_engine(tmp_handle);
+    esp_err_t ret = jpeg_decoder_process(s_jpg_handle, &s_jpg_cfg_rgb, tx_buf, tx_size, s_bg_buf, out_size, &decoded_size);
     ppa_jpg_unlock();
     free(tx_buf);
     if (ret != ESP_OK) {
@@ -544,12 +547,9 @@ void ppa_wait_pending_preload(void) {
 }
 
 void ppa_release_jpeg_engine(void) {
-    if (!ppa_jpg_lock()) return;   // 2026-10-06 拿不到锁(解码悬挂)不等待,跳过删除
-    if (s_jpg_handle) {
-        jpeg_del_decoder_engine(s_jpg_handle);
-        s_jpg_handle = NULL;
-    }
-    ppa_jpg_unlock();
+    /* 2026-10-26 不再 del:引擎常驻复用。del 后 dma2d_release_pool 重建,
+       下次 lazy 重建引擎时 dma2d_connect 在硬件未完全释放时会死等复位
+       (实测 Interrupt wdt timeout panic)。引擎仅在 ppa_deinit 销毁 */
 }
 
 void ppa_restore_jpeg_engine(void) {
@@ -585,21 +585,17 @@ uint8_t* ppa_decode_jpeg_to_rgb565(const char *path, int *out_w, int *out_h) {
     uint8_t *rgb_buf = (uint8_t*)heap_caps_malloc(out_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
     if (!rgb_buf) { free(tx_buf); return NULL; }
 
-    // 复用 PPA JPEG 引擎（需空闲，调用者保证视频已停）
+    // 复用共享 JPEG 引擎（需空闲，调用者保证视频已停）
     if (!ppa_jpg_lock()) { free(tx_buf); free(rgb_buf); return NULL; }   // 2026-10-06 超时不等待
-    jpeg_decoder_handle_t handle = NULL;
-    jpeg_decode_engine_cfg_t eng_cfg = { .timeout_ms = 1000 };
-    if (jpeg_new_decoder_engine(&eng_cfg, &handle) != ESP_OK) {
-        ppa_jpg_unlock();
-        free(tx_buf); free(rgb_buf); return NULL;
+    /* 2026-10-26 统一共享引擎:不再 per-call new/del(见 bg 路径注释) */
+    if (!s_jpg_handle) {
+        if (jpeg_new_decoder_engine(&s_jpg_eng_cfg, &s_jpg_handle) != ESP_OK) {
+            ppa_jpg_unlock();
+            free(tx_buf); free(rgb_buf); return NULL;
+        }
     }
-    jpeg_decode_cfg_t cfg = {
-        .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
-        .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
-    };
     uint32_t decoded;
-    esp_err_t ret = jpeg_decoder_process(handle, &cfg, tx_buf, tx_size, rgb_buf, out_size, &decoded);
-    jpeg_del_decoder_engine(handle);
+    esp_err_t ret = jpeg_decoder_process(s_jpg_handle, &s_jpg_cfg_rgb, tx_buf, tx_size, rgb_buf, out_size, &decoded);
     ppa_jpg_unlock();
     free(tx_buf);
 
@@ -1040,9 +1036,19 @@ uint8_t* ppa_composite_frame(int frame_index) {
         blend_cfg.ck_rgb_default_val = ck_default;
     }
 
+    // 2026-10-21 JPEG 解码与 PPA blend 共享 DMA2D 引擎:blend 提交必须与
+    // 解码同锁串行化(播放约百帧后 DMA2D reset 忙等 panic 实测:锁只盖
+    // 解码段,blend 在锁外并发提交导致通道状态竞争)
+    if (!ppa_jpg_lock()) {
+        ESP_LOGE(TAG, "blend lock timeout, drop frame");
+        s_decode_cool_down = 30;
+        return NULL;
+    }
     ret = ppa_do_blend(s_ppa_client, &blend_cfg);
+    ppa_jpg_unlock();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "PPA blend failed: %s", esp_err_to_name(ret));
+        s_decode_cool_down = 30;
         return NULL;
     }
 
@@ -1105,11 +1111,13 @@ uint8_t* ppa_composite_standee_frame(int frame_index) {
     memcpy(s_tx_buf, jpg_data, jpg_size);
 
     // Step 3: JPEG 解码直通到 comp 槽（480×800 竖帧，与竖屏 cover 同构 → 18fps 同款性能）
+    int64_t t_lock0 = esp_timer_get_time();
     if (!ppa_jpg_lock()) {   // 2026-10-06 超时不等待(悬挂保护)
         ESP_LOGE(TAG, "standee decode lock timeout");
         s_decode_cool_down = 30;
         return NULL;
     }
+    int64_t t_lock1 = esp_timer_get_time();
     if (!s_jpg_handle) jpeg_new_decoder_engine(&s_jpg_eng_cfg, &s_jpg_handle);
     int64_t t_decode0 = esp_timer_get_time();
     uint32_t decoded_size = 0;
@@ -1125,12 +1133,13 @@ uint8_t* ppa_composite_standee_frame(int frame_index) {
                  (unsigned)decoded_size, (unsigned)STANDEE_SIZE_RGB565);
         return NULL;   // 尺寸不符丢帧
     }
-    // 计时日志（每 30 帧一次；%d：nano printf 不支持 %lld，之前打印出 "ld" 字面量）
+    /* 2026-10-25 掉帧排查:锁等待与解码分计(每 10 帧一次;
+       lock ~3000ms = 锁被他人占满(缩略图/背景解码) → FPS 1/3 的根因) */
     static int s_standee_tick = 0;
-    if (++s_standee_tick >= 30) {
+    if (++s_standee_tick >= 10) {
         s_standee_tick = 0;
-        ESP_LOGI(TAG, "standee timing: decode %d ms",
-                 (int)((t_decode1 - t_decode0) / 1000));
+        ESP_LOGI(TAG, "standee timing: lock %d ms, decode %d ms",
+                 (int)((t_lock1 - t_lock0) / 1000), (int)((t_decode1 - t_decode0) / 1000));
     }
     return comp;
 }
@@ -1215,18 +1224,18 @@ int ppa_long_bg_decode(const char *path, int slot) {
         ESP_LOGE(TAG, "long bg decode lock timeout");
         return -1;
     }
-    jpeg_decoder_handle_t handle = NULL;
-    jpeg_decode_engine_cfg_t eng_cfg = { .timeout_ms = 1000 };
-    if (jpeg_new_decoder_engine(&eng_cfg, &handle) != ESP_OK) {
-        ppa_jpg_unlock();
-        ESP_LOGE(TAG, "long bg engine create fail");
-        return -1;
+    /* 2026-10-26 统一共享引擎:不再 per-call new/del(见 bg 路径注释) */
+    if (!s_jpg_handle) {
+        if (jpeg_new_decoder_engine(&s_jpg_eng_cfg, &s_jpg_handle) != ESP_OK) {
+            ppa_jpg_unlock();
+            ESP_LOGE(TAG, "long bg engine create fail");
+            return -1;
+        }
     }
     uint32_t decoded;
-    esp_err_t ret = jpeg_decoder_process(handle, &s_jpg_cfg_rgb, s_long_bg_tx, tx_need,
+    esp_err_t ret = jpeg_decoder_process(s_jpg_handle, &s_jpg_cfg_rgb, s_long_bg_tx, tx_need,
                                          s_long_bg[slot].buf,
                                          LONG_BG_MAX_W * LONG_BG_MAX_H * 2, &decoded);
-    jpeg_del_decoder_engine(handle);
     ppa_jpg_unlock();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "long bg decode fail: %s (%s)", esp_err_to_name(ret), path);

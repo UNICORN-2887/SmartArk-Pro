@@ -65,7 +65,10 @@ bool CustomWakeWord::Initialize(AudioCodec* codec) {
 
     ESP_LOGI(TAG, "multinet:%s", mn_name_);
     multinet_ = esp_mn_handle_from_name(mn_name_);
-    multinet_model_data_ = multinet_->create(mn_name_, 2000);  // 2秒超时
+    /* 2026-10-26 超时窗口 2000→5000ms:6 音节长词(你好维什戴尔)在 2s 窗口内
+       说不完,候选停在 'wei shi' 前两字即 TIMEOUT(实测:5 音节逻各斯正常,
+       6 音节每次只识别到前两字)。窗口拉长后长词可完整说完 */
+    multinet_model_data_ = multinet_->create(mn_name_, 5000);  // 5秒超时
     multinet_->set_det_threshold(multinet_model_data_, 0.10); // 过滤噪声误触发（正常唤醒~0.12）
     esp_mn_commands_clear();
     // 默认命令词表(服务器唤醒词表拉取失败时的保底)
@@ -220,6 +223,30 @@ void CustomWakeWord::AudioDetectionTask() {
         // detect + 不依赖DETECTED状态直接查结果
         esp_mn_state_t mn_state = multinet_->detect(multinet_model_data_, res->data);
         esp_mn_results_t *mn_result = multinet_->get_results(multinet_model_data_);
+
+        /* 2026-10-26 诊断(用户要求):识别不到时无法区分"音频没进来/无候选"
+           与"候选分数低于阈值"。① 有候选即打印拼音+分数(1s 节流);
+           ② 无候选每 2s 心跳打印状态(证明检测循环活着、音频在流动) */
+        static int64_t s_diag_last_cand = 0, s_diag_last_hb = 0;
+        int64_t diag_now = esp_timer_get_time();
+        if (mn_result && mn_result->command_id[0] >= 1 &&
+            (size_t)mn_result->command_id[0] <= command_names_.size()) {
+            if (diag_now - s_diag_last_cand > 1000000) {
+                s_diag_last_cand = diag_now;
+                ESP_LOGI(TAG, "MN 候选: '%s' prob=%.3f state=%d(阈值 %.2f)",
+                         mn_result->string, mn_result->prob[0], (int)mn_state, 0.10f);
+            }
+        } else if (diag_now - s_diag_last_hb > 2000000) {
+            s_diag_last_hb = diag_now;
+            /* 2026-10-26 心跳带输入能量:完全无候选时区分
+               "麦克风没声音进来"(能量≈0 → 音频链路断)与
+               "有声音但不触发"(能量大 → VAD/模型问题) */
+            int64_t energy = 0;
+            for (int i = 0; i < (int)(res->data_size / 2); i += 16)
+                energy += res->data[i] < 0 ? -res->data[i] : res->data[i];
+            ESP_LOGI(TAG, "MN 心跳: state=%d 无候选(检测运行中,能量=%lld)",
+                     (int)mn_state, (long long)energy);
+        }
 
         // 必须检查 DETECTED 状态，否则 get_results() 返回残留旧数据
         if (mn_state == ESP_MN_STATE_DETECTED && mn_result && mn_result->command_id[0] >= 1 &&

@@ -18,6 +18,10 @@
 #include <cJSON.h>
 #include <driver/gpio.h>
 #include <esp_wifi.h>
+#include "radar_ble.h"   // 2026-10-22 交友雷达(声明为 extern "C")
+
+/* 2026-10-26 唤醒状态指示点(ImageDisplay 实现,C 链接):0 待机/1 唤醒/2 聆听/3 回应 */
+extern "C" void application_wake_status_update(int state);
 #include <arpa/inet.h>
 
 /* 2026-10-07 下载提速:关闭 WiFi 省电(默认 MIN_MODEM 使 TCP 吞吐掉到
@@ -205,6 +209,12 @@ void Application::FetchWakeWords(bool quiet) {
                 ClearOperatorAfterRebind(new_uid);
             });
         }
+        // 2026-10-22 首次绑定也持久化:雷达 BLE 广播(约 52s)早于词表(约 62s),
+        // 广播时读 NVS 拿 uid;此前首次绑定(last=0)从不写 NVS → 新设备永远广播 SZFD:0
+        if (bound_user_uid_ > 0 && last_uid == 0) {
+            Settings("wakewords", true).SetInt("bound_uid", bound_user_uid_);
+            ESP_LOGI(TAG, "首次绑定 u%d 已持久化到 NVS", bound_user_uid_);
+        }
     }
     cJSON *list = cJSON_GetObjectItem(data, "wake_words");
     cJSON *item = nullptr;
@@ -256,15 +266,19 @@ void Application::FetchWakeWords(bool quiet) {
         return;
     }
     wake_words_sig_ = sig;
-    // 绑定成功:应用词表(检测运行中需先停后启,SetWakeWordCommands 在 Start 时安全生效)
-    bool running = audio_service_.IsWakeWordRunning();
-    if (running) {
-        audio_service_.EnableWakeWordDetection(false);
+    wake_word_commands_ = commands;   /* 2026-10-25 全量缓存(选角色重注册用) */
+    /* 2026-10-26 词表到达:重试词表未到期间暂存的选角色(用户开机即选角色
+       的场景,SwitchAgentByPath 当时反查失败,现在补上) */
+    if (!pending_agent_path_.empty()) {
+        std::string p = pending_agent_path_;
+        pending_agent_path_.clear();
+        ESP_LOGI(TAG, "词表到达,重试暂存的角色路径: %s", p.c_str());
+        SwitchAgentByPath(p);
     }
-    audio_service_.SetWakeWordCommands(commands);
-    if (running) {
-        audio_service_.EnableWakeWordDetection(true);
-    }
+    /* 2026-10-25 用户预期:开机后未选择角色前,任何唤醒词都不生效;
+       选择角色后才注册该角色的词。故不恢复 NVS,active_agent_name_
+       保持空 → Reapply 注册空集 */
+    ReapplyWakeWordCommands();
     bind_code_overlay_hide();
     if (display != nullptr) {
         display->SetStatus(Lang::Strings::STANDBY);
@@ -272,6 +286,57 @@ void Application::FetchWakeWords(bool quiet) {
     ESP_LOGI(TAG, "Wake words from server: %d commands, %d agents%s",
              commands.size(), (int)wake_word_agents_.size(),
              quiet ? " (轮询热更新)" : "");
+}
+
+/* 2026-10-25 按当前角色过滤注册唤醒词:
+   未选择(空)= 零唤醒词(用户预期:选了才认);
+   已选择但角色不在词表 = 清空选择回零;
+   已选择且存在 = 只注册该角色的词 */
+void Application::ReapplyWakeWordCommands() {
+    std::vector<std::pair<std::string, std::string>> cmds;
+    if (!active_agent_name_.empty()) {
+        for (auto &c : wake_word_commands_)
+            if (c.second == active_agent_name_) cmds.push_back(c);
+        if (cmds.empty()) {
+            /* 2026-10-26 显示名对不上会静默清空 → 角色"无法唤醒"。
+               打印全量词表便于排查(维是戴尔案例) */
+            ESP_LOGW(TAG, "词表匹配失败: 当前角色 '%s' 不在 %d 条词表中:",
+                     active_agent_name_.c_str(), (int)wake_word_commands_.size());
+            for (auto &c : wake_word_commands_)
+                ESP_LOGW(TAG, "  词表: '%s' → 角色 '%s'", c.first.c_str(), c.second.c_str());
+            /* 当前角色已不在词表(删除/改名)→ 清空选择 */
+            active_agent_name_.clear();
+            Settings("wakewords", true).SetString("active_agent", "");
+        }
+    }
+    if (cmds.empty()) {
+        /* 零唤醒词:关检测省 CPU,与"未选择"语义一致 */
+        if (audio_service_.IsWakeWordRunning())
+            audio_service_.EnableWakeWordDetection(false);
+        ESP_LOGI(TAG, "唤醒词注册: 0 条(未选择角色,全部静默)");
+        return;
+    }
+    bool running = audio_service_.IsWakeWordRunning();
+    if (running) {
+        audio_service_.EnableWakeWordDetection(false);
+        /* 2026-10-25 sr_lib 竞态保护:停后等检测任务完全退出(模型释放
+           完成)再重启。实测快速停→启(model_create 空名 → hufzip 释放
+           垃圾队列 → vQueueDelete 断言 panic) */
+        vTaskDelay(pdMS_TO_TICKS(150));
+    }
+    audio_service_.SetWakeWordCommands(cmds);
+    /* 2026-10-25 选角色后无条件开检测:此前"零唤醒词"关掉了检测,
+       若沿用 running 判断则永远开不回来(实测该坑)。
+       2026-10-26 加策略位门控:词表到达/重试可能发生在立绘页
+       (wake_allowed_=false),不得开检测——进对话模式的
+       application_set_wake_word_detection(true) 会开并在 Start() 应用词表 */
+    if (wake_allowed_) {
+        audio_service_.EnableWakeWordDetection(true);
+    }
+    ESP_LOGI(TAG, "唤醒词注册: %d 条(当前角色 %s,检测 %s)", (int)cmds.size(),
+             active_agent_name_.c_str(), wake_allowed_ ? "开" : "关");
+    for (auto &c : cmds)   /* 2026-10-26 逐词打印:排查"无法唤醒" */
+        ESP_LOGI(TAG, "  唤醒词: '%s'", c.first.c_str());
 }
 
 void Application::ClearOperatorAfterRebind(int new_uid) {
@@ -684,6 +749,10 @@ void Application::Start() {
         xEventGroupSetBits(event_group_, MAIN_EVENT_SEND_AUDIO);
     };
     callbacks.on_wake_word_detected = [this](const std::string& wake_word) {
+        /* 2026-10-26 识别内容直出日志(用户要求):任何识别都打印,
+           含被冷却/状态/策略拦截的——"无法唤醒"排查看这里 */
+        ESP_LOGI(TAG, "Wakenet 识别: '%s' (state=%d, wake_allowed=%d)",
+                 wake_word.c_str(), (int)device_state_, (int)wake_allowed_);
         xEventGroupSetBits(event_group_, MAIN_EVENT_WAKE_WORD_DETECTED);
     };
     callbacks.on_vad_change = [this](bool speaking) {
@@ -705,8 +774,31 @@ void Application::Start() {
     boot_cover_init();
 
 
+    /* 2026-10-23 CP OTA 提前到 StartNetwork 之前:CP 固件 3.0.10 连不上
+       某些热点时主流程会卡在配网页(切网重试循环),原位置(StartNetwork 后)
+       的降级 OTA 任务永远没机会创建 → 死锁。周期重试任务与主流程解耦,
+       任何网络通一次即自动降级 */
+    {
+        extern void cp_ota_task(void *arg);
+        xTaskCreate(cp_ota_task, "cp_ota", 8192, NULL, 2, NULL);
+    }
+
     /* Wait for the network to be ready */
+    ESP_LOGI(TAG, "STEP1: StartNetwork begin");
     board.StartNetwork();
+    ESP_LOGI(TAG, "STEP2: StartNetwork done");
+
+    /* 2026-10-22 交友雷达第一层:BLE 广播+扫描+上报(内部自等网络,
+       失败静默降级不影响主流程)。
+       2026-10-23 独立任务:CP 固件无 BT 时 esp_hosted_bt_host_stack_setup
+       会阻塞等待 HCI 响应,若在主流程同步调用会卡死整个启动
+       (词表/CP OTA 全部无法执行) */
+    {
+        xTaskCreate([](void *) {
+            radar_ble_start();
+            vTaskDelete(NULL);
+        }, "radar_init", 8192, NULL, 3, NULL);
+    }
 
     /* 2026-10-07 下载提速:关闭 WiFi 省电(默认 MIN_MODEM 使 TCP 吞吐掉到
        200-400KB/s;用户 WiFi 上限 8MB/s,服务器本地 10-21MB/s,瓶颈在设备端) */
@@ -714,13 +806,10 @@ void Application::Start() {
         extern void wifi_power_save_off(void);
         wifi_power_save_off();
     }
+    ESP_LOGI(TAG, "STEP3: power save off done");
 
-    /* 2026-10-07 CP 固件自动 OTA(C6 出厂 2.3.2 无 SW_AGGR → 流模式 ~20KB/s;
-       版本落后则下载 3.0.9 官方固件经 SDIO 写入并整机重启,匹配则跳过) */
-    {
-        extern void cp_ota_task(void *arg);
-        xTaskCreate(cp_ota_task, "cp_ota", 8192, NULL, 2, NULL);
-    }
+    /* 2026-10-07 CP 固件自动 OTA —— 2026-10-23 已提前到 StartNetwork 之前,
+       此处不再重复创建 */
 
     /* 2026-09-26 索引页提前:WiFi 连接成功立即显示角色选择页(黑底),
        后续 OTA 检查/协议连接只更新顶部状态栏,不再出现"白屏→检查新版本→待命→
@@ -733,7 +822,9 @@ void Application::Start() {
         chat_overlay_init(display->GetTextFont());
         settings_ui_init(display->GetTextFont());
         wifi_ui_init(display->GetTextFont());
+        ESP_LOGI(TAG, "STEP5: agent_index_show begin");
         agent_index_show();
+        ESP_LOGI(TAG, "STEP6: agent_index_show done");
     }
 
     // Update the status bar immediately to show the network state
@@ -742,7 +833,21 @@ void Application::Start() {
     // 2026-09-26:离线模式按钮已移入配网页(wifi_ui 列表页),网络门期间不再单独弹
     // Check for new firmware version or get the MQTT broker address
     Ota ota;
+    ESP_LOGI(TAG, "STEP7: CheckNewVersion begin");
     CheckNewVersion(ota);
+    ESP_LOGI(TAG, "STEP8: CheckNewVersion done");
+
+    /* 2026-10-25 开机无竞争测速:此时无雷达/UI 竞争,下行天花板参考值。
+       2026-10-26 改后台任务:原同步调用 60s 超时(4MB Range)阻塞 Start 主流程,
+       FetchWakeWords + 协议初始化被挡 60s+ → 词表迟迟不到 → 选角色时
+       "词表未到"、唤醒词注册全空(用户实测逻各斯无法唤醒的根因) */
+    {
+        extern void role_download_speedtest(void);
+        xTaskCreate([](void* arg) {
+            role_download_speedtest();
+            vTaskDelete(NULL);
+        }, "dl_speedtest", 16384, NULL, 2, NULL);
+    }
 
     // 2026-09-28 开机欢迎(用户要求):版本检查/升级流程结束后播阿米娅「欢迎回家,博士」
     audio_service_.PlaySound(Lang::Sounds::P3_WELCOME);
@@ -1043,6 +1148,8 @@ void Application::OnWakeWordDetected() {
     if (device_state_ == kDeviceStateIdle) {
         auto wake_word = audio_service_.GetLastWakeWord();
         ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
+        /* 2026-10-26 唤醒成功指示点(绿色;文件级 extern "C" 声明) */
+        application_wake_status_update(1);
         /* 背景音乐与对话不共存(2026-09-11):任何唤醒词触发对话前先停音乐 */
         extern void bg_music_stop(void);
         bg_music_stop();
@@ -1218,8 +1325,13 @@ void Application::SetDeviceState(DeviceState state) {
                                : (wake_words_state_ == 1 ? "未绑定设备" : Lang::Strings::STANDBY));
             display->SetEmotion("neutral");
             audio_service_.EnableVoiceProcessing(false);
+            /* 2026-10-26 状态指示点回待机灰 */
+            application_wake_status_update(0);
             if (!application_offline_mode()) {
-                audio_service_.EnableWakeWordDetection(true);   // 离线模式不加载唤醒词模型（省数秒+无对话）
+                /* 2026-10-26 策略位:仅对话模式(wake_allowed_)才开检测。
+                   立绘模式曾在此被无条件重开 → 立绘误唤醒(实测) */
+                if (wake_allowed_)
+                    audio_service_.EnableWakeWordDetection(true);
             }
             break;
         case kDeviceStateConnecting:
@@ -1230,6 +1342,8 @@ void Application::SetDeviceState(DeviceState state) {
         case kDeviceStateListening:
             display->SetStatus(Lang::Strings::LISTENING);
             display->SetEmotion("neutral");
+            /* 2026-10-26 状态指示点:聆听蓝 */
+            application_wake_status_update(2);
 
             // Make sure the audio processor is running
             if (!audio_service_.IsAudioProcessorRunning()) {
@@ -1241,6 +1355,8 @@ void Application::SetDeviceState(DeviceState state) {
             break;
         case kDeviceStateSpeaking:
             display->SetStatus(Lang::Strings::SPEAKING);
+            /* 2026-10-26 状态指示点:回应橙 */
+            application_wake_status_update(3);
 
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);
@@ -1257,6 +1373,15 @@ void Application::SetDeviceState(DeviceState state) {
             // Do nothing
             break;
     }
+}
+
+void Application::SetBoundUserUid(int uid) {
+    /* 2026-10-25 兜底设置:词表拉取延迟(开机仪式等点击)时,索引页
+       下载探测路径同步拉词表拿到 uid 后写入,并持久化到 NVS(重启
+       后 scan_bound_user_uid 的 _users 目录兜底之外再多一层) */
+    if (uid <= 0) return;
+    bound_user_uid_ = uid;
+    Settings("wakewords", true).SetInt("bound_uid", uid);
 }
 
 void Application::Reboot() {
@@ -1305,6 +1430,39 @@ bool Application::CanEnterSleepMode() {
 void Application::SwitchAgent(const std::string &agent_id) {
     if (protocol_) protocol_->SetAgentId(agent_id);
 }
+
+/* 2026-10-25 显示角色 ↔ 语音 agent 联动:进立绘时按 SD 路径反查词表
+   (显示名 → 路径 → agent_id),切协议 agent + 持久化 + 只留当前角色的唤醒词。
+   未命中(手工角色/无词表)不动,保持原状态 */
+void Application::SwitchAgentByPath(const std::string &sd_path) {
+    /* 2026-10-26 词表未到(开机早期选角色):暂存路径,词表到达后重试。
+       此前反查失败静默丢弃 → 角色选择丢失 → 该角色唤醒词永远不注册
+       (用户实测:开机即选维是戴尔,词表 58s 才应用,之后无法唤醒) */
+    if (wake_word_paths_.empty()) {
+        pending_agent_path_ = sd_path;
+        ESP_LOGW(TAG, "SwitchAgentByPath: 词表未到,暂存路径待重试(%s)", sd_path.c_str());
+        return;
+    }
+    for (const auto &kv : wake_word_paths_) {
+        std::string p = "/sdcard/" + kv.second;
+        if (p != sd_path) continue;
+        const std::string &name = kv.first;
+        auto it = wake_word_agents_.find(name);
+        if (it == wake_word_agents_.end()) return;
+        if (name == active_agent_name_ && it->second == protocol_->agent_id())
+            return;   // 已是当前角色,零动作(唤醒词触发的立绘入口也走这里)
+        active_agent_name_ = name;
+        Settings("wakewords", true).SetString("active_agent", name);
+        ESP_LOGI(TAG, "SwitchAgentByPath: %s → agent '%s'", name.c_str(), it->second.c_str());
+        if (protocol_) protocol_->SetAgentId(it->second);
+        ReapplyWakeWordCommands();
+        return;
+    }
+    /* 2026-10-26 反查失败日志(维是戴尔无法唤醒排查):路径不在词表
+       → 不切 agent、不重注册 → 唤醒词仍是旧角色的 */
+    ESP_LOGW(TAG, "SwitchAgentByPath: 路径不在词表,未切换(%s,词表 %d 条)",
+             sd_path.c_str(), (int)wake_word_paths_.size());
+}
 void Application::CloseAudioChannel() {
     Schedule([this]() {
         if (protocol_ && protocol_->IsAudioChannelOpened()) {
@@ -1320,6 +1478,8 @@ void application_switch_agent(const char *agent_id) {
     Application::GetInstance().SwitchAgent(agent_id);
 }
 void application_set_wake_word_detection(bool enable) {
+    /* 2026-10-26 同时维护策略位(状态机 idle 转换按位重开检测) */
+    Application::GetInstance().SetWakeAllowed(enable);
     Application::GetInstance().GetAudioService().EnableWakeWordDetection(enable);
 }
 void application_end_conversation(void) {

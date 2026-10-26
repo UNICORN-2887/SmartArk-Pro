@@ -1,0 +1,2183 @@
+/* 角色下载页:云端角色清单 → 点选 → 确认框 → 逐文件下载写入 SD 卡。
+ *
+ * 交互(极简,给小学生用):
+ *   菜单点"角色下载" → 自动拉取云端角色列表 → 屏幕点角色名 → 确认框"下载 xxx?"
+ *   → [下载]/[取消] → "下载中 xx%" → 完成提示(去罗德岛选角色)
+ * 失败自动重试 3 次;全部成功后写 .done 标记(半成品目录会被角色页过滤掉)。
+ * 打开本页自动关闭干员索引页(互斥,防两页叠加事件串扰)。
+ *
+ * 下载核心 role_download_fetch 同时供干员索引页"未缓存弹窗下载"复用(见 .h)。
+ *
+ * 服务器 API(与 paperdoll_sim/device_api.py 对应):
+ *   GET /api/roles                                  → [{"name","vocation","star","has":[..],"incomplete"}]
+ *   GET /api/roles/<voc>/<star>/<name>/manifest     → {"files":[{"rel","size"}]}
+ *   GET /api/roles/file?v=&s=&n=&p=                 → 单文件二进制
+ */
+#include "role_downloader.h"
+#include "freertos/idf_additions.h"   /* xTaskCreateWithCaps(2026-10-26 dl_w 栈改 PSRAM) */
+
+#include <string>
+#include <vector>
+#include <cstring>
+#include <dirent.h>
+#include <unistd.h>
+#include <sys/stat.h>
+
+#include <esp_log.h>
+#include <esp_http_client.h>
+#include <esp_crt_bundle.h>   // 2026-10-21 直连 COS HTTPS 证书校验
+#include <esp_tls.h>
+#include <esp_heap_caps.h>   // 2026-10-07 cp_ota 固件 PSRAM 缓冲
+#include <esp_timer.h>       // 2026-10-25 开机测速计时
+#include <esp_system.h>      // 2026-10-07 cp_ota 完成后 esp_restart
+#include <cJSON.h>
+#include <freertos/FreeRTOS.h>   // 2026-10-07 xSemaphoreCreateMutex(下载并发互斥)
+#include <freertos/semphr.h>
+#include <freertos/task.h>
+
+#include <esp_lvgl_port.h>
+#include <wifi_station.h>
+#include "system_info.h"
+
+#define TAG "RoleDownload"
+
+#define MAX_ROLES 200
+#define MAX_HTTP_BUF 8192
+#define BUF_SIZE 16384   /* 2026-10-06 下载加速:4K→16K(esp_http_client 内部缓冲) */
+
+/* 2026-10-25 自适应写卡节奏(每 16KB 停 s_pace_ms,仅升不降、开机重置):
+   好卡起步 20ms(800KB/s)永不触发上调;脏卡/慢卡持续速率 ~360KB/s,
+   检测到文件耗时远超限速预算(>2s)后自动上调 20→30→45→60(≈270KB/s
+   下限),几页内收敛到卡的真实速率,消除页尾积压卡顿。 */
+static uint32_t s_pace_ms = 20;
+
+/* bundle 单页字节上限(与服务器 &count=8000000 对齐) */
+static const size_t PAGE_CAP = 8 * 1024 * 1024;
+/* 服务器打包的页字节预算 = count 参数,800 万(十进制)≠ 8MiB(8388608),
+   差 388KB。本地打包模拟必须用它,用 8MiB 会少算页数
+   (实测 Wisadel 20 块被算成 18,UI 显示 20/18) */
+static const int64_t BUNDLE_PAGE_BUDGET = 8000000;
+
+/* 2026-10-25 下载看门狗:SD 卡(slot0)与 C6 SDIO(slot1)共用 P4 SDMMC,
+   驱动互斥锁无限等。卡停摆时 C6 事务 wedged → dl_fetch 永久阻塞在驱动里:
+   无日志、无 WDT(任务阻塞,IDLE0 正常复位)。块级进度时间戳,
+   90s 无进展 → esp_restart 自愈(增量下载,重启后重下即可)。 */
+static volatile uint32_t s_dl_progress_ms = 0;
+static void dl_progress_tick(void) { s_dl_progress_ms = (uint32_t)(esp_timer_get_time() / 1000); }
+static void dl_watchdog_task(void *arg) {
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+        uint32_t last = s_dl_progress_ms;
+        if (last != 0 && now - last > 90000) {
+            /* 2026-10-25 Wisadel 实测:恒定卡死在 PPD_Q/forms/背面/mesh.json
+               (卡坏块持忙),90s 无进展 → 重启自愈(增量下载,重下即可) */
+            ESP_LOGE(TAG, "下载 90 秒无进展(SD 卡疑似坏块持忙),重启自愈");
+            esp_restart();
+        }
+    }
+}
+
+/* 2026-10-24 下载进行中标志:WifiBoard::SetPowerSaveMode 在下载期间
+   忽略"开省电"(省电会把 WiFi 下行压到 ~1Mbps) */
+static volatile int s_dl_busy = 0;
+bool role_download_busy(void) { return s_dl_busy != 0; }
+struct DlBusyGuard {
+    DlBusyGuard() { s_dl_busy++; }
+    ~DlBusyGuard() { s_dl_busy--; }
+};
+
+/* 2026-10-25 等待下载任务真正结束(实现见 s_fetching 定义之后) */
+void role_download_wait_idle(int timeout_ms);
+/* 2026-10-23 CP OTA / 2026-10-24 下载期间暂停雷达 BLE(文件级声明,
+   供 fetch_guarded 提前引用) */
+extern "C" void radar_ble_pause(void);
+extern "C" void radar_ble_resume(void);
+
+/* ── 2026-10-25 开机无竞争测速:网络就绪后下载一页 bundle(4MB)计时 ──
+ * 目的:区分"WiFi 下行本身受限(热点/链路)"与"运行期竞争"。
+ * 开机后无雷达/无 UI/无音频竞争,此速度 = 下行天花板。 */
+static std::string url_host(void);                 // 定义在本文件稍后
+static std::string url_encode(const std::string &v);   // 定义在本文件稍后
+static std::string http_get(const std::string &url, std::string &body, int timeout_ms);
+static std::string http_download_mem(const std::string &url, uint8_t *buf, size_t cap,
+                                     size_t *len_out,
+                                     bool (*step_cb)(int pct, const char *file, void *ud),
+                                     void *ud, int throttle_ms);
+
+/* 2026-10-25 兜底拿绑定 uid:词表接口独立同步拉一次(约 200ms)。
+ * 开机流程的词表拉取在开机仪式(等用户点击"开始唤醒")之后才执行,
+ * 用户在这之前点索引页卡片时 bound_user_uid 还是 0 → 误报"未克隆"。
+ * 本函数不依赖任何时序:失败返回 0(调用方走原逻辑)。 */
+int role_download_bound_uid_now(void) {
+    if (url_host().empty()) return 0;
+    std::string body, err;
+    err = http_get(url_host() + "/api/wakewords?mac=" +
+                   url_encode(SystemInfo::GetMacAddress()), body, 8000);
+    if (!err.empty()) return 0;
+    cJSON *root = cJSON_Parse(body.c_str());
+    if (!root) return 0;
+    int uid = 0;
+    cJSON *data = cJSON_GetObjectItem(root, "data");
+    if (data) {
+        cJSON *u = cJSON_GetObjectItem(data, "uid");
+        if (u && cJSON_IsNumber(u)) uid = (int)u->valueint;
+    }
+    cJSON_Delete(root);
+    return uid;
+}
+void role_download_speedtest(void) {
+    if (url_host().empty()) return;
+    /* 2026-10-25 测 COS 直连吞吐:先拿 presigned URL,再 Range 拉 4MB。
+       对比 bundle(服务器中转 ~770KB/s)定位真正的带宽天花板 */
+    std::string murl = url_host() + "/api/user_repo/oss_url?mac=" +
+                       url_encode(SystemInfo::GetMacAddress()) +
+                       "&rel=" + url_encode("Arknights/main/operator/SNIPER/6STAR/Wisadel");
+    std::string body, err = http_get(murl, body, 8000);
+    if (!err.empty()) { ESP_LOGW(TAG, "SPEEDTEST: oss_url 获取失败 %s", err.c_str()); return; }
+    cJSON *root = cJSON_Parse(body.c_str());
+    if (!root) { ESP_LOGW(TAG, "SPEEDTEST: oss_url JSON 解析失败"); return; }
+    cJSON *ju = cJSON_GetObjectItem(root, "url");
+    std::string oss;
+    if (ju && cJSON_IsString(ju) && ju->valuestring) oss = ju->valuestring;
+    cJSON_Delete(root);
+    if (oss.empty()) { ESP_LOGW(TAG, "SPEEDTEST: 无 oss url"); return; }
+    ESP_LOGI(TAG, "SPEEDTEST: COS 直连测速开始(4MB Range)…");
+    uint8_t *buf = (uint8_t *)heap_caps_malloc(4 * 1024 * 1024, MALLOC_CAP_SPIRAM);
+    if (!buf) { ESP_LOGW(TAG, "SPEEDTEST: 4MB PSRAM 分配失败"); return; }
+    esp_http_client_config_t cfg = {};
+    cfg.url = oss.c_str();
+    cfg.timeout_ms = 60000;
+    cfg.buffer_size = 16384;
+    cfg.crt_bundle_attach = esp_crt_bundle_attach;
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    size_t len = 0;
+    if (client) {
+        esp_http_client_set_header(client, "Range", "bytes=0-4194303");
+        esp_http_client_open(client, 0);
+        esp_http_client_fetch_headers(client);
+        int64_t t0 = esp_timer_get_time();
+        while (len < 4 * 1024 * 1024) {
+            int r = esp_http_client_read(client, (char *)(buf + len), 32768);
+            if (r <= 0) break;
+            len += (size_t)r;
+        }
+        int64_t dt = esp_timer_get_time() - t0;
+        if (dt <= 0) dt = 1;
+        ESP_LOGI(TAG, "SPEEDTEST: COS 直连 %u 字节 / %.2fs = %.0f KB/s",
+                 (unsigned)len, dt / 1e6, len * 1e6 / dt / 1024.0);
+        esp_http_client_cleanup(client);
+    }
+    heap_caps_free(buf);
+}
+
+/* 2026-10-07 全局累计下载字节(ImageDisplay 速度显示用;多文件下载 pct 按单文件重置,
+   按总字节×pct 会算出假速度 100MB/s,真实字节计数才准) */
+int64_t g_dl_bytes_done = 0;
+
+struct RoleInfo {
+    std::string name, vocation, star;
+    bool incomplete = false;
+};
+struct FileItem {
+    std::string rel;
+    int64_t size = 0;
+};
+
+static lv_obj_t *s_page = nullptr;
+static lv_obj_t *s_list = nullptr;
+static lv_obj_t *s_progress = nullptr;
+static lv_obj_t *s_status_label = nullptr;
+static lv_obj_t *s_confirm_box = nullptr;   // 确认框(下载/取消)
+static lv_obj_t *s_confirm_lbl = nullptr;
+static std::vector<RoleInfo> s_roles;
+static std::vector<FileItem> s_files;   // 2026-10-07 仅作 parse 输出缓冲(锁内写、拷局部读)
+static std::vector<FileItem> s_music_missing;   // 背景音乐缺失列表(check 写 / fetch 读,锁保护)
+static bool s_busy = false;       // 列表加载/下载中
+static bool s_quit = false;       // 页面关闭/下载取消
+static int s_confirm_idx = -1;    // 确认框指向的角色下标
+static const lv_font_t *s_font = NULL;
+
+/* ImageDisplay.cpp 提供:下载页打开前关闭干员索引页(互斥) */
+extern void agent_index_hide_for_app(void);
+
+static const lv_font_t *efont(void) { return s_font ? s_font : &lv_font_montserrat_14; }
+
+void role_downloader_set_font(const lv_font_t *font) {
+    s_font = font;
+}
+
+/* ---------- 小工具 ---------- */
+static std::string s_url_host;
+static std::string url_host() {
+    if (s_url_host.empty()) {
+#if defined(CONFIG_RESOURCE_SERVER)
+        s_url_host = CONFIG_RESOURCE_SERVER;   // 如 http://124.221.186.33
+#endif
+    }
+    /* 2026-10-05 裸前缀 "http://" 视为未配置:拼接出的 "http:///api/…" 解析出
+       空 host → getaddrinfo("") → lwip assert 整机崩溃 */
+    if (s_url_host == "http://" || s_url_host == "https://")
+        s_url_host.clear();
+    return s_url_host;
+}
+
+/* 用户仓库模式:接口走 /api/user_repo(服务器按 mac 定位 uid),
+ * rel = 用户根下相对路径,落位 /sdcard/_users/u<uid>/<rel>/。
+ * 2026-10-07 并发防护:cover 同步/角色下载/主页下载多任务曾共用全局
+ * s_files/s_user_mode/s_public_rel,互相覆盖引发三类故障:
+ *  - fetch 循环持 s_files[i] 引用,他任务 clear+重建 → 悬空引用 → 乱码文件名(URL 里二进制)
+ *  - probe_public("cover") 改全局 rel,角色 fetch 的 file_url_for 读到 "cover" → 404
+ *  - 双下载任务并发 → 取消一个另一个仍在跑
+ * 方案:mode/rel 全部显式传参(impl 系列,不读全局);s_files 仅作解析缓冲,
+ * parse 临界区加锁 + 调用方立即拷贝局部列表;fetch 同一时刻只允许一个任务 */
+static std::string url_encode(const std::string &v);   // 定义在本文件稍后
+
+static SemaphoreHandle_t s_dl_mutex = NULL;
+static void dl_lock(void) {
+    if (!s_dl_mutex) s_dl_mutex = xSemaphoreCreateMutex();
+    if (s_dl_mutex) xSemaphoreTake(s_dl_mutex, portMAX_DELAY);
+}
+static void dl_unlock(void) {
+    if (s_dl_mutex) xSemaphoreGive(s_dl_mutex);
+}
+static bool s_fetching = false;   // 防重入:同一时刻只允许一个下载任务
+
+/* 2026-10-25 等待下载任务真正结束(取消传播需要时间:乐观关闭弹窗后
+   bundle 读循环还没走到检查点)。调用方在启动新下载前等待,避免
+   "已有下载任务进行中,忽略新请求"。 */
+void role_download_wait_idle(int timeout_ms) {
+    for (int i = 0; i < timeout_ms / 100 && s_fetching; i++)
+        vTaskDelay(pdMS_TO_TICKS(100));
+}
+
+static std::string manifest_url_for(const char *voc, const char *star, const char *name,
+                                    bool umode, int uid, const std::string &urel,
+                                    bool pmode, const std::string &prel) {
+    if (umode) {
+        return url_host() + "/api/user_repo/manifest?mac=" +
+               url_encode(SystemInfo::GetMacAddress()) + "&rel=" + url_encode(urel);
+    }
+    if (pmode) {
+        return url_host() + "/api/public/manifest?rel=" + url_encode(prel);
+    }
+    return url_host() + "/api/roles/" + url_encode(voc) + "/" +
+           url_encode(star) + "/" + url_encode(name) + "/manifest";
+}
+
+static std::string file_url_for(const char *voc, const char *star, const char *name,
+                                const std::string &frel,
+                                bool umode, int uid, const std::string &urel,
+                                bool pmode, const std::string &prel) {
+    if (umode) {
+        return url_host() + "/api/user_repo/file?mac=" + url_encode(SystemInfo::GetMacAddress()) +
+               "&rel=" + url_encode(urel) + "&p=" + url_encode(frel);
+    }
+    if (pmode) {
+        return url_host() + "/api/public/file?rel=" + url_encode(prel) +
+               "&p=" + url_encode(frel);
+    }
+    return url_host() + "/api/roles/file?v=" + url_encode(voc) +
+           "&s=" + url_encode(star) + "&n=" + url_encode(name) + "&p=" + url_encode(frel);
+}
+
+static std::string role_local_base(const char *voc, const char *star, const char *name,
+                                   bool umode, int uid, const std::string &urel,
+                                   bool pmode, const std::string &prel) {
+    if (umode) {
+        if (urel.rfind("Arknights/", 0) == 0) {
+            /* 统一文件系统(2026-09-10):Arknights 类落位 /sdcard/<rel>/,不分用户 */
+            return "/sdcard/" + urel + "/";
+        }
+        /* OC(other/...)保留用户隔离 */
+        return "/sdcard/_users/u" + std::to_string(uid) + "/" + urel + "/";
+    }
+    if (pmode) {
+        return "/sdcard/Arknights/main/" + prel + "/";
+    }
+    return "/sdcard/Arknights/main/operator/" + std::string(voc) + "/" +
+           std::string(star) + "/" + std::string(name) + "/";
+}
+
+/* __index__ 条目落位:公共库重定向到 INDEX 缩略图目录;用户库直接落在角色目录内 */
+static std::string file_dst_for(const char *voc, const char *star, const char *name,
+                                const std::string &rel,
+                                bool umode, int uid, const std::string &urel,
+                                bool pmode, const std::string &prel) {
+    if (!umode && !pmode && rel.rfind("__index__/", 0) == 0) {
+        return "/sdcard/Arknights/main/operator/INDEX/" + std::string(voc) + "_108x228/" +
+               std::string(star) + "/" + std::string(name) + ".jpg";
+    }
+    return role_local_base(voc, star, name, umode, uid, urel, pmode, prel) + rel;
+}
+
+/* URL 编码(设备/角色名/路径可能含中文与特殊字符) */
+static std::string url_encode(const std::string &v) {
+    static const char hex[] = "0123456789ABCDEF";
+    std::string out;
+    for (unsigned char c : v) {
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {
+            out += (char)c;
+        } else {
+            out += '%';
+            out += hex[c >> 4];
+            out += hex[c & 0xF];
+        }
+    }
+    return out;
+}
+
+static std::string http_get(const std::string &url, std::string &body, int timeout_ms = 20000) {
+    /* 返回空字符串 = 成功;否则返回错误描述。
+     * 注意:读循环缓冲只用 1KB 栈(esp_http_client 内部 8KB 解析缓冲是堆分配),
+     * 调用本函数的任务栈 ≥10KB 即安全。 */
+    /* 2026-10-05 网络未就绪不发请求:新设备 WiFi 未配置时,lwip 的 TCP/IP
+       mbox 尚未创建,getaddrinfo 直接 assert(Invalid mbox)整机崩溃。
+       旧设备开机自动连 WiFi 所以正常,新设备必崩——这是根因。 */
+    if (!WifiStation::GetInstance().IsConnected()) {
+        return "network not ready";
+    }
+    /* 2026-10-05 空/非法 URL 防御:新设备未激活时 OTA 服务器地址为空,
+       getaddrinfo("") 触发 lwip assert(Invalid mbox)整机崩溃。
+       校验到 host 段:裸前缀 "http:///…" 也拦截(host 为空同样崩) */
+    bool _ok = false;
+    size_t _scheme = url.find("://");
+    if (_scheme != std::string::npos) {
+        size_t _hs = _scheme + 3;
+        size_t _he = url.find_first_of("/?#", _hs);
+        std::string _host = url.substr(_hs, _he == std::string::npos
+                                                ? std::string::npos : _he - _hs);
+        _ok = !_host.empty();
+    }
+    if (url.empty() || url.size() < 8 || !_ok) {
+        return "empty url";
+    }
+    esp_http_client_config_t cfg = {};
+    cfg.url = url.c_str();
+    cfg.timeout_ms = timeout_ms;
+    cfg.buffer_size = MAX_HTTP_BUF;
+    cfg.buffer_size_tx = 1024;
+    cfg.user_agent = "szfz-device/1.0";
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if (!client) return "http client init fail";
+
+    body.clear();
+    char buf[1024];
+
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err != ESP_OK) { esp_http_client_cleanup(client); return "open fail"; }
+    int64_t total = esp_http_client_fetch_headers(client);
+    if (total < 0) { esp_http_client_cleanup(client); return "fetch headers fail"; }
+
+    while (true) {
+        int r = esp_http_client_read(client, buf, sizeof(buf));
+        if (r <= 0) break;
+        body.append(buf, r);
+    }
+    int status = esp_http_client_get_status_code(client);
+    esp_http_client_cleanup(client);
+    if (status < 200 || status >= 300) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "HTTP %d", status);
+        return msg;
+    }
+    return "";
+}
+
+/* 下载到文件(边下边写,返回空=成功;返回 "cancelled" = 回调要求取消)。
+ * offset>0 时断点续传:发 HTTP Range,206 → 追加写;服务器不支持(200)→ 从头重写。
+ * 取消时不删已写数据(保留 .part 供下次续传)。step_cb 每 1% 调用一次,返回 false 中止。 */
+static std::string http_download_ex(const std::string &url, const std::string &dst,
+                                    bool (*step_cb)(int pct, const char *file, void *ud),
+                                    void *ud, int64_t offset = 0, int throttle_ms = 5) {
+    /* 2026-10-24 下载前强制关 C6 省电:待机时 SetPowerSaveMode(true) 会把
+       WiFi 下行压到 ~1Mbps(实测 200KB/s);开机音乐下载那次恰好省电刚关
+       才有 1.2MB/s。esp_wifi_set_ps 幂等,每文件多调无害 */
+    extern void wifi_power_save_off(void);
+    wifi_power_save_off();
+    DlBusyGuard _bg;
+    esp_http_client_config_t cfg = {};
+    cfg.url = url.c_str();
+    cfg.timeout_ms = 60000;
+    cfg.buffer_size = BUF_SIZE;
+    cfg.user_agent = "szfz-device/1.0";
+    cfg.crt_bundle_attach = esp_crt_bundle_attach;   /* 2026-10-21 直连 COS(HTTPS)证书校验 */
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if (!client) return "client init fail";
+    if (offset > 0) {
+        char rng[48];
+        snprintf(rng, sizeof(rng), "bytes=%d-", (int)offset);
+        ESP_LOGI(TAG, "http_dl 续传: %s (Range: %s)", url.c_str(), rng);
+        esp_http_client_set_header(client, "Range", rng);
+    }
+
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err != ESP_OK) { esp_http_client_cleanup(client); return "open fail"; }
+    int64_t total = esp_http_client_fetch_headers(client);
+    int status = esp_http_client_get_status_code(client);
+    if (status < 200 || status >= 300) {
+        esp_http_client_cleanup(client);
+        char msg[48]; snprintf(msg, sizeof(msg), "HTTP %d", status);
+        return msg;
+    }
+    // 206 = 服务器从 offset 起发剩余数据(追加写);200 = 不支持 Range,从头重写
+    bool append = (offset > 0 && status == 206);
+    int64_t base = append ? offset : 0;
+    FILE *f = fopen(dst.c_str(), append ? "ab" : "wb");
+    if (!f) { esp_http_client_cleanup(client); return "SD 写入失败(卡满/未挂载?)"; }
+
+    /* 2026-10-06 下载加速:原 1KB 栈缓冲逐片读+写,实测仅 0.11MB/s——
+       每次 read 仅 1KB(TCP 吞吐低)+ fwrite 1KB 落盘(SD 4KB 块写放大)。
+       改 32KB 堆缓冲(栈缓冲曾让 10KB 栈下载任务贴近溢出极限)+ stdio
+       32KB 全缓冲,批量落盘,预期提速 10 倍以上。
+       2026-10-25 缓冲改 PSRAM:内部 SRAM 紧张(minimal 24KB),32MB
+       PSRAM 闲着;释放 32KB SRAM 为 TCP 窗口扩容让路 */
+    char *buf = (char*)heap_caps_malloc(32768, MALLOC_CAP_SPIRAM);
+    if (!buf) { fclose(f); esp_http_client_cleanup(client); return "内存不足"; }
+    setvbuf(f, NULL, _IOFBF, 32768);
+    int64_t done = 0;
+    int last_pct = -1;
+    while (true) {
+        int r = esp_http_client_read(client, buf, 32768);
+        if (r <= 0) break;
+        fwrite(buf, 1, r, f);
+        done += r;
+        g_dl_bytes_done += r;   /* 2026-10-07 速度统计真实字节 */
+        /* 2026-10-07 下载节流:SDIO 接收缓冲(DMA 内部池)曾在全速下载时
+           耗尽(dma_alloc failed → dropping read → RPC 超时 → 掉速回 20KB/s)。
+           每读一轮让出 throttle_ms 给 SDIO 排空缓冲。
+           2026-10-21 bundle 传 20ms:SD 卡写吞吐 ~2MB/s,2.4MB/s 下载把
+           SDMMC 写队列压满后读循环卡死(实测 Send-Q 148KB 积压几十秒),
+           20ms/32KB ≈ 1.6MB/s 在 SD 舒服区间且比旧版快 12 倍 */
+        vTaskDelay(pdMS_TO_TICKS(throttle_ms));
+        int64_t full = base + total;   // 206 时 total=剩余部分
+        if (full > 0 && step_cb) {
+            int pct = (int)((base + done) * 100 / full);
+            if (pct != last_pct) {
+                last_pct = pct;
+                if (!step_cb(pct, nullptr, ud)) {
+                    free(buf);
+                    fclose(f);
+                    esp_http_client_cleanup(client);
+                    return "cancelled";   // 保留 .part(断点续传数据)
+                }
+            }
+        }
+    }
+    free(buf);
+    fclose(f);
+    esp_http_client_cleanup(client);
+    return "";
+}
+
+/* 确保目录存在(逐级 mkdir) */
+static bool mkdirs(const std::string &path) {
+    if (path.empty()) return true;
+    struct stat st;
+    if (stat(path.c_str(), &st) == 0) return true;
+    size_t pos = path.rfind('/');
+    if (pos != std::string::npos && pos > 0) {
+        if (!mkdirs(path.substr(0, pos))) return false;
+    }
+    return mkdir(path.c_str(), 0777) == 0 || stat(path.c_str(), &st) == 0;
+}
+
+/* 递归删除目录(含内容);不存在/是文件时 unlink。 */
+static void remove_dir_r(const std::string &path) {
+    DIR *d = opendir(path.c_str());
+    if (!d) { unlink(path.c_str()); return; }
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        remove_dir_r(path + "/" + e->d_name);
+    }
+    closedir(d);
+    rmdir(path.c_str());
+}
+
+/* FATFS f_rename 不覆盖已存在目标(返回 FR_EXIST):覆盖式改名 = 先删目标再改。
+   失败保留 .part(下次续传/重试)。 */
+static bool rename_overwrite(const char *from, const char *to) {
+    struct stat st;
+    if (stat(to, &st) == 0) unlink(to);
+    return rename(from, to) == 0;
+}
+
+/* ---------- JSON 解析 ---------- */
+static void parse_roles(const std::string &body) {
+    s_roles.clear();
+    cJSON *root = cJSON_Parse(body.c_str());
+    if (!root || !cJSON_IsArray(root)) { if (root) cJSON_Delete(root); return; }
+    int n = cJSON_GetArraySize(root);
+    for (int i = 0; i < n && (int)s_roles.size() < MAX_ROLES; i++) {
+        cJSON *item = cJSON_GetArrayItem(root, i);
+        if (!item) continue;
+        RoleInfo r;
+        cJSON *j;
+        if ((j = cJSON_GetObjectItem(item, "name")) && cJSON_IsString(j)) r.name = j->valuestring;
+        if ((j = cJSON_GetObjectItem(item, "vocation")) && cJSON_IsString(j)) r.vocation = j->valuestring;
+        if ((j = cJSON_GetObjectItem(item, "star")) && cJSON_IsString(j)) r.star = j->valuestring;
+        if ((j = cJSON_GetObjectItem(item, "incomplete")) && cJSON_IsBool(j)) r.incomplete = cJSON_IsTrue(j);
+        if (!r.name.empty()) s_roles.push_back(std::move(r));
+    }
+    cJSON_Delete(root);
+}
+
+static bool parse_manifest(const std::string &body) {
+    s_files.clear();
+    cJSON *root = cJSON_Parse(body.c_str());
+    if (!root) return false;
+    cJSON *files = cJSON_GetObjectItem(root, "files");
+    if (files && cJSON_IsArray(files)) {
+        int n = cJSON_GetArraySize(files);
+        for (int i = 0; i < n; i++) {
+            cJSON *item = cJSON_GetArrayItem(files, i);
+            FileItem f;
+            cJSON *j;
+            if ((j = cJSON_GetObjectItem(item, "rel")) && cJSON_IsString(j)) f.rel = j->valuestring;
+            if ((j = cJSON_GetObjectItem(item, "size"))) f.size = (int64_t)j->valuedouble;
+            if (!f.rel.empty()) s_files.push_back(std::move(f));
+        }
+    }
+    cJSON_Delete(root);
+    return !s_files.empty();
+}
+
+/* ---------- 下载核心(下载页/索引页弹窗共用) ---------- */
+
+/* 2026-10-07 清单总字节统计(局部文件列表用) */
+static int64_t sum_files(const std::vector<FileItem> &files) {
+    int64_t total = 0;
+    for (const FileItem &f : files) total += f.size;
+    ESP_LOGI(TAG, "probe OK: %d 个文件, 共 %d KB", (int)files.size(), (int)(total / 1024));
+    return total;
+}
+
+static int64_t probe_impl(const char *voc, const char *star, const char *name,
+                          bool umode, int uid, const std::string &urel,
+                          bool pmode, const std::string &prel,
+                          std::vector<FileItem> *files_out) {
+    std::string murl = manifest_url_for(voc, star, name, umode, uid, urel, pmode, prel);
+    ESP_LOGI(TAG, "probe: %s", murl.c_str());
+    std::string body, err;
+    for (int attempt = 0; attempt < 3; attempt++) {
+        err = http_get(murl, body);
+        if (err.empty()) {
+            /* 解析临界区:全局 s_files 是共享缓冲,拷局部后解锁(并发任务安全) */
+            dl_lock();
+            bool ok = parse_manifest(body);
+            std::vector<FileItem> files = s_files;
+            dl_unlock();
+            if (ok && files_out) *files_out = files;
+            if (ok) return files.empty() ? -2 : sum_files(files);
+            err = "parse fail";
+        }
+        if (err.rfind("HTTP 404", 0) == 0) return -2;   // 云端无此角色包:重试无意义
+        ESP_LOGW(TAG, "probe manifest 失败(第%d次): %s", attempt + 1, err.c_str());
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+    if (err.rfind("HTTP 404", 0) == 0) return -2;   // 云端资源未就绪(区别于网络失败)
+    if (!err.empty()) return -1;
+    return -1;
+}
+
+int64_t role_download_probe(const char *voc, const char *star, const char *name) {
+    return probe_impl(voc, star, name, false, 0, "", false, "", NULL);
+}
+
+int role_download_estimate_minutes(int64_t total_bytes) {
+    const int64_t KBPS = 500;   // 保守速度估算(kB/s,实测 2.4G WiFi 明文下载 1MB/s+)
+    int64_t secs = total_bytes / KBPS / 1024;
+    int m = (int)((secs + 59) / 60);
+    return m < 1 ? 1 : m;
+}
+
+static int check_impl(const char *voc, const char *star, const char *name,
+                      bool umode, int uid, const std::string &urel,
+                      bool pmode, const std::string &prel, int64_t *total_out,
+                      const std::vector<std::string> *prefixes = nullptr) {
+    std::vector<FileItem> files;
+    int64_t total = probe_impl(voc, star, name, umode, uid, urel, pmode, prel, &files);
+    if (total == -2) return -2;   // 云端无此角色(手工角色):按齐全处理,直接展示
+    if (total < 0) { if (total_out) *total_out = -1; return -1; }   // 网络失败:未知
+    int64_t sub_total = 0;
+    for (const FileItem &f : files) {
+        /* 2026-09-26:__index__ 缩略图缺失不判"有更新"——缩略图由索引页 thumbs
+           同步静默补,不该因缺一张缩略图弹"更新资源"弹窗(资源本体齐全即齐全) */
+        if (f.rel.rfind("__index__/", 0) == 0) continue;
+        if (prefixes && !prefixes->empty()) {   /* 2026-10-25 懒下载:只核对前缀集 */
+            bool match = false;
+            for (auto &p : *prefixes)
+                if (f.rel.compare(0, p.size(), p) == 0) { match = true; break; }
+            if (!match) continue;
+            sub_total += f.size;
+        }
+        std::string p = file_dst_for(voc, star, name, f.rel, umode, uid, urel, pmode, prel);
+        struct stat st;
+        if (stat(p.c_str(), &st) != 0 || st.st_size != f.size) {
+            ESP_LOGI(TAG, "check %s: 缺/异 %s", name, f.rel.c_str());
+            return 0;   // 部分缺失
+        }
+        /* 2026-09-17:mesh.ppdq 下载中断残留(大小与清单一致但 magic 坏)——
+           曾导致设备永远 bad magic、永不重下、动作按钮全无的死循环 */
+        if (f.rel.size() >= 9 && f.rel.compare(f.rel.size() - 9, 9, "mesh.ppdq") == 0) {
+            FILE *ff = fopen(p.c_str(), "rb");
+            char mg[4] = {0, 0, 0, 0};
+            bool bad = true;
+            if (ff) {
+                if (fread(mg, 1, 4, ff) == 4 && memcmp(mg, "PPDQ", 4) == 0) bad = false;
+                fclose(ff);
+            }
+            if (bad) {
+                ESP_LOGW(TAG, "check %s: %s magic 坏(残留) → 判缺重下", name, f.rel.c_str());
+                return 0;
+            }
+        }
+    }
+    if (total_out) *total_out = (prefixes && !prefixes->empty()) ? sub_total : total;
+    return 1;   // 齐全
+}
+
+int role_download_check(const char *voc, const char *star, const char *name, int64_t *total_out) {
+    return check_impl(voc, star, name, false, 0, "", false, "", total_out);
+}
+
+int role_download_list(std::vector<CloudRole> &out) {
+    std::string body, err;
+    for (int attempt = 0; attempt < 2; attempt++) {
+        err = http_get(url_host() + "/api/roles", body, 8000);
+        if (err.empty()) break;
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+    if (!err.empty()) {
+        ESP_LOGW(TAG, "role_download_list 失败: %s", err.c_str());
+        return 1;
+    }
+    cJSON *root = cJSON_Parse(body.c_str());
+    if (!root || !cJSON_IsArray(root)) { if (root) cJSON_Delete(root); return 1; }
+    int n = cJSON_GetArraySize(root);
+    for (int i = 0; i < n; i++) {
+        cJSON *item = cJSON_GetArrayItem(root, i);
+        if (!item) continue;
+        CloudRole r;
+        cJSON *j;
+        if ((j = cJSON_GetObjectItem(item, "name")) && cJSON_IsString(j)) r.name = j->valuestring;
+        if ((j = cJSON_GetObjectItem(item, "vocation")) && cJSON_IsString(j)) r.voc = j->valuestring;
+        if ((j = cJSON_GetObjectItem(item, "star")) && cJSON_IsString(j)) r.star = j->valuestring;
+        if ((j = cJSON_GetObjectItem(item, "incomplete")) && cJSON_IsBool(j)) r.incomplete = cJSON_IsTrue(j);
+        if (!r.name.empty() && !r.voc.empty() && !r.star.empty()) out.push_back(std::move(r));
+    }
+    cJSON_Delete(root);
+    ESP_LOGI(TAG, "role_download_list: %d roles", (int)out.size());
+    return 0;
+}
+
+int role_download_thumbs(std::vector<CloudRole> &out) {
+    std::string body, err;
+    for (int attempt = 0; attempt < 2; attempt++) {
+        err = http_get(url_host() + "/api/roles/thumbs", body, 8000);
+        if (err.empty()) break;
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+    if (!err.empty()) {
+        ESP_LOGW(TAG, "thumbs 获取失败: %s", err.c_str());
+        return 1;
+    }
+    cJSON *root = cJSON_Parse(body.c_str());
+    if (!root) return 1;
+    cJSON *arr = cJSON_GetObjectItem(root, "thumbs");
+    if (arr && cJSON_IsArray(arr)) {
+        int n = cJSON_GetArraySize(arr);
+        for (int i = 0; i < n; i++) {
+            cJSON *item = cJSON_GetArrayItem(arr, i);
+            if (!item) continue;
+            CloudRole r;
+            cJSON *j;
+            if ((j = cJSON_GetObjectItem(item, "voc")) && cJSON_IsString(j)) r.voc = j->valuestring;
+            if ((j = cJSON_GetObjectItem(item, "star")) && cJSON_IsString(j)) r.star = j->valuestring;
+            if ((j = cJSON_GetObjectItem(item, "name")) && cJSON_IsString(j)) r.name = j->valuestring;
+            if (!r.name.empty() && !r.voc.empty() && !r.star.empty()) out.push_back(std::move(r));
+        }
+    }
+    cJSON_Delete(root);
+    ESP_LOGI(TAG, "role_download_thumbs: %d", (int)out.size());
+    return 0;
+}
+
+int role_download_thumb(const char *voc, const char *star, const char *name) {
+    /* 已有则跳过(下载器完整下载也会写入同路径) */
+    char dst[320];
+    snprintf(dst, sizeof(dst), "/sdcard/Arknights/main/operator/INDEX/%.31s_108x228/%.15s/%.63s.jpg",
+             voc, star, name);   // 精度限制:职业/星级/角色名均有界,防截断告警
+    struct stat st;
+    if (stat(dst, &st) == 0 && st.st_size > 0) return 0;
+    std::string durl = url_host() + "/api/roles/file?v=" + url_encode(voc) +
+                       "&s=" + url_encode(star) + "&n=" + url_encode(name) +
+                       "&p=__index__/" + url_encode(name) + ".jpg";
+    std::string dir = dst;
+    size_t slash = dir.rfind('/');
+    if (slash != std::string::npos) mkdirs(dir.substr(0, slash));
+    /* SD 卡与 WiFi 协处理器共享 SDMMC 总线:小文件连续写会与 WiFi 下行争抢
+       导致瞬时写超时(0x107)——失败重试 2 次,间隔拉长让总线喘息 */
+    std::string err;
+    for (int attempt = 0; attempt < 3; attempt++) {
+        err = http_download_ex(durl, dst, nullptr, nullptr);
+        if (err.empty()) return 0;
+        if (err.rfind("HTTP 4", 0) == 0) return -1;   // 404/400:服务器无此缩略图
+        vTaskDelay(pdMS_TO_TICKS(800));
+    }
+    return 1;
+}
+
+/* ---------- 大块传输:服务器中转分页内存版(2026-10-21 终版四) ----------
+ * 1198 个小文件逐一下载(每文件请求往返 ~1.5s)实测极慢。
+ * 终版:服务器 bundle 分页(OSS 链接角色先本地缓存 zip 流式转出),
+ * 设备每页(~4MB)下载到 PSRAM 缓冲(不碰 SD,满速),再从内存解析
+ * 写 SD(带 yield)。网络读与 SD 写解耦:
+ *  - .part 直写版曾 Send-Q 148KB 积压卡死(SD 写被网络推着跑)
+ *  - 内存版实测下载 2.4MB/s;WDT 已由解析 yield + 下载期停唤醒词解决 */
+
+/* 下载到内存缓冲(页数据),不落盘 */
+static std::string http_download_mem(const std::string &url, uint8_t *buf, size_t cap,
+                                     size_t *len_out,
+                                     bool (*step_cb)(int pct, const char *file, void *ud),
+                                     void *ud, int throttle_ms) {
+    /* 2026-10-24 同 http_download_ex:下载前强制关 C6 省电(幂等) */
+    extern void wifi_power_save_off(void);
+    wifi_power_save_off();
+    DlBusyGuard _bg;
+    esp_http_client_config_t cfg = {};
+    cfg.url = url.c_str();
+    cfg.timeout_ms = 60000;
+    cfg.buffer_size = BUF_SIZE;
+    cfg.user_agent = "szfz-device/1.0";
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if (!client) return "client init fail";
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err != ESP_OK) { esp_http_client_cleanup(client); return "open fail"; }
+    esp_http_client_fetch_headers(client);
+    int status = esp_http_client_get_status_code(client);
+    if (status < 200 || status >= 300) {
+        esp_http_client_cleanup(client);
+        return "HTTP status";
+    }
+    size_t done = 0;
+    int last_pct = -1;
+    while (done < cap) {
+        size_t want = cap - done < 32768 ? cap - done : 32768;
+        int r = esp_http_client_read(client, (char *)(buf + done), (int)want);
+        if (r <= 0) break;
+        done += (size_t)r;
+        g_dl_bytes_done += r;
+        dl_progress_tick();   /* 2026-10-25 看门狗进度(下载阶段) */
+        vTaskDelay(pdMS_TO_TICKS(throttle_ms));
+        if (step_cb) {
+            int pct = (int)(done * 100 / cap);
+            if (pct != last_pct) {
+                last_pct = pct;
+                if (!step_cb(pct, nullptr, ud)) {
+                    esp_http_client_cleanup(client);
+                    return "cancelled";
+                }
+            }
+        }
+    }
+    /* 2026-10-25 页真实大小 < 缓冲时(done<cap 正常结束)补 100% 回调:
+       进度分母=缓冲,分母过大页小则百分比停在 56-68% 就进写卡,
+       进度条看起来像卡死(用户实测:68% 进入写入)。完整接收才补,
+       连接中断(done<cap 但未收完)不误报 100% */
+    if (step_cb && done < cap && esp_http_client_is_complete_data_received(client)) {
+        if (!step_cb(100, nullptr, ud)) {
+            esp_http_client_cleanup(client);
+            return "cancelled";
+        }
+    }
+    *len_out = done;
+    esp_http_client_cleanup(client);
+    return "";
+}
+
+static int bundle_fetch_user(int uid, const std::string &urel, int pages,
+                             int start_skip, int start_pg, size_t max_file,
+                             const std::vector<std::string> *prefixes,
+                             bool (*step_cb)(int pct, const char *file, void *ud), void *ud) {
+    if (url_host().empty()) { ESP_LOGW(TAG, "bundle: url_host 空,回退逐文件"); return -1; }
+    std::string base = "/sdcard/" + urel + "/";
+
+    /* 2026-10-25 页缓冲 ≥ 角色最大单文件+头部余量:服务器严格打包后,
+       单文件页可超 8MB(Wisadel PPD_Q/mesh.json 12.17MB),页 = 文件名+
+       尺寸头(~≤526B)+数据+6B 尾标记,按 max_file 精确分配会截掉尾标记。
+       缓冲不够会截断页 → 文件丢失+假成功(三台设备恒定卡死根因) */
+    size_t page_cap = PAGE_CAP;
+    if (max_file + 1024 > page_cap) page_cap = max_file + 1024;
+    uint8_t *page = (uint8_t *)heap_caps_malloc(page_cap, MALLOC_CAP_SPIRAM);
+    if (!page) {
+        ESP_LOGW(TAG, "bundle: %uMB PSRAM 页缓冲失败(free %u KB),回退逐文件",
+                 (unsigned)(page_cap / 1048576),
+                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+        return -1;
+    }
+    uint8_t *buf = (uint8_t *)heap_caps_malloc(16384, MALLOC_CAP_SPIRAM);   /* 2026-10-25 改 PSRAM:释放 SRAM */
+    if (!buf) { free(page); return -1; }
+
+    int total_n = 0;
+    int skip = start_skip;   /* 2026-10-25 断点:从首个缺失文件所在块继续 */
+    for (int pg = 0; pg < 200; pg++) {
+        int last_skip = skip;   /* 2026-10-25 防页尾标记缺失 → 无限重下同一页 */
+        /* 2026-10-25 UI 显示"第N/M块":每页下载前更新块号(ud 为 UI 传入的
+           RoleDlPageInfo*,其余调用点传 null 不碰) */
+        if (ud) { ((RoleDlPageInfo *)ud)->page = start_pg + pg; ((RoleDlPageInfo *)ud)->pages = pages; }
+        std::string url = url_host() + "/api/user_repo/bundle?mac=" +
+                          url_encode(SystemInfo::GetMacAddress()) + "&rel=" + url_encode(urel) +
+                          "&skip=" + std::to_string(skip) + "&count=8000000";   /* 2026-10-25 4MB→8MB 页:页数减半,页间解析/写SD空白减半(PAGE_CAP 8MB 已够) */
+        /* 2026-10-25 懒下载:only= 前缀集(逗号连接),服务器只打包匹配文件;
+           空 = 全量。skip/next 在过滤集内计数,与本地 files 过滤一致 */
+        if (prefixes && !prefixes->empty()) {
+            std::string joined;
+            for (auto &p : *prefixes) { if (!joined.empty()) joined += ","; joined += p; }
+            url += "&only=" + url_encode(joined);
+        }
+        if (pg == 0) ESP_LOGI(TAG, "bundle: 分页内存版(%.72s)", url.c_str());
+        size_t plen = 0;
+        /* 2026-10-25 throttle 5→15ms:WND_SCALE 提速后网络峰值 2MB/s+
+           超过 SD 卡舒服区间(~2MB/s),8MB 页解析写 SD 时 SDMMC 卡死
+           (task_wdt:sdmmc_send_cmd_send_status)。15ms/16KB≈1.07MB/s
+           只削峰值:均值 600KB/s 时每块 27ms>15ms 不受影响。
+           2026-10-26 页级计时诊断:下载慢(5s均值 ~18KB/s)时区分
+           "网络慢"(下载耗时长)与"卡慢"(写卡耗时长) */
+        int64_t t_dl0 = esp_timer_get_time();
+        std::string derr = http_download_mem(url, page, page_cap, &plen, step_cb, ud, 15);
+        int64_t t_dl_ms = (esp_timer_get_time() - t_dl0) / 1000;
+        if (!derr.empty()) {
+            ESP_LOGW(TAG, "bundle 页下载失败: %s", derr.c_str());
+            free(buf); free(page);
+            return -1;
+        }
+        if (plen < 12) { free(buf); free(page); return -1; }
+        /* 内存解析 SZFB:magic + 条目 + [u16 0][u32 next_skip] */
+        const uint8_t *p = page;
+        size_t rem = plen;
+        if (memcmp(p, "SZFB", 4) != 0) { free(buf); free(page); return -1; }
+        p += 4; rem -= 4;
+        int page_n = 0;
+        bool parse_ok = true;
+        int64_t t_write_ms = 0;   /* 2026-10-26 写卡总耗时(页级诊断) */
+        while (rem >= 6) {
+            uint16_t nl;
+            memcpy(&nl, p, 2); p += 2; rem -= 2;
+            if (nl == 0) {
+                uint32_t ns = 0;
+                if (rem >= 4) { memcpy(&ns, p, 4); skip = (int)ns; }
+                else parse_ok = false;
+                break;
+            }
+            if (nl > 500 || rem < (size_t)nl + 4) { parse_ok = false; break; }
+            char name[512];
+            memcpy(name, p, nl); name[nl] = 0; p += nl; rem -= nl;
+            uint32_t size;
+            memcpy(&size, p, 4); p += 4; rem -= 4;
+            if (rem < size) { parse_ok = false; break; }
+            if (strstr(name, "..")) { parse_ok = false; break; }
+            std::string dst = base + name;
+            std::string dir = dst;
+            size_t slash = dir.rfind('/');
+            if (slash != std::string::npos) mkdirs(dir.substr(0, slash));
+            FILE *o = fopen(dst.c_str(), "wb");
+            if (!o) { parse_ok = false; break; }
+            /* 2026-10-25 写前告知 UI"正在写卡 <文件>":大文件单写可达数十秒,
+               只靠写后回调 UI 会停在上一文件,96-100% 处像卡死;同时写前
+               检查取消,长写期间点取消立刻生效 */
+            if (step_cb && !step_cb(-1, name, ud)) {
+                fclose(o); free(buf); free(page);
+                return 2;
+            }
+            /* 2026-10-25 逐文件开始日志:卡死时精确定位卡在哪个文件
+               (Wisadel 实测恒定死在 PPD_Q/forms/背面/mesh.json → 卡坏块) */
+            ESP_LOGI(TAG, "写文件开始: %s (%uB)", name, (unsigned)size);
+            const uint8_t *d = p;
+            uint32_t left = size;
+            int64_t t0 = esp_timer_get_time();
+            while (left > 0) {
+                size_t chunk = left < 16384 ? left : 16384;
+                size_t w = fwrite(d, 1, chunk, o);
+                d += w; left -= (uint32_t)w;
+                /* 2026-10-25 自适应写卡限速(见 s_pace_ms 注释)。
+                   每 16KB 停 s_pace_ms,低于卡后台刷写速率则缓存不积满;
+                   写短 = 卡异常,放弃本文件(check 大小比对自愈) */
+                if (w < chunk) { parse_ok = false; break; }
+                dl_progress_tick();   /* 2026-10-25 看门狗进度(写卡阶段,每 16KB) */
+                vTaskDelay(pdMS_TO_TICKS(s_pace_ms));
+            }
+            fclose(o);
+            /* 慢文件诊断 + 节奏自适应:实测卡持续速率仅 ~360KB/s
+               (7.1MB 文件卡 28.7 秒),固定限速 800KB/s 仍会页尾积压。
+               耗时超过限速预算 2 秒 = 卡跟不上,上调节奏(仅升不降)。 */
+            int64_t t_ms = (esp_timer_get_time() - t0) / 1000;
+            t_write_ms += t_ms;   /* 2026-10-26 写卡总耗时累计 */
+            if (t_ms > 2000)
+                ESP_LOGW(TAG, "写文件慢 %dms: %s (%uB)", (int)t_ms, name, (unsigned)size);
+            uint32_t budget_ms = ((uint32_t)size / 16384 + 1) * s_pace_ms;
+            if (t_ms > (int64_t)budget_ms + 2000 && s_pace_ms < 60) {
+                s_pace_ms += s_pace_ms / 2;   /* 20→30→45→60 渐进 */
+                if (s_pace_ms > 60) s_pace_ms = 60;
+                ESP_LOGW(TAG, "写卡节奏上调至 %dms/16KB(卡速率低于限速)", (int)s_pace_ms);
+            }
+            /* 2026-10-26 回退"下调自适应":写卡限速降到 5ms/16KB(3.2MB/s)
+               超过 SD 卡舒适区 → SDMMC 持忙卡死 → 90s watchdog 重启
+               (用户实测连续崩溃)。保持只升不降,下限 20ms(1.6MB/s)安全 */
+            p += size; rem -= size;
+            total_n++; page_n++;
+            if (step_cb && !step_cb(-1, name, ud)) {
+                free(buf); free(page);
+                return 2;
+            }
+        }
+        /* 2026-10-25 页损坏(截断/条目异常)一律 -1 失败:走逐文件增量回退,
+           已写文件大小比对跳过,缺的补齐。旧版返回 0(假成功)导致丢文件 */
+        if (!parse_ok) { free(buf); free(page); return -1; }
+        ESP_LOGI(TAG, "bundle 第%d页: %d 文件 (next=%d) | 页下载 %lldms / 写卡 %lldms",
+                 pg + 1, page_n, skip, (long long)t_dl_ms, (long long)t_write_ms);
+        if (skip <= 0) break;
+        if (skip == last_skip) {
+            ESP_LOGW(TAG, "bundle 页未推进(next 不变),中止防无限重下");
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(800));
+    }
+    free(buf); free(page);
+    ESP_LOGI(TAG, "bundle 完成: %d 文件落位", total_n);
+    return total_n > 0 ? 0 : -1;
+}
+
+/* 2026-10-26 流式 bundle:HTTP 边下载边解析 SZFB 边写卡,缓冲仅 16KB。
+   PPD 模式 PSRAM 碎片化时整页缓冲(8MB 连续块)分配失败 → 回退逐文件
+   (40-59KB/s 慢启动损耗);流式不依赖大块连续内存,彻底解决 */
+static int bundle_fetch_public_stream(const std::string &rel,
+                                      const std::vector<std::string> *prefixes,
+                                      bool (*step_cb)(int pct, const char *file, void *ud), void *ud) {
+    if (url_host().empty()) { ESP_LOGW(TAG, "bundle: url_host 空,回退逐文件"); return -1; }
+    std::string base = "/sdcard/Arknights/main/" + rel + "/";
+    char *buf = (char*)heap_caps_malloc(16384, MALLOC_CAP_SPIRAM);
+    if (!buf) return -1;
+
+    esp_http_client_handle_t hc = NULL;
+    /* 流式读 helper:精确读满 n 字节(跨 esp_http_client_read 短读) */
+    auto read_n = [&](uint8_t *dst, size_t n) -> bool {
+        size_t got = 0;
+        while (got < n) {
+            int r = esp_http_client_read(hc, (char*)(dst + got), (int)(n - got));
+            if (r <= 0) return false;
+            got += (size_t)r;
+        }
+        return true;
+    };
+
+    int total_n = 0;
+    int skip = 0;
+    for (int pg = 0; pg < 200; pg++) {
+        int last_skip = skip;
+        std::string url = url_host() + "/api/public/bundle?rel=" + url_encode(rel) +
+                          "&skip=" + std::to_string(skip) + "&count=8000000";
+        if (prefixes && !prefixes->empty()) {
+            std::string joined;
+            for (auto &p : *prefixes) { if (!joined.empty()) joined += ","; joined += p; }
+            url += "&only=" + url_encode(joined);
+        }
+        if (pg == 0) ESP_LOGI(TAG, "bundle: 流式解析(%.72s)", url.c_str());
+        esp_http_client_config_t cfg = {};
+        cfg.url = url.c_str();
+        cfg.timeout_ms = 60000;
+        cfg.buffer_size = 16384;
+        cfg.user_agent = "szfz-device/1.0";
+        hc = esp_http_client_init(&cfg);
+        if (!hc) { free(buf); return -1; }
+        if (esp_http_client_open(hc, 0) != ESP_OK) { esp_http_client_cleanup(hc); free(buf); return -1; }
+        esp_http_client_fetch_headers(hc);
+        int status = esp_http_client_get_status_code(hc);
+        if (status < 200 || status >= 300) { esp_http_client_cleanup(hc); free(buf); return -1; }
+        int64_t total_len = esp_http_client_get_content_length(hc);
+        /* 2026-10-26 chunked 流无 Content-Length(Flask 流式默认)→ 进度
+           永停"正在写卡"假卡死(用户实测)。服务器补 X-Total-Bytes 头
+           (打包前预计算本页字节) */
+        if (total_len < 0) {
+            char *hval = NULL;
+            if (esp_http_client_get_header(hc, "X-Total-Bytes", &hval) == ESP_OK && hval)
+                total_len = atoll(hval);
+        }
+        int64_t done_bytes = 0;
+        int last_pct = -1;
+        bool ok = true;
+        uint8_t magic[4];
+        if (!read_n(magic, 4) || memcmp(magic, "SZFB", 4) != 0) ok = false;
+        int page_n = 0;
+        while (ok) {
+            uint8_t h2[2];
+            if (!read_n(h2, 2)) { ok = false; break; }
+            uint16_t nl;
+            memcpy(&nl, h2, 2);
+            if (nl == 0) {
+                uint8_t h4[4];
+                if (!read_n(h4, 4)) { ok = false; break; }
+                uint32_t ns; memcpy(&ns, h4, 4);
+                skip = (int)ns;
+                break;
+            }
+            if (nl > 500) { ok = false; break; }
+            char name[512];
+            if (!read_n((uint8_t*)name, nl)) { ok = false; break; }
+            name[nl] = 0;
+            uint8_t s4[4];
+            if (!read_n(s4, 4)) { ok = false; break; }
+            uint32_t size; memcpy(&size, s4, 4);
+            if (strstr(name, "..")) { ok = false; break; }
+            std::string dst = base + name;
+            std::string dir = dst;
+            size_t slash = dir.rfind('/');
+            if (slash != std::string::npos) mkdirs(dir.substr(0, slash));
+            if (step_cb && !step_cb(-1, name, ud)) { esp_http_client_cleanup(hc); free(buf); return 2; }
+            FILE *o = fopen(dst.c_str(), "wb");
+            if (!o) { ok = false; break; }
+            ESP_LOGI(TAG, "写文件开始(流式): %s (%uB)", name, (unsigned)size);
+            uint32_t left = size;
+            int64_t t0 = esp_timer_get_time();
+            while (left > 0) {
+                size_t chunk = left < 16384 ? left : 16384;
+                int r = esp_http_client_read(hc, buf, (int)chunk);
+                if (r <= 0) { ok = false; break; }
+                size_t w = fwrite(buf, 1, (size_t)r, o);
+                if (w != (size_t)r) { ok = false; break; }
+                left -= (uint32_t)r;
+                done_bytes += r;
+                dl_progress_tick();
+                if (total_len > 0 && step_cb) {
+                    int pct = (int)(done_bytes * 100 / total_len);
+                    if (pct != last_pct) { last_pct = pct; step_cb(pct, nullptr, ud); }
+                }
+                vTaskDelay(pdMS_TO_TICKS(s_pace_ms));
+            }
+            fclose(o);
+            int64_t t_ms = (esp_timer_get_time() - t0) / 1000;
+            if (t_ms > 2000) ESP_LOGW(TAG, "写文件慢 %dms: %s (%uB)", (int)t_ms, name, (unsigned)size);
+            if (!ok) break;
+            total_n++; page_n++;
+            if (step_cb && !step_cb(-1, name, ud)) { esp_http_client_cleanup(hc); free(buf); return 2; }
+        }
+        esp_http_client_cleanup(hc);
+        if (!ok) { free(buf); return -1; }
+        ESP_LOGI(TAG, "bundle 流式第%d页: %d 文件 (next=%d)", pg + 1, page_n, skip);
+        if (skip <= 0) break;
+        if (skip == last_skip) {
+            ESP_LOGW(TAG, "bundle 页未推进(next 不变),中止防无限重下");
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(800));
+    }
+    free(buf);
+    ESP_LOGI(TAG, "bundle 流式完成: %d 文件落位", total_n);
+    return total_n > 0 ? 0 : -1;
+}
+
+/* 2026-10-25 懒下载模块完成标记(.done_<tag>):写入与查询 */
+static void write_done_markers(const char *voc, const char *star, const char *name,
+                               bool umode, int uid, const std::string &urel,
+                               bool pmode, const std::string &prel,
+                               const std::vector<std::string> *tags) {
+    std::string base = role_local_base(voc, star, name, umode, uid, urel, pmode, prel);
+    if (tags && !tags->empty()) {
+        for (auto &t : *tags) {
+            FILE *f = fopen((base + ".done_" + t).c_str(), "w");
+            if (f) { fprintf(f, "ok"); fclose(f); }
+        }
+    } else {
+        static const char *ALL[] = {"cover", "standee", "ppd", "ppdq", "voice"};
+        for (auto t : ALL) {
+            FILE *f = fopen((base + ".done_" + t).c_str(), "w");
+            if (f) { fprintf(f, "ok"); fclose(f); }
+        }
+        FILE *f = fopen((base + ".done").c_str(), "w");   /* 旧版全量标记,兼容 */
+        if (f) { fprintf(f, "ok"); fclose(f); }
+    }
+}
+
+static int fetch_impl(const char *voc, const char *star, const char *name,
+                      bool umode, int uid, const std::string &urel,
+                      bool pmode, const std::string &prel,
+                      bool (*step_cb)(int pct, const char *file, void *ud), void *ud,
+                      const std::vector<std::string> *prefixes = nullptr,
+                      const std::vector<std::string> *tags = nullptr,
+                      bool qbase = false) {
+    ESP_LOGI(TAG, "fetch_impl: umode=%d pmode=%d rel=%s", (int)umode, (int)pmode,
+             umode ? urel.c_str() : (pmode ? prel.c_str() : name));
+    /* 2026-10-26 下载期间暂停雷达 BLE:扫描/广播 HCI 走 SDIO 总线,与
+       WiFi 下载数据争抢(手机同 WiFi 秒下 5.2MB、设备仅 25KB/s,疑似
+       元凶之一)。RAII 保证所有 return 路径自动恢复 */
+    radar_ble_pause();
+    vTaskDelay(pdMS_TO_TICKS(1000));   // 等当前扫描窗口(600ms)退出
+    struct BleResumeGuard {
+        ~BleResumeGuard() { radar_ble_resume(); }
+    } _ble_guard;
+    /* 1. manifest(URL 由显式参数构造,不受并发任务影响) */
+    std::string murl = manifest_url_for(voc, star, name, umode, uid, urel, pmode, prel);
+    std::string body, err;
+    for (int attempt = 0; attempt < 3; attempt++) {
+        err = http_get(murl, body);
+        if (err.empty()) {
+            dl_lock();
+            bool ok = parse_manifest(body);
+            dl_unlock();
+            if (ok) { err = ""; break; }
+            err = "parse fail";
+        }
+        ESP_LOGW(TAG, "manifest 获取失败(第%d次): %s", attempt + 1, err.c_str());
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+    if (!err.empty()) return 1;
+    /* 文件列表局部拷贝:循环内引用绝不悬空(他任务 parse 不再影响本任务) */
+    dl_lock();
+    std::vector<FileItem> files = s_files;
+    dl_unlock();
+    if (files.empty()) return 1;
+    /* 2026-10-25 懒下载:按前缀集过滤(bundle 也只请求这些前缀) */
+    std::vector<std::string> qbase_pfx;   /* Q 基座:内部按 manifest 算精确前缀集 */
+    if (qbase) {
+        for (auto &f : files) {
+            bool top = (f.rel.compare(0, 6, "PPD_Q/") == 0 &&
+                        f.rel.find('/', 6) == std::string::npos);
+            /* 默认主形态 = 正面(设备 s_pd_form_idx 0) */
+            bool face = (f.rel.rfind("PPD_Q/forms/正面/", 0) == 0);
+            if (top || face) qbase_pfx.push_back(f.rel);
+        }
+        prefixes = &qbase_pfx;
+        if (qbase_pfx.empty()) { ESP_LOGW(TAG, "Q 基座前缀集为空,跳过"); return 1; }
+    }
+    if (prefixes && !prefixes->empty()) {
+        std::vector<FileItem> flt;
+        for (auto &f : files) {
+            for (auto &p : *prefixes)
+                if (f.rel.compare(0, p.size(), p) == 0) { flt.push_back(f); break; }
+        }
+        files = flt;
+        if (files.empty()) { ESP_LOGW(TAG, "前缀集无匹配文件,跳过"); return 1; }
+    }
+
+    /* 2026-10-21 大块传输:用户仓库先试 bundle(单流 ~1.3MB/s vs 逐文件
+       ~100KB/s)。成功 → 文件已全部落位,后续逐文件循环全 skip;失败/取消
+       → 回退逐文件。取消(2)直接上抛。 */
+    /* 2026-10-21 bundle 大流持续写 SD 会卡 SDMMC(Send-Q 积压实测),
+       暂禁用走逐文件 8 路并发;换 SD 卡后重新启用 */
+    if (umode) {
+        /* 2026-10-25 断点续传:首个缺失文件索引 = 前导完整文件数(清单序,
+           排除 __index__)。取消/看门狗重启后重下,已完整的前导文件跳过,
+           不再从第1块重下。文件写的是最终路径(无 .part),取消留下的
+           半截文件大小不匹配 → 自然断在此处 */
+        int first_missing = 0;
+        for (auto &f : files) {
+            if (f.rel.compare(0, 10, "__index__/") == 0) continue;
+            struct stat st;
+            std::string path = "/sdcard/" + urel + "/" + f.rel;
+            if (stat(path.c_str(), &st) == 0 && (int64_t)st.st_size == f.size)
+                first_missing++;
+            else break;
+        }
+        /* 2026-10-25 最大单文件供页缓冲扩容(超 8MB 的单文件页防截断) */
+        int64_t max_file = 0;
+        for (auto &f : files) {
+            if (f.size > max_file) max_file = f.size;
+        }
+        /* 2026-10-25 总块数 + 起始块号:本地复现服务器严格打包(8MB 限额
+           "加入前"检查,单文件可超),供 UI 精确"第N/M块"。排除 __index__
+           缩略图(bundle 不含,由逐文件循环补下)。旧版 ceil(总量/8MB)
+           少算(严格打包后 Wisadel 实为 20 块,少算 3) */
+        int pages = 0, start_pg = 1;
+        {
+            int64_t acc = 0;
+            int sent = 0, n = 0;
+            for (auto &f : files) {
+                if (f.rel.compare(0, 10, "__index__/") == 0) continue;
+                if (sent > 0 && acc + f.size > BUNDLE_PAGE_BUDGET) {
+                    pages++; acc = 0; sent = 0;
+                }
+                if (++n == first_missing + 1) start_pg = pages + 1;
+                acc += f.size; sent++;
+            }
+            if (sent > 0) pages++;
+            if (pages < 1) pages = 1;
+        }
+        if (first_missing > 0)
+            ESP_LOGI(TAG, "bundle 断点: 前 %d 文件完整,从第%d块续传", first_missing, start_pg);
+        int br = bundle_fetch_user(uid, urel, pages, first_missing, start_pg,
+                                   (size_t)max_file, prefixes, step_cb, ud);
+        if (br == 2) return 2;
+        if (br == 0) {
+            /* 2026-10-25 bundle 全量落位:只补 __index__ 缩略图后直接收尾。
+               不走下面的 8 并发逐文件循环:8×12KB 栈 ≈100KB 内部 RAM,
+               而设备此时余量 ~29KB → xTaskCreate 静默失败(返回值未查),
+               仅 2 个 worker 建成功 → 进度停在 2×136/1087≈25% → 信号量
+               耗尽、主循环永久等待 → 看门狗重启(实测"20块 24-25% 必崩"
+               根因)。同时省掉 1087 个文件的重复 stat(慢卡上数秒)。
+               懒下载:全量(full)才补缩略图,模块集只写对应模块标记 */
+            if (!prefixes || prefixes->empty()) {
+                int thumb_ok = 0, thumb_fail = 0;
+                for (auto &f : files) {
+                    if (f.rel.compare(0, 10, "__index__/") != 0) continue;
+                    std::string dst = file_dst_for(voc, star, name, f.rel,
+                                                   umode, uid, urel, pmode, prel);
+                    struct stat st;
+                    if (stat(dst.c_str(), &st) == 0 && (int64_t)st.st_size == f.size) {
+                        thumb_ok++; continue;
+                    }
+                    std::string durl = file_url_for(voc, star, name, f.rel,
+                                                    umode, uid, urel, pmode, prel);
+                    std::string dir = dst;
+                    size_t slash = dir.rfind('/');
+                    if (slash != std::string::npos) mkdirs(dir.substr(0, slash));
+                    std::string derr = "none";
+                    for (int attempt = 0; attempt < 3; attempt++) {
+                        derr = http_download_ex(durl, dst, NULL, NULL, 0);
+                        if (derr.empty()) break;
+                        vTaskDelay(pdMS_TO_TICKS(1500));
+                    }
+                    if (derr.empty()) thumb_ok++; else thumb_fail++;
+                }
+                ESP_LOGI(TAG, "bundle 完成收尾: 缩略图 %d ok / %d fail", thumb_ok, thumb_fail);
+            }
+            write_done_markers(voc, star, name, umode, uid, urel, pmode, prel, tags);
+            return 0;
+        }
+        ESP_LOGW(TAG, "bundle 未用(%d),走逐文件下载", br);
+    }
+
+    /* 2. 逐文件增量下载(2026-10-07 并发版):
+     *    - 已存在且大小与清单一致 → 跳过(增量)
+     *    - 先下到 <目标>.part(断点续传载体),完成后再改名落位
+     *    - .part 已有部分数据 → HTTP Range 续传
+     *    旧文件在失败/取消时保持原样;.done 只在全部就绪时写。
+     *    并发:esp-hosted 链路单连接往返延迟 ~1.5s,串行吞吐仅 10-40KB/s;
+     *    文件级 3 路并行(不同连接互不阻塞),总吞吐约 3 倍 */
+    int ok = 0, skip = 0, fail = 0;
+    bool cancelled = false;
+    size_t total_files = files.size();
+    /* 2026-10-21 并发 3→8:瓶颈是每文件 ~1.5s 请求往返(非带宽,开机曲
+       单流 1.3MB/s 为证),3 路仅 2 文件/s ≈ 100KB/s;8 路 ≈ 5 文件/s。
+       小文件低强度写 SD 稳定(大流持续写会卡 SDMMC,已放弃 bundle) */
+    int NW = (total_files < 12) ? 1 : 8;
+    struct DLW {   /* worker 参数与本地统计(worker 结束后主循环汇总) */
+        const std::vector<FileItem> *files;
+        const char *voc, *star, *name;
+        bool umode; int uid; std::string urel; bool pmode; std::string prel;
+        size_t i0, i1;
+        volatile bool cancelled = false;   /* 共享取消标志(多读者,单写者=主循环) */
+        volatile int done = 0;             /* 本 worker 完成文件数 */
+        volatile bool finished = false;
+        SemaphoreHandle_t cnt;             /* 每完成一个文件 give 一次(主循环计数) */
+        int ok = 0, skip = 0, fail = 0;
+    } args[8];
+    SemaphoreHandle_t cnt = xSemaphoreCreateCounting((UBaseType_t)total_files, 0);
+    for (int w = 0; w < NW; w++) {
+        args[w].files = &files;
+        args[w].voc = voc; args[w].star = star; args[w].name = name;
+        args[w].umode = umode; args[w].uid = uid; args[w].urel = urel;
+        args[w].pmode = pmode; args[w].prel = prel;
+        args[w].i0 = total_files * w / NW;
+        args[w].i1 = total_files * (w + 1) / NW;
+        args[w].cnt = cnt;
+    }
+    int create_fail = 0;
+    for (int w = 0; w < NW; w++) {
+        /* 2026-10-26 栈改 PSRAM(xTaskCreate → xTaskCreateWithCaps):
+           PPD 对话模式内部 SRAM 仅剩 ~28KB,原 12KB×8 内部栈 worker 全灭
+           → 本段文件未处理 + 主循环 60s 超时(用户看到"卡住") */
+        BaseType_t rc = xTaskCreateWithCaps([](void *p) {
+            auto *a = (DLW *)p;
+            for (size_t i = a->i0; i < a->i1 && !a->cancelled; i++) {
+                const FileItem &f = (*a->files)[i];
+                std::string dst = file_dst_for(a->voc, a->star, a->name, f.rel,
+                                               a->umode, a->uid, a->urel, a->pmode, a->prel);
+                struct stat st;
+                bool skip_one = false;
+                if (stat(dst.c_str(), &st) == 0 && st.st_size == f.size) {
+                    skip_one = true;
+                    if (f.rel.size() >= 9 && f.rel.compare(f.rel.size() - 9, 9, "mesh.ppdq") == 0) {
+                        FILE *ff = fopen(dst.c_str(), "rb");
+                        char mg[4] = {0, 0, 0, 0};
+                        if (!ff || fread(mg, 1, 4, ff) != 4 || memcmp(mg, "PPDQ", 4) != 0) skip_one = false;
+                        if (ff) fclose(ff);
+                    }
+                }
+                if (skip_one) { a->skip++; a->done++; xSemaphoreGive(a->cnt); continue; }
+                std::string durl = file_url_for(a->voc, a->star, a->name, f.rel,
+                                                a->umode, a->uid, a->urel, a->pmode, a->prel);
+                std::string dir = dst;
+                size_t slash = dir.rfind('/');
+                if (slash != std::string::npos) mkdirs(dir.substr(0, slash));
+                std::string part = dst + ".part";
+                int64_t offset = 0;
+                if (stat(part.c_str(), &st) == 0) {
+                    if (st.st_size == f.size) {
+                        if (rename_overwrite(part.c_str(), dst.c_str())) { a->ok++; a->done++; xSemaphoreGive(a->cnt); continue; }
+                        unlink(part.c_str());
+                    } else if (st.st_size > f.size) {
+                        unlink(part.c_str());
+                    } else {
+                        offset = st.st_size;
+                    }
+                }
+                ESP_LOGI(TAG, "fetch %s: 清单大小=%d, 断点=%d",
+                         f.rel.c_str(), (int)f.size, (int)offset);
+                std::string derr;
+                for (int attempt = 0; attempt < 3 && !a->cancelled; attempt++) {
+                    derr = http_download_ex(durl, part, NULL, NULL, offset);
+                    if (derr.empty()) break;
+                    if (derr == "cancelled") { a->cancelled = true; break; }
+                    ESP_LOGW(TAG, "%s 下载失败(第%d次): %s | URL: %s", f.rel.c_str(), attempt + 1,
+                             derr.c_str(), durl.c_str());
+                    vTaskDelay(pdMS_TO_TICKS(1500));
+                    if (stat(part.c_str(), &st) == 0 && st.st_size > offset)
+                        offset = st.st_size;
+                }
+                if (derr.empty()) {
+                    if (rename_overwrite(part.c_str(), dst.c_str())) a->ok++;
+                    else a->fail++;
+                } else if (derr != "cancelled") {
+                    a->fail++;   // .part 保留,下次续传
+                } else {
+                    a->cancelled = true;
+                }
+                a->done++;
+                xSemaphoreGive(a->cnt);
+            }
+            a->finished = true;
+            vTaskDelete(NULL);
+        }, "dl_w", 12288, &args[w], 5, NULL, MALLOC_CAP_SPIRAM);
+        if (rc != pdPASS) {
+            /* 2026-10-25 内部 RAM 不足(8×12KB 栈 > 余量)worker 建不出来:
+               标记 finished 防主循环/汇总永久等待,并计入失败防假成功
+               (.done 只应在全量处理后才写)。
+               2026-10-26 栈改 PSRAM(与 pd 任务同款):PPD 对话模式内部 SRAM
+               仅剩 ~28KB 时 worker 全灭 → 主循环 60s 超时 = 用户看到"卡住"。
+               PSRAM 充足(余量 ~1MB+),8×12KB 无压力 */
+            ESP_LOGW(TAG, "dl_w worker %d 创建失败(内存不足),本段文件未处理", w);
+            args[w].finished = true;
+            create_fail++;
+        }
+    }
+    /* 主循环:按完成文件数推进进度;取消时置共享标志,worker 尽快退出 */
+    size_t done = 0;
+    while (done < total_files) {
+        if (!xSemaphoreTake(cnt, pdMS_TO_TICKS(60000))) {
+            if (cancelled) break;
+            /* 2026-10-25 超时且无取消:若全部 worker 已退出(创建失败等),
+               没有生产者 → 永久等待只会等来看门狗重启,主动失败退出 */
+            bool any_alive = false;
+            for (int w = 0; w < NW; w++)
+                if (!args[w].finished) any_alive = true;
+            if (!any_alive) break;
+        }
+        done++;
+        if (step_cb && !step_cb((int)(done * 100 / total_files), nullptr, ud)) {
+            cancelled = true;
+            for (int w = 0; w < NW; w++) args[w].cancelled = true;
+            break;
+        }
+    }
+    /* 汇总(等 worker 全部退出) */
+    for (int w = 0; w < NW; w++)
+        while (!args[w].finished) vTaskDelay(pdMS_TO_TICKS(10));
+    ok = 0; skip = 0; fail = 0;
+    for (int w = 0; w < NW; w++) { ok += args[w].ok; skip += args[w].skip; fail += args[w].fail; }
+    fail += create_fail;   /* 2026-10-25 建失败的 worker 其文件段未处理,计入失败防假成功 */
+    vSemaphoreDelete(cnt);
+
+    /* 3. 收尾:全部就绪(下载+跳过)写 .done;失败/取消保留 .part 与旧 .done(角色按旧数据仍完整) */
+    if (cancelled) {
+        ESP_LOGI(TAG, "%s 取消: %d ok / %d skip(.part 保留可续传)", name, ok, skip);
+        return 2;
+    }
+    if (fail == 0) {
+        write_done_markers(voc, star, name, umode, uid, urel, pmode, prel, tags);
+        ESP_LOGI(TAG, "Download complete: %s (%d 下载 / %d 跳过)", name, ok, skip);
+        return 0;
+    }
+    ESP_LOGW(TAG, "%s 下载不完整: %d ok / %d skip / %d fail(.part 保留可续传)",
+             name, ok, skip, fail);
+    return 1;
+}
+
+/* 2026-10-07 防重入:双下载任务并发会互相踩 s_files(引用悬空→乱码 URL),
+   且"取消一个另一个仍在跑";同一时刻只允许一个下载任务 */
+static int fetch_guarded(const char *voc, const char *star, const char *name,
+                         bool umode, int uid, const std::string &urel,
+                         bool pmode, const std::string &prel,
+                         bool (*step_cb)(int pct, const char *file, void *ud), void *ud,
+                         const std::vector<std::string> *prefixes = nullptr,
+                         const std::vector<std::string> *tags = nullptr,
+                         bool qbase = false) {
+    dl_lock();
+    if (s_fetching) {
+        dl_unlock();
+        ESP_LOGW(TAG, "已有下载任务进行中,忽略新请求");
+        return 3;
+    }
+    s_fetching = true;
+    dl_unlock();
+    /* 2026-10-24 下载期间暂停雷达(BLE 扫描/ESP-NOW/WiFi 扫描/ping):
+       实测 WiFi 主动扫描(60s 一次)在下载中执行会把速率打到 11KB/s,
+       且 BLE/心跳也分流下行带宽(100KB/s 的另一半原因)。
+       radar_ble_pause/resume 为文件级 extern "C" 声明(1267 行) */
+    radar_ble_pause();
+    vTaskDelay(pdMS_TO_TICKS(3000));   // 等当前扫描窗口结束
+    /* 2026-10-25 看门狗守护整个下载:任何阶段 90s 无进展即重启自愈 */
+    s_dl_progress_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    TaskHandle_t wd_handle = nullptr;
+    xTaskCreate(dl_watchdog_task, "dl_wd", 3072, nullptr, 5, &wd_handle);
+    int r = fetch_impl(voc, star, name, umode, uid, urel, pmode, prel, step_cb, ud,
+                       prefixes, tags, qbase);
+    if (wd_handle) vTaskDelete(wd_handle);
+    radar_ble_resume();
+    dl_lock();
+    s_fetching = false;
+    dl_unlock();
+    return r;
+}
+
+int role_download_fetch(const char *voc, const char *star, const char *name,
+                        bool (*step_cb)(int pct, const char *file, void *ud), void *ud) {
+    return fetch_guarded(voc, star, name, false, 0, "", false, "", step_cb, ud);
+}
+
+/* ---------- 用户仓库三件套(复用公共库逻辑,URL 与落位走 _users/<rel>) ---------- */
+
+int64_t role_download_probe_user(int uid, const char *rel) {
+    return probe_impl("", "", "", true, uid, rel, false, "", NULL);
+}
+
+int role_download_check_user(int uid, const char *rel, int64_t *total_out) {
+    return check_impl("", "", "", true, uid, rel, false, "", total_out);
+}
+
+int role_download_fetch_user(int uid, const char *rel,
+                             bool (*step_cb)(int pct, const char *file, void *ud), void *ud) {
+    return fetch_guarded("", "", "", true, uid, rel, false, "", step_cb, ud);
+}
+
+/* ── 2026-10-25 懒下载(漫展快速展示) ── */
+
+int role_download_check_user_set(int uid, const char *rel,
+                                 const std::vector<std::string> &prefixes,
+                                 int64_t *total_out) {
+    return check_impl("", "", "", true, uid, rel, false, "", total_out, &prefixes);
+}
+
+int role_download_fetch_user_set(int uid, const char *rel,
+                                 const std::vector<std::string> &prefixes,
+                                 const std::vector<std::string> &tags,
+                                 bool (*step_cb)(int pct, const char *file, void *ud), void *ud) {
+    return fetch_guarded("", "", "", true, uid, rel, false, "", step_cb, ud,
+                         &prefixes, &tags);
+}
+
+int role_download_fetch_user_qbase(int uid, const char *rel,
+                                   bool (*step_cb)(int pct, const char *file, void *ud), void *ud) {
+    static const std::vector<std::string> kTags = {"ppdq"};
+    return fetch_guarded("", "", "", true, uid, rel, false, "", step_cb, ud,
+                         nullptr, &kTags, true);
+}
+
+bool role_download_module_ready(int uid, const char *rel, const char *tag) {
+    std::string m = role_local_base("", "", "", true, uid, rel, false, "") + ".done_" + tag;
+    struct stat st;
+    return stat(m.c_str(), &st) == 0;
+}
+
+/* ---------- 公共共享资源三件套(背景/音乐等,2026-09-10;rel 相对 Arknights/main) ---------- */
+
+int64_t role_download_probe_public(const char *rel) {
+    return probe_impl("", "", "", false, 0, "", true, rel, NULL);
+}
+
+int role_download_check_public(const char *rel, int64_t *total_out) {
+    return check_impl("", "", "", false, 0, "", true, rel, total_out);
+}
+
+int role_download_fetch_public(const char *rel,
+                               bool (*step_cb)(int pct, const char *file, void *ud), void *ud) {
+    /* 2026-10-05 资源服务器未配置(CONFIG_RESOURCE_SERVER 空)时直接失败:
+       url 会是 "/api/..." 无 host,再往下走 http_get 曾触发 lwip assert 整机崩溃 */
+    if (url_host().empty()) {
+        ESP_LOGW(TAG, "fetch_public: 资源服务器地址为空,跳过");
+        return -1;
+    }
+    return fetch_guarded("", "", "", false, 0, "", true, rel, step_cb, ud);
+}
+
+/* ---------- 背景音乐清单检查/下载(2026-09-11) ---------- */
+
+int role_download_check_music_missing(void) {
+    /* 拉 /api/public/music_manifest,对比本地 /sdcard/Arknights/main/music 目录下的 wav。
+       返回:≥0=缺失首数(缺失文件名写入 s_music_missing 供下载) -1=网络失败/清单不可用 */
+    std::string body, err;
+    for (int attempt = 0; attempt < 3; attempt++) {
+        err = http_get(url_host() + "/api/public/music_manifest", body);
+        if (err.empty()) break;
+        vTaskDelay(pdMS_TO_TICKS(1500));
+    }
+    if (!err.empty()) return -1;
+    /* 清单存本地:播放时按场景名查实际文件名(2026-09-11)。
+       首次使用时 music 目录可能还不存在,必须先建目录(2026-09-13 修:
+       "音乐清单不存在"根因——目录缺失时 fopen 静默失败,清单从未落盘) */
+    {
+        mkdirs("/sdcard/Arknights/main/music");
+        FILE *mf = fopen("/sdcard/Arknights/main/music/music_manifest.json", "wb");
+        if (mf) {
+            fwrite(body.c_str(), 1, body.size(), mf);
+            fclose(mf);
+        } else {
+            ESP_LOGW(TAG, "music_manifest.json 落盘失败");
+        }
+    }
+    cJSON *root = cJSON_Parse(body.c_str());
+    if (!root) return -1;
+    int missing = 0;
+    dl_lock();
+    s_music_missing.clear();
+    cJSON *tracks = cJSON_GetObjectItem(root, "tracks");
+    if (tracks && cJSON_IsArray(tracks)) {
+        int n = cJSON_GetArraySize(tracks);
+        for (int i = 0; i < n; i++) {
+            cJSON *it = cJSON_GetArrayItem(tracks, i);
+            cJSON *fj = it ? cJSON_GetObjectItem(it, "file") : NULL;
+            if (!fj || !cJSON_IsString(fj)) continue;
+            FileItem fi;
+            fi.rel = fj->valuestring;
+            fi.size = 0;
+            std::string dst = "/sdcard/Arknights/main/music/" + fi.rel;
+            struct stat st;
+            if (stat(dst.c_str(), &st) != 0 || st.st_size == 0) {
+                s_music_missing.push_back(fi);
+                missing++;
+            }
+        }
+    }
+    dl_unlock();
+    cJSON_Delete(root);
+    ESP_LOGI(TAG, "music check: 缺失 %d 首", missing);
+    return missing;
+}
+
+int role_download_fetch_music_missing(bool (*step_cb)(int pct, const char *file, void *ud), void *ud) {
+    /* 下载 s_music_missing 中记录的缺失 wav(本地已存在且 >0 跳过;无断点,单曲小文件) */
+    /* 2026-10-26 同 fetch_impl:下载期间暂停雷达 BLE(SDIO 总线争抢) */
+    radar_ble_pause();
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    struct BleResumeGuard {
+        ~BleResumeGuard() { radar_ble_resume(); }
+    } _ble_guard2;
+    dl_lock();
+    std::vector<FileItem> files = s_music_missing;
+    dl_unlock();
+    size_t total_files = files.size();
+    if (total_files == 0) return 0;
+    /* 2026-10-26 bundle 优先(流式解析,缓冲仅 16KB,不受 PSRAM 碎片化影响):
+       缺失清单 → only= 前缀,一次持续流下载。逐文件 HTTP 每首新建连接过
+       TCP 慢启动(实测 8-33KB/s 波动,9 首 ~40MB 要半小时) */
+    {
+        std::vector<std::string> pfx;
+        for (auto &f : files) pfx.push_back(f.rel);
+        int br = bundle_fetch_public_stream("music", &pfx, step_cb, ud);
+        if (br == 0) {
+            ESP_LOGI(TAG, "music fetch(bundle 流式): %d 首落位", (int)total_files);
+            return 0;
+        }
+        if (br == 2) return 2;   /* 用户取消 */
+        ESP_LOGW(TAG, "music bundle 失败(%d),回退逐文件", br);
+    }
+    int ok = 0, fail = 0;
+    for (size_t i = 0; i < total_files; i++) {
+        const FileItem &f = files[i];
+        /* 2026-10-26 块级进度:每曲开始前更新上下文曲号,UI 显示"第 X/N 首" */
+        if (ud) { ((MusicDlCtx*)ud)->cur = (int)(i + 1); ((MusicDlCtx*)ud)->total = (int)total_files; }
+        if (step_cb && !step_cb((int)(i * 100 / total_files), f.rel.c_str(), ud)) return 2;
+        std::string dst = "/sdcard/Arknights/main/music/" + f.rel;
+        struct stat st;
+        if (stat(dst.c_str(), &st) == 0 && st.st_size > 0) { ok++; continue; }
+        std::string dir = dst;
+        size_t slash = dir.rfind('/');
+        if (slash != std::string::npos) mkdirs(dir.substr(0, slash));
+        std::string durl = url_host() + "/api/public/file?rel=music&p=" + url_encode(f.rel);
+        std::string derr = http_download_ex(durl, dst, step_cb, ud, 0);
+        if (derr.empty()) ok++;
+        else {
+            fail++;
+            ESP_LOGW(TAG, "music 下载失败: %s (%s)", f.rel.c_str(), derr.c_str());
+        }
+    }
+    ESP_LOGI(TAG, "music fetch: %d ok / %d fail", ok, fail);
+    return fail == 0 ? 0 : 1;
+}
+
+/* ---------- 开机曲自动下载(2026-10-21) ---------- */
+
+int role_download_fetch_music_boot(void) {
+    /* 只下 Rhodes_Island.wav(开机曲):.part 半成品断点续传,完整后 rename
+       原子完成;boot_music_play 扫描到的永远是完整文件。 */
+    if (url_host().empty()) return -1;   // 网络未就绪防护(曾触发 lwip assert)
+    std::string dst = "/sdcard/Arknights/main/music/Rhodes_Island.wav";
+    struct stat st;
+    if (stat(dst.c_str(), &st) == 0 && st.st_size > 0) return 0;   // 已完整
+    mkdirs("/sdcard/Arknights/main/music");
+    std::string part = dst + ".part";
+    int64_t off = 0;
+    if (stat(part.c_str(), &st) == 0) off = st.st_size;   // 断点续传
+    std::string durl = url_host() + "/api/public/file?rel=music&p=" + url_encode("Rhodes_Island.wav");
+    std::string derr = http_download_ex(durl, part, nullptr, nullptr, off);
+    if (!derr.empty()) {
+        ESP_LOGW(TAG, "boot music 下载失败(%s),下次开机续传", derr.c_str());
+        return -1;
+    }
+    if (rename(part.c_str(), dst.c_str()) != 0) {
+        ESP_LOGW(TAG, "boot music rename 失败,下次开机续传");
+        return -1;
+    }
+    ESP_LOGI(TAG, "boot music 下载完成: Rhodes_Island.wav");
+    return 0;
+}
+
+/* ---------- 键盘词组库自动下载(2026-10-26) ---------- */
+
+int role_download_fetch_ime_dict(void) {
+    /* 下载 ime_dict.txt(公开库根,~450KB)到 /sdcard/Arknights/main/。
+       存在且 >100KB 即跳过;无断点(小文件整下,失败下次开机重试) */
+    if (url_host().empty()) return -1;   // 网络未就绪防护(同 boot music)
+    std::string dst = "/sdcard/Arknights/main/ime_dict.txt";
+    struct stat st;
+    if (stat(dst.c_str(), &st) == 0 && st.st_size > 100000) return 0;   // 已就绪
+    mkdirs("/sdcard/Arknights/main");
+    std::string durl = url_host() + "/api/public/file?rel=.&p=" + url_encode("ime_dict.txt");
+    std::string derr = http_download_ex(durl, dst, nullptr, nullptr, 0);
+    if (!derr.empty()) {
+        ESP_LOGW(TAG, "ime_dict 下载失败(%s),下次开机重试", derr.c_str());
+        return -1;
+    }
+    ESP_LOGI(TAG, "ime_dict.txt 下载完成(键盘词组库)");
+    return 0;
+}
+
+/* ---------- 服务器可达性探测(2026-10-21) ---------- */
+
+int role_download_network_ok(int timeout_ms) {
+    /* 认证门户网络(如校园 guest)拿到 IP 但无外网:HTTP 被门户 302 劫持,
+       响应是 HTML。GET manifest 看响应是否 JSON('{' 开头)即可识破。
+       仅在 netif 已有 IP 后调用(WiFi 判定链路保证,防 lwip assert)。 */
+    if (url_host().empty()) return -1;
+    esp_http_client_config_t cfg = {};
+    std::string u = url_host() + "/api/user_repo/manifest?mac=probe";
+    cfg.url = u.c_str();
+    cfg.timeout_ms = timeout_ms;
+    cfg.user_agent = "szfz-device/1.0";
+    cfg.buffer_size = 1024;
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if (!client) return -1;
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err != ESP_OK) { esp_http_client_cleanup(client); return -1; }
+    esp_http_client_fetch_headers(client);
+    int status = esp_http_client_get_status_code(client);
+    char buf[256];
+    int len = esp_http_client_read(client, buf, sizeof(buf) - 1);
+    esp_http_client_cleanup(client);
+    if (status != 200 || len <= 0) return -1;
+    buf[len] = 0;
+    if (!strchr(buf, '{')) return -1;   // 认证门户 HTML / 非 JSON
+    return 0;
+}
+
+/* ---------- 一键克隆(公共库→绑定用户仓库,2026-09-10) ---------- */
+
+/* POST JSON(小请求小响应;克隆是低频操作,timeout 拉长到 90s 覆盖 copytree) */
+static std::string http_post(const std::string &url, const std::string &json_body,
+                             std::string &resp_body, int *out_status) {
+    esp_http_client_config_t cfg = {};
+    cfg.url = url.c_str();
+    cfg.timeout_ms = 90000;
+    cfg.buffer_size = 1024;
+    cfg.user_agent = "szfz-device/1.0";
+    cfg.method = HTTP_METHOD_POST;
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if (!client) return "client init fail";
+    esp_http_client_set_header(client, "Content-Type", "application/json");
+    esp_err_t err = esp_http_client_open(client, (int)json_body.size());
+    if (err != ESP_OK) { esp_http_client_cleanup(client); return "open fail"; }
+    int w = esp_http_client_write(client, json_body.c_str(), (int)json_body.size());
+    if (w < 0) { esp_http_client_cleanup(client); return "write fail"; }
+    int64_t total = esp_http_client_fetch_headers(client);
+    if (total < 0) { esp_http_client_cleanup(client); return "fetch headers fail"; }
+    resp_body.clear();
+    char buf[1024];
+    while (true) {
+        int r = esp_http_client_read(client, buf, sizeof(buf));
+        if (r <= 0) break;
+        resp_body.append(buf, r);
+    }
+    int status = esp_http_client_get_status_code(client);
+    esp_http_client_cleanup(client);
+    if (out_status) *out_status = status;
+    if (status < 200 || status >= 300) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "HTTP %d", status);
+        return msg;
+    }
+    return "";
+}
+
+int role_download_clone(const char *voc, const char *star, const char *name) {
+    /* POST /api/user_repo/clone(mac 定位用户;服务器复制公共库角色目录+建 agent 行)。
+       返回:0=成功 1=网络/其它失败 2=配额不足(403 storage/quota)
+             3=已克隆过(409,直接进下载即可) 4=云端无此角色(404) */
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "mac", SystemInfo::GetMacAddress().c_str());
+    cJSON_AddStringToObject(root, "voc", voc);
+    cJSON_AddStringToObject(root, "star", star);
+    cJSON_AddStringToObject(root, "name", name);
+    char *js = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    std::string body(js ? js : "{}");
+    if (js) free(js);
+
+    std::string resp, err;
+    int status = 0;
+    ESP_LOGI(TAG, "clone: %s/%s/%s", voc, star, name);
+    err = http_post(url_host() + "/api/user_repo/clone", body, resp, &status);
+    if (!err.empty()) {
+        if (status == 403) {
+            /* 2026-09-30 未验收角色:服务器拒绝克隆(error=notaccepted) */
+            if (resp.find("notaccepted") != std::string::npos ||
+                resp.find("验收") != std::string::npos) return 5;
+            /* 区分存储配额/克隆个数/未绑定:消息里含"配额"则按配额处理 */
+            if (resp.find("storage") != std::string::npos ||
+                resp.find("quota") != std::string::npos ||
+                resp.find("配额") != std::string::npos) return 2;
+            return 1;   // 未绑定等其它 403
+        }
+        if (status == 409) return 3;
+        if (status == 404) return 4;
+        ESP_LOGW(TAG, "clone 失败: %s (HTTP %d)", err.c_str(), status);
+        return 1;
+    }
+    ESP_LOGI(TAG, "clone OK: %s", resp.c_str());
+    return 0;
+}
+
+/* ---------- 目录清空工具(换绑用户时清 operator,2026-09-10) ---------- */
+
+void role_download_remove_dir(const char *path) {
+    if (!path || !path[0]) return;
+    remove_dir_r(path);
+}
+
+int role_download_fetch_public_profile(const char *fname, const char *dst) {
+    /* 2026-10-06 公共 Ur_Info 下载(蟑螂派对默认照片/动图):单文件无断点 */
+    if (url_host().empty()) return -1;   // 网络未就绪防护(曾触发 lwip assert)
+    std::string url = url_host() + "/api/public/user_profile?f=" + fname;
+    std::string err = http_download_ex(url, dst, NULL, NULL, 0);
+    return err.empty() ? 0 : -1;
+}
+
+/* ---------- CP(协处理器)固件自动 OTA(2026-10-07) ----------
+ * C6 出厂固件 2.3.2 无 SDIO SW_AGGR → 兼容流模式 → WiFi 吞吐 ~20KB/s
+ * (换热点不变、PC 同链路 1MB/s,瓶颈确在板内 SDIO 通道)。
+ * 开机网络就绪后检查 CP 版本,低于 host 3.0.9 则从资源服务器下载官方
+ * 预编译固件(esphome/esp-hosted-firmware v3.0.9,服务器侧已 SHA256 校验),
+ * 经 SDIO OTA 写入后整机重启(开机流程自动复位 CP 跑新固件)。
+ * 失败安全:任何一步失败 → 下次开机自动重试;版本已匹配 → 静默跳过。 */
+#include "eh_host_cp_ota.h"   // feature include 在组件公开路径
+
+/* transport 头不在公开 include 路径,extern 声明即可(符号随 esp_hosted 链接) */
+extern "C" uint32_t eh_host_mcu_transport_get_fw_version(void);
+
+/* host 组件版本 3.0.9(与 esp_hosted 组件 idf_component.yml 一致;
+   打包格式 major<<16|minor<<8|patch,与 eh_common_fw_version.h 相同)
+   2026-10-23:CP 目标 esphome 3.0.10 预编译固件(带 ESP-NOW overlay,
+   内核 3.0.10 可能修复 3.0.9 的 esp_now 空口互盲;版本不同即 OTA) */
+#define CP_OTA_HOST_VER 0x030009u   /* 2026-10-24 回退 3.0.9:3.0.10 C6 固件
+                                        SDIO 不稳(HP WDT 崩溃);3.0.9 同带
+                                        esp_now_hosted overlay,ESP-NOW 不受影响 */
+#define CP_OTA_CHUNK 1536u   /* EH_RPC_OTA_CHUNK_MAX */
+
+static bool cp_ota_download(uint8_t **buf_out, size_t *len_out) {
+    if (url_host().empty()) return false;
+    /* 2026-10-07 公共路由 /api/cp_fw:全部设备共用(不放用户仓库——换绑/未绑定
+       设备会 404);固件在服务器隔离目录,不与角色清单混列 */
+    std::string url = url_host() + "/api/cp_fw";
+    esp_http_client_config_t cfg = {};
+    cfg.url = url.c_str();
+    cfg.timeout_ms = 120000;
+    cfg.buffer_size = 4096;
+    cfg.user_agent = "szfz-device/1.0";
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if (!client) return false;
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err != ESP_OK) { esp_http_client_cleanup(client); return false; }
+    int64_t total = esp_http_client_fetch_headers(client);
+    int status = esp_http_client_get_status_code(client);
+    if (status != 200 || total <= 0 || total > 4 * 1024 * 1024) {
+        esp_http_client_cleanup(client);
+        return false;
+    }
+    uint8_t *buf = (uint8_t*)heap_caps_malloc((size_t)total, MALLOC_CAP_SPIRAM);
+    if (!buf) { esp_http_client_cleanup(client); return false; }
+    int64_t done = 0;
+    while (done < total) {
+        int r = esp_http_client_read(client, (char*)buf + done, (int)(total - done));
+        if (r <= 0) break;
+        done += r;
+        /* 2026-10-07 进度日志:下载 ~70 秒无日志被误判卡死(用户报告) */
+        if ((done & 0x1FFFF) == 0 || done == total)
+            ESP_LOGI("CpOta", "下载 %u/%u KB", (unsigned)(done / 1024), (unsigned)(total / 1024));
+    }
+    esp_http_client_cleanup(client);
+    if (done != total) { heap_caps_free(buf); return false; }
+    *buf_out = buf;
+    *len_out = (size_t)total;
+    return true;
+}
+
+/* 2026-10-23 CP OTA 期间暂停雷达 BLE(声明已移到文件顶部) */
+
+void cp_ota_task(void *arg) {
+    /* 2026-10-23 周期重试版:不再依赖 WifiStation 连接状态(3.0.10 CP 固件下
+       STA_CONNECTED/GET_IP 事件链到 host 断裂,IsConnected/GetIpAddress 恒空,
+       原等待逻辑 180s 后静默退出)。每 10s 检查 CP 版本,落后即尝试 OTA,
+       失败重试,最多 30 分钟;成功整机重启。 */
+    for (int attempt = 0; attempt < 180; attempt++) {
+        vTaskDelay(pdMS_TO_TICKS(10000));
+        ESP_LOGI("CpOta", "task alive, attempt %d/180", attempt + 1);   // 2026-10-23 定位日志
+        uint32_t cp_ver = eh_host_mcu_transport_get_fw_version();
+        /* 2026-10-23 版本不同即 OTA:支持降级(esphome 3.0.9 替换官方 3.0.10) */
+        if (cp_ver == 0 || cp_ver == CP_OTA_HOST_VER) {
+            ESP_LOGI("CpOta", "cp fw 0x%06x 已匹配 host 0x%06x,跳过", (unsigned)cp_ver, (unsigned)CP_OTA_HOST_VER);
+            vTaskDelete(NULL);
+            return;
+        }
+        ESP_LOGW("CpOta", "cp fw 0x%06x 落后 host 0x%06x → 自动 OTA(尝试 %d/180)",
+                 (unsigned)cp_ver, (unsigned)CP_OTA_HOST_VER, attempt + 1);
+        uint8_t *fw = NULL;
+        size_t fw_len = 0;
+        if (!cp_ota_download(&fw, &fw_len)) {
+            ESP_LOGE("CpOta", "固件下载失败,10 秒后重试");
+            continue;
+        }
+        ESP_LOGI("CpOta", "固件 %u 字节已下载,开始 SDIO OTA", (unsigned)fw_len);
+        /* 2026-10-23 暂停雷达 BLE:扫描事件走 SDIO HCI,与 OTA 传输抢总线
+           (实测传输 68% 处被 BLE 流量打断 write 失败) */
+        radar_ble_pause();
+        vTaskDelay(pdMS_TO_TICKS(3000));   // 等当前扫描窗口结束
+        bool ok = (eh_host_cp_ota_begin() == ESP_OK);
+        size_t off = 0;
+        while (ok && off < fw_len) {
+            size_t n = (fw_len - off > CP_OTA_CHUNK) ? CP_OTA_CHUNK : (fw_len - off);
+            esp_err_t wret = eh_host_cp_ota_write(fw + off, (uint32_t)n);
+            if (wret != ESP_OK) {
+                /* 2026-10-23 定位 786432 处确定性失败:打出 CP 返回的具体错误码 */
+                ESP_LOGE("CpOta", "write 失败 @%u/%u err=%s(%d)",
+                         (unsigned)off, (unsigned)fw_len, esp_err_to_name(wret), (int)wret);
+                ok = false;
+                break;
+            }
+            off += n;
+            vTaskDelay(pdMS_TO_TICKS(5));   // CP 写内部闪存,每块稍作停顿
+            if ((off & 0x1FFFF) == 0) ESP_LOGI("CpOta", "OTA %u/%u", (unsigned)off, (unsigned)fw_len);
+        }
+        heap_caps_free(fw);
+        radar_ble_resume();
+        if (!ok || eh_host_cp_ota_end() != ESP_OK || eh_host_cp_ota_activate() != ESP_OK) {
+            ESP_LOGE("CpOta", "OTA 传输失败,10 秒后重试");
+            continue;
+        }
+        ESP_LOGW("CpOta", "OTA 完成 → 1 秒后整机重启应用新固件");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        esp_restart();
+    }
+    vTaskDelete(NULL);
+}
+
+int role_download_clear_operator(void) {
+    /* 清空 /sdcard/Arknights/main/operator 全部角色目录,保留 INDEX(缩略图公共共享)。
+       返回 0=完成 1=目录不存在(视为已清) -1=部分失败 */
+    const char *base = "/sdcard/Arknights/main/operator";
+    DIR *d = opendir(base);
+    if (!d) return 1;
+    struct dirent *e;
+    int removed = 0, failed = 0;
+    while ((e = readdir(d)) != NULL) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        if (strcmp(e->d_name, "INDEX") == 0) continue;   // 缩略图保留
+        std::string p = std::string(base) + "/" + e->d_name;
+        remove_dir_r(p);
+        struct stat st;
+        if (stat(p.c_str(), &st) == 0) failed++;
+        else removed++;
+    }
+    closedir(d);
+    ESP_LOGI(TAG, "clear operator: %d 目录删除, %d 失败", removed, failed);
+    return failed > 0 ? -1 : 0;
+}
+
+/* ---------- UI(下载页) ---------- */
+/* 任务线程更新 LVGL 必须加锁 */
+static void ui_status(const char *text) {
+    if (s_status_label && lvgl_port_lock(pdMS_TO_TICKS(200))) {
+        lv_label_set_text(s_status_label, text);
+        lvgl_port_unlock();
+    }
+}
+static void ui_hide_progress() {
+    if (s_progress && lvgl_port_lock(pdMS_TO_TICKS(200))) {
+        lv_obj_add_flag(s_progress, LV_OBJ_FLAG_HIDDEN);
+        lvgl_port_unlock();
+    }
+}
+
+static void page_close() {
+    if (s_page) {
+        lv_obj_del(s_page);
+        s_page = nullptr;
+        s_list = nullptr;
+        s_progress = nullptr;
+        s_status_label = nullptr;
+        s_confirm_box = nullptr;
+        s_confirm_lbl = nullptr;
+    }
+    s_confirm_idx = -1;
+    s_quit = true;
+}
+
+void role_downloader_close(void) {
+    /* 供 ImageDisplay 互斥调用(干员索引页打开前关闭本页):LVGL 任务上下文 */
+    page_close();
+}
+
+/* ---------- 确认框 ---------- */
+static void hide_confirm() {
+    if (s_confirm_box) lv_obj_add_flag(s_confirm_box, LV_OBJ_FLAG_HIDDEN);
+    s_confirm_idx = -1;
+}
+
+static void show_confirm(int idx) {
+    if (!s_confirm_box || idx < 0 || idx >= (int)s_roles.size()) return;
+    char msg[128];
+    snprintf(msg, sizeof(msg), "下载 %s ?", s_roles[idx].name.c_str());
+    lv_label_set_text(s_confirm_lbl, msg);
+    lv_obj_remove_flag(s_confirm_box, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_confirm_box);
+    s_confirm_idx = idx;
+}
+
+static void download_task(void *arg);
+
+static void on_role_click(lv_event_t *e) {
+    if (s_busy) return;
+    int idx = (int)(intptr_t)lv_event_get_user_data(e);
+    if (idx < 0 || idx >= (int)s_roles.size()) return;
+    if (s_roles[idx].incomplete) {
+        ui_status("该角色资源不完整,暂不可下载");
+        ESP_LOGW(TAG, "%s incomplete, refuse download", s_roles[idx].name.c_str());
+        return;
+    }
+    show_confirm(idx);
+}
+
+static void start_download(int idx) {
+    if (idx < 0 || idx >= (int)s_roles.size()) return;
+    s_busy = true;
+    s_quit = false;
+    lv_obj_t *bar = s_progress;
+    lv_bar_set_value(bar, 0, LV_ANIM_OFF);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(s_status_label, "准备下载…");
+    ESP_LOGI(TAG, "Download start: %s (%s/%s)", s_roles[idx].name.c_str(),
+             s_roles[idx].vocation.c_str(), s_roles[idx].star.c_str());
+    /* 栈 12KB:http_download_ex 内 4KB 缓冲 + esp_http_client 解析栈 */
+    xTaskCreate(download_task, "role_dl", 12288, (void *)(intptr_t)idx, 5, nullptr);
+}
+
+static void download_task(void *arg) {
+    int idx = (int)(intptr_t)arg;
+    if (idx < 0 || idx >= (int)s_roles.size()) { s_busy = false; vTaskDelete(nullptr); return; }
+    RoleInfo role = s_roles[idx];
+
+    int r = role_download_fetch(role.vocation.c_str(), role.star.c_str(), role.name.c_str(),
+        [](int pct, const char *file, void *ud) -> bool {
+            if (s_quit) return false;
+            if (file && s_status_label && lvgl_port_lock(pdMS_TO_TICKS(100))) {
+                lv_label_set_text(s_status_label, file);
+                lvgl_port_unlock();
+            }
+            if (pct >= 0 && s_progress && lvgl_port_lock(pdMS_TO_TICKS(100))) {
+                lv_bar_set_value(s_progress, pct, LV_ANIM_OFF);
+                lvgl_port_unlock();
+            }
+            return true;
+        }, nullptr);
+
+    /* manifest 是否带 INDEX 缩略图(2026-10-07 锁内拷局部:他任务 probe 会改 s_files) */
+    dl_lock();
+    std::vector<FileItem> files_after = s_files;
+    dl_unlock();
+    bool has_thumb = false;
+    for (const FileItem &f : files_after)
+        if (f.rel.rfind("__index__/", 0) == 0) has_thumb = true;
+
+    if (r == 0) {
+        ui_status(has_thumb ? "下载完成!点'返回'去罗德岛选角色"
+                            : "已下载,但缺角色页缩略图");
+    } else if (r == 2) {
+        ui_status("已取消");
+    } else if (r == 3) {
+        ui_status("已有下载任务进行中,请稍候");   // 2026-10-07 防重入
+    } else {
+        ui_status("下载失败,原角色已恢复,可重试");
+    }
+    ui_hide_progress();
+    s_busy = false;
+    vTaskDelete(nullptr);
+}
+
+static void on_back(lv_event_t *e) {
+    s_quit = true;
+    page_close();
+}
+
+void role_downloader_show(void) {
+    if (s_page) return;
+    agent_index_hide_for_app();   // 互斥:关闭干员索引页(两页同层,叠加会串事件)
+    if (!lvgl_port_lock(0)) return;
+    s_quit = false;
+
+    s_page = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(s_page, 480, 800);
+    lv_obj_set_style_bg_color(s_page, lv_color_hex(0x1a1a24), 0);
+    lv_obj_set_style_bg_opa(s_page, LV_OPA_COVER, 0);
+
+    /* 标题栏 */
+    lv_obj_t *title = lv_label_create(s_page);
+    lv_label_set_text(title, "角色下载");
+    lv_obj_set_pos(title, 20, 8);
+    lv_obj_set_style_text_color(title, lv_color_white(), 0);
+    lv_obj_set_style_text_font(title, efont(), 0);
+
+    lv_obj_t *btn = lv_btn_create(s_page);
+    lv_obj_set_size(btn, 70, 34);
+    lv_obj_set_pos(btn, 390, 8);
+    lv_obj_t *bl = lv_label_create(btn);
+    lv_label_set_text(bl, "返回");
+    lv_obj_set_style_text_font(bl, efont(), 0);
+    lv_obj_center(bl);
+    lv_obj_add_event_cb(btn, on_back, LV_EVENT_CLICKED, nullptr);
+
+    /* 状态 + 进度 */
+    s_status_label = lv_label_create(s_page);
+    lv_obj_set_pos(s_status_label, 20, 56);
+    lv_label_set_text(s_status_label, "加载角色列表…");
+    lv_obj_set_style_text_color(s_status_label, lv_color_hex(0x9fd3b0), 0);
+    lv_obj_set_style_text_font(s_status_label, efont(), 0);
+
+    s_progress = lv_bar_create(s_page);
+    lv_obj_set_size(s_progress, 440, 14);
+    lv_obj_set_pos(s_progress, 20, 84);
+    lv_obj_add_flag(s_progress, LV_OBJ_FLAG_HIDDEN);
+
+    /* 列表(LVGL 裁剪了 list 组件,用滚动容器+按钮列) */
+    s_list = lv_obj_create(s_page);
+    lv_obj_set_size(s_list, 440, 680);
+    lv_obj_set_pos(s_list, 20, 108);
+    lv_obj_set_style_bg_color(s_list, lv_color_hex(0x24242f), 0);
+    lv_obj_set_style_bg_opa(s_list, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(s_list, 0, 0);
+    lv_obj_set_style_pad_all(s_list, 8, 0);
+    lv_obj_set_scroll_dir(s_list, LV_DIR_VER);
+    lv_obj_set_flex_flow(s_list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(s_list, 6, 0);
+
+    /* 确认框(点角色后弹出:[下载]/[取消]) */
+    s_confirm_box = lv_obj_create(s_page);
+    lv_obj_set_size(s_confirm_box, 340, 150);
+    lv_obj_set_pos(s_confirm_box, 70, 300);
+    lv_obj_set_style_bg_color(s_confirm_box, lv_color_hex(0x2a2a35), 0);
+    lv_obj_set_style_bg_opa(s_confirm_box, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(s_confirm_box, 2, 0);
+    lv_obj_set_style_border_color(s_confirm_box, lv_color_hex(0x666688), 0);
+    lv_obj_set_style_radius(s_confirm_box, 10, 0);
+    lv_obj_set_style_pad_all(s_confirm_box, 0, 0);
+    s_confirm_lbl = lv_label_create(s_confirm_box);
+    lv_label_set_text(s_confirm_lbl, "下载 ?");
+    lv_obj_align(s_confirm_lbl, LV_ALIGN_TOP_MID, 0, 22);
+    lv_obj_set_style_text_color(s_confirm_lbl, lv_color_white(), 0);
+    lv_obj_set_style_text_font(s_confirm_lbl, efont(), 0);
+
+    lv_obj_t *ok_btn = lv_btn_create(s_confirm_box);
+    lv_obj_set_size(ok_btn, 120, 44);
+    lv_obj_set_pos(ok_btn, 36, 88);
+    lv_obj_set_style_bg_color(ok_btn, lv_color_hex(0x00AA55), 0);
+    lv_obj_t *ok_lbl = lv_label_create(ok_btn);
+    lv_label_set_text(ok_lbl, "下载");
+    lv_obj_set_style_text_font(ok_lbl, efont(), 0);
+    lv_obj_center(ok_lbl);
+    lv_obj_add_event_cb(ok_btn, [](lv_event_t *e) {
+        int idx = s_confirm_idx;
+        hide_confirm();
+        start_download(idx);
+    }, LV_EVENT_CLICKED, nullptr);
+
+    lv_obj_t *no_btn = lv_btn_create(s_confirm_box);
+    lv_obj_set_size(no_btn, 120, 44);
+    lv_obj_set_pos(no_btn, 184, 88);
+    lv_obj_set_style_bg_color(no_btn, lv_color_hex(0x555555), 0);
+    lv_obj_t *no_lbl = lv_label_create(no_btn);
+    lv_label_set_text(no_lbl, "取消");
+    lv_obj_set_style_text_font(no_lbl, efont(), 0);
+    lv_obj_center(no_lbl);
+    lv_obj_add_event_cb(no_btn, [](lv_event_t *e) {
+        hide_confirm();
+    }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_flag(s_confirm_box, LV_OBJ_FLAG_HIDDEN);
+
+    lvgl_port_unlock();
+
+    /* 拉取角色列表(小任务,栈 10KB:http_get 1KB 栈缓冲 + esp_http_client) */
+    s_busy = true;
+    ESP_LOGI(TAG, "Downloader page shown, server=%s", url_host().c_str());
+    xTaskCreate([](void *) {
+        std::string body, err;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            err = http_get(url_host() + "/api/roles", body);
+            if (err.empty()) break;
+            ESP_LOGW(TAG, "roles 获取失败(第%d次): %s url=%s", attempt + 1, err.c_str(),
+                     (url_host() + "/api/roles").c_str());
+            vTaskDelay(pdMS_TO_TICKS(2000));
+        }
+        if (!lvgl_port_lock(0)) { s_busy = false; vTaskDelete(nullptr); return; }
+        lv_obj_clean(s_list);
+        if (err.empty()) {
+            parse_roles(body);
+            for (size_t i = 0; i < s_roles.size(); i++) {
+                std::string label = (s_roles[i].incomplete ? "[缺立绘] " : "") + s_roles[i].name;
+                lv_obj_t *btn = lv_btn_create(s_list);
+                lv_obj_set_size(btn, 424, 46);
+                lv_obj_set_style_pad_all(btn, 0, 0);
+                lv_obj_t *lbl = lv_label_create(btn);
+                lv_label_set_text(lbl, label.c_str());
+                lv_obj_set_style_text_font(lbl, efont(), 0);
+                lv_obj_center(lbl);
+                lv_obj_add_event_cb(btn, on_role_click, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+            }
+            lv_label_set_text(s_status_label, s_roles.empty() ? "没有可下载角色" : "点角色名开始下载");
+            ESP_LOGI(TAG, "Roles loaded: %d", (int)s_roles.size());
+        } else {
+            lv_label_set_text(s_status_label, "连不上服务器,检查网络");
+            ESP_LOGW(TAG, "roles 获取失败: %s", err.c_str());
+        }
+        s_busy = false;
+        lvgl_port_unlock();
+        vTaskDelete(nullptr);
+    }, "role_list", 10240, nullptr, 5, nullptr);
+}

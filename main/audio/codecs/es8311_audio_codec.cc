@@ -150,6 +150,15 @@ void Es8311AudioCodec::CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gp
 }
 
 void Es8311AudioCodec::SetOutputVolume(int volume) {
+    /* 2026-10-26 音频通道全关时 UpdateDeviceState 已销毁 dev_(置 NULL),
+       此时调 esp_codec_dev_set_out_vol(NULL) 返回 INVALID_ARG → ESP_ERROR_CHECK
+       abort(用户实测:退出对话模式/键盘后开设置页拖音量滑块即崩)。
+       修复:dev 不存在时仅缓存音量,下次打开通道时由 UpdateDeviceState
+       用 output_volume_ 应用(见 85 行 set_out_vol(dev_, output_volume_)) */
+    if (dev_ == nullptr) {
+        AudioCodec::SetOutputVolume(volume);
+        return;
+    }
     ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(dev_, volume));
     AudioCodec::SetOutputVolume(volume);
 }

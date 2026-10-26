@@ -26,12 +26,22 @@ static const char *TAG = "paperdoll";
    0=全 CPU 真旋转（与仿真器一致；呼吸层本来就要求 CPU 浮点，PPA 收益有限）
    2026-08-25 重开：对话模式下 CPU 预算 = 渲染 + AFE + 音频 + LVGL 上屏，56ms 全 CPU 渲染
    会饿死 IDLE 触发 watchdog；PPA 接走 legwear/back hair/footwear 等大层省 ~15-20ms。
-   缺 .ppa.raw 的角色自动回退 CPU（has_ppa=false），零风险。 */
+   缺 .ppa.raw 的角色自动回退 CPU（has_ppa=false），零风险。
+   2026-10-25 实测:P4 无硬件浮点,Wisadel 21 层大贴图纯 CPU 渲染 350ms(soft-float),
+   硬件混合 241ms——PPA 仍需开启(大模型只有硬件路径可行) */
 #define PD_USE_PPA 1
 
-/* ---- PPA 硬件混合客户端（BLEND 引擎，阻塞式；与 PPACompositor 同配置） ---- */
+/* ---- PPA 硬件混合客户端（BLEND 引擎，阻塞式；与 PPACompositor 同配置）。
+   2026-10-25 异步流水实验回退:max_pending=2+非阻塞提交诱发 dma2d_connect
+   死转 panic(与立绘直写的通道悬挂同源),稳定优先 ---- */
 static ppa_client_handle_t s_ppa_client = NULL;
 static SemaphoreHandle_t s_ppa_mtx = NULL;   /* 双核并发提交串行化（max_pending=1，并发会 ESP_FAIL） */
+
+static void ppa_blend_wait(void) { }   /* 占位:阻塞模式无在飞事务 */
+
+static void ppa_blend_wait_if_overlap(int x0, int y0, int x1, int y1) {
+    (void)x0; (void)y0; (void)x1; (void)y1;   /* 占位:阻塞模式无需相交测试 */
+}
 
 static void ppa_init(void) {
     if (s_ppa_client) return;
@@ -49,7 +59,9 @@ static void ppa_init(void) {
     }
 }
 
-/* 帧缓冲上的 PPA 混合（bg=out=fb 原地叠加，fg=预缩放 BGRA 纹理；[cy0,cy1)=行带裁切） */
+/* 帧缓冲上的 PPA 混合（bg=out=fb 原地叠加，fg=预缩放 BGRA 纹理；[cy0,cy1)=行带裁切）。
+   2026-10-25 异步流水:非阻塞提交,与后续不重叠图层并行;相交依赖由
+   ppa_blend_wait_if_overlap 处理,带尾/帧尾由 ppa_blend_wait 兜底 */
 static void ppa_blend_layer(uint16_t *fb, int fw, int fh, int x, int y,
                             const pd_tex_t *fg, int cy0, int cy1) {
     if (!s_ppa_client || !fg->rgba) return;
@@ -60,6 +72,8 @@ static void ppa_blend_layer(uint16_t *fb, int fw, int fh, int x, int y,
     if (y + bh > cy1) bh = cy1 - y;
     if (x + bw > fw) bw = fw - x;
     if (bw <= 0 || bh <= 0) return;
+    /* 与在飞 blend 相交 → 先等(读改写数据依赖) */
+    ppa_blend_wait_if_overlap(x, y, x + bw, y + bh);
 
     ppa_in_pic_blk_config_t bg_cfg = {};
     bg_cfg.buffer = fb;
@@ -90,7 +104,7 @@ static void ppa_blend_layer(uint16_t *fb, int fw, int fh, int x, int y,
     cfg.fg_alpha_update_mode = PPA_ALPHA_NO_CHANGE;
     cfg.bg_ck_en = false;
     cfg.fg_ck_en = false;
-    cfg.mode = PPA_TRANS_MODE_BLOCKING;
+    cfg.mode = PPA_TRANS_MODE_BLOCKING;   /* 2026-10-25 异步实验回退 */
     if (s_ppa_mtx) xSemaphoreTake(s_ppa_mtx, portMAX_DELAY);
     esp_err_t ret = ppa_do_blend(s_ppa_client, &cfg);
     if (s_ppa_mtx) xSemaphoreGive(s_ppa_mtx);
@@ -314,13 +328,20 @@ static void blit(uint16_t *fb, int fw, int fh, const pd_tex_t *t, const mat_t *M
     if (iy0 < cy0) iy0 = cy0;
     if (iy1 > cy1) iy1 = cy1;
     if (ix0 >= ix1 || iy0 >= iy1) return;
+    /* 2026-10-25 异步流水:本层像素区与在飞 blend 相交 → 先等完成
+       (blend 对 fb 读改写,CPU 覆写其区域会撕裂) */
+    ppa_blend_wait_if_overlap(ix0, iy0, ix1, iy1);
 
     mat_t inv;
     mat_inv(M, &inv);
-    /* 16.16 定点逆映射步进（内循环只有两次定点加法） */
+    /* 16.16 定点逆映射步进（内循环只有两次定点加法）。
+       2026-10-25 行起点/行步进同步定点化:旧版每行 6 次软浮点
+       (2乘2加+2浮转整),21 层 × 800 行 ≈ 8ms/帧(P4 无 FPU);
+       定点后每行仅 2 次整数加法,数值语义与旧版截断一致 */
     int32_t dux = (int32_t)(inv.a * 65536.0f), dvx = (int32_t)(inv.b * 65536.0f);
-    float u00 = inv.a * ix0 + inv.c * iy0 + inv.e;
-    float v00 = inv.b * ix0 + inv.d * iy0 + inv.f;
+    int32_t duy = (int32_t)(inv.c * 65536.0f), dvy = (int32_t)(inv.d * 65536.0f);
+    int32_t u00 = (int32_t)((inv.a * ix0 + inv.c * iy0 + inv.e) * 65536.0f);
+    int32_t v00 = (int32_t)((inv.b * ix0 + inv.d * iy0 + inv.f) * 65536.0f);
     const uint32_t wmax = (uint32_t)t->w * 65536u;
     const uint32_t hmax = (uint32_t)t->h * 65536u;
     const uint32_t *px = t->rgba;
@@ -329,7 +350,7 @@ static void blit(uint16_t *fb, int fw, int fh, const pd_tex_t *t, const mat_t *M
     const uint16_t *span = t->span;
 
     for (int y = iy0; y < iy1; y++) {
-        int32_t u = (int32_t)(u00 * 65536.0f), v = (int32_t)(v00 * 65536.0f);
+        int32_t u = u00, v = v00;
         int xa = ix0, xb = ix1;
         if (span && dux != 0) {
             /* 逐行跨度裁切：本行采样的纹理行范围 → 内容起止并集 → 映射回屏幕 x 区间 */
@@ -346,7 +367,10 @@ static void blit(uint16_t *fb, int fw, int fh, const pd_tex_t *t, const mat_t *M
                     if (b > smax) smax = b;
                 }
             }
-            if (smin > smax) { u00 += inv.c; v00 += inv.d; continue; }  /* 整行无内容 */
+            if (smin > smax) { u00 += duy; v00 += dvy; continue; }  /* 整行无内容 */
+            /* 2026-10-25 跨度映射回退浮点:定点版(整数除法+偏置 ceil)在
+               负坐标边界有 ±1 偏差,实测大图层(topwear)整层消失。
+               仅 span 图层每行 4 次软浮点(~1ms/帧),可接受 */
             float uf = (float)u / 65536.0f;
             float duf = (float)dux / 65536.0f;
             float xa_f = (float)ix0 + ((float)smin - 1.5f - uf) / duf;
@@ -355,7 +379,7 @@ static void blit(uint16_t *fb, int fw, int fh, const pd_tex_t *t, const mat_t *M
             int xb2 = (int)floorf(fmaxf(xa_f, xb_f)) + 2;
             if (xa2 < ix0) xa2 = ix0;
             if (xb2 > ix1) xb2 = ix1;
-            if (xa2 >= xb2) { u00 += inv.c; v00 += inv.d; continue; }
+            if (xa2 >= xb2) { u00 += duy; v00 += dvy; continue; }
             xa = xa2; xb = xb2;
         }
         u += dux * (xa - ix0);
@@ -392,7 +416,7 @@ static void blit(uint16_t *fb, int fw, int fh, const pd_tex_t *t, const mat_t *M
             u += dux; v += dvx;
             row++;
         }
-        u00 += inv.c; v00 += inv.d;
+        u00 += duy; v00 += dvy;
     }
 }
 
@@ -800,6 +824,12 @@ pd_model_t *pd_load(const char *dir, int mode) {   /* 2026-09-17:0=旧全量 1=m
         }
         if ((j = cJSON_GetObjectItem(it, "group")) && cJSON_IsString(j))
             L->group = strcmp(j->valuestring, "head") == 0 ? 1 : 0;
+        /* 2026-10-21 图层绑定:bind 名字先存,全部层加载后统一解析索引 */
+        if ((j = cJSON_GetObjectItem(it, "bind")) && cJSON_IsString(j))
+            snprintf(L->bind_name, sizeof(L->bind_name), "%s", j->valuestring);
+        else
+            L->bind_name[0] = 0;
+        L->bind_idx = -1;
         L->special = special_of(cJSON_GetObjectItem(it, "special") &&
                                 cJSON_IsString(cJSON_GetObjectItem(it, "special"))
                                     ? cJSON_GetObjectItem(it, "special")->valuestring : NULL);
@@ -866,6 +896,20 @@ pd_model_t *pd_load(const char *dir, int mode) {   /* 2026-09-17:0=旧全量 1=m
                 }
             }
         }
+    }
+    /* 2026-10-21 绑定解析:全部层加载完后 bind_name → bind_idx */
+    for (int i = 0; i < m->n_layers; i++) {
+        pd_layer_t *L = &m->layers[i];
+        L->bind_idx = -1;
+        if (!L->bind_name[0]) continue;
+        for (int k = 0; k < m->n_layers; k++) {
+            if (k != i && strcmp(m->layers[k].name, L->bind_name) == 0) {
+                L->bind_idx = (int16_t)k;
+                break;
+            }
+        }
+        if (L->bind_idx < 0)
+            ESP_LOGW(TAG, "bind 目标不存在: %s → %s", L->name, L->bind_name);
     }
 #else
     m->ppa_zoom = -1;
@@ -1643,7 +1687,16 @@ static void draw_band(pd_model_t *m, uint16_t *dst, int dw, int dh, uint32_t t_m
         mat_t M = Msway;
         float px = hp0, py = hp1;   /* 特殊部件枢轴（头组分支内重定向；瞳孔裁剪在层尾使用） */
 
-        if (L->group == 0 && strcmp(L->name, "neck") != 0) {
+        /* 2026-10-21 绑定层:继承父层本帧最终矩阵(父 z 低先绘制,last_m 已记录)。
+           跳过自身组变换与动画增量(自身无轨道;父层增量已在 last_m 内) */
+        bool bound = (L->bind_idx >= 0 && L->bind_idx < m->n_layers && L->bind_idx != i);
+        if (bound) {
+            pd_layer_t *P = &m->layers[L->bind_idx];
+            M = (mat_t){P->last_m[0], P->last_m[1], P->last_m[2],
+                        P->last_m[3], P->last_m[4], P->last_m[5]};
+        }
+
+        if (!bound && L->group == 0 && strcmp(L->name, "neck") != 0) {
             /* 呼吸层（topwear/手）：始终 CPU 浮点渲染（亚像素平滑呼吸，与头/颈连续）；
                其余身体大图层走 PPA 硬件（整数坐标） */
             static const char *bobset[] = {"topwear", "handwear-l", "handwear-r"};
@@ -1673,7 +1726,7 @@ static void draw_band(pd_model_t *m, uint16_t *dst, int dw, int dh, uint32_t t_m
             mat_t sc = mat_S(vscale, vscale);
             mat_mul(&M, &t);
             mat_mul(&M, &sc);
-        } else if (strcmp(L->name, "neck") == 0) {
+        } else if (!bound && strcmp(L->name, "neck") == 0) {
             /* 脖子 0.85 阻尼 */
             mat_t t1 = ppa_frame
                        ? mat_T(roundf(sX(m, hp0, dw)), roundf(sY(m, hp1, dh)) + breathPx)
@@ -1687,7 +1740,7 @@ static void draw_band(pd_model_t *m, uint16_t *dst, int dw, int dh, uint32_t t_m
             mat_mul(&M, &sc1);
             mat_mul(&M, &sc);
             mat_mul(&M, &t2);
-        } else {
+        } else if (!bound) {
             /* 头组全变换 */
             mat_t tmp = Mhead;
             M = Msway;
@@ -1771,6 +1824,22 @@ static void draw_band(pd_model_t *m, uint16_t *dst, int dw, int dh, uint32_t t_m
                     mat_mul(&M, &sc);
                     mat_mul(&M, &o2);
                     mat_mul(&M, &r2);
+                } else if (strncmp(L->name, "eye_mirror", 10) == 0) {
+                    /* 2026-10-26 对称镜像眼(网页抠图生成,整层=眼白+虹膜+
+                       睫毛合并):不匹配 eyelash/irides 前缀时走默认路径
+                       不眨眼(用户实测只有原睁眼会眨)。照抄 eyelash 的
+                       眼皮式压缩,special=eye-r/l 保证与对侧眨眼同步 */
+                    float ao = m->landscape ? 0.0f : L->h * 0.2f;
+                    mat_t r1 = mat_R(eyeTiltRad), o1 = mat_T(0, ao),
+                          sc = m->landscape
+                                   ? mat_S(fmaxf(0.05f, s), 1)
+                                   : mat_S(1, fmaxf(0.05f, s)),
+                          o2 = mat_T(0, -ao), r2 = mat_R(-eyeTiltRad);
+                    mat_mul(&M, &r1);
+                    mat_mul(&M, &o1);
+                    mat_mul(&M, &sc);
+                    mat_mul(&M, &o2);
+                    mat_mul(&M, &r2);
                 } else if (strncmp(L->name, "eyebrow", 7) == 0) {
                     /* 眉毛独立参数：高（px）+ 斜（度，正=内端向下=生气皱眉）。
                        眉毛跟脸轴（眉高/眉斜按脸轴 tune） */
@@ -1797,7 +1866,7 @@ static void draw_band(pd_model_t *m, uint16_t *dst, int dw, int dh, uint32_t t_m
            一次性动画乘 sin 包络（0→1→0）：姿势渐入渐出——Spine 该模型的动作
            是"换链瞬变姿势"（中间过程在隐藏链/mesh 形变，PPD 表达不了），
            包络提供过程感（待机→姿势→待机），避免瞬切两帧 */
-        if (m->anim_idx >= 0 && m->anim_idx < m->n_anims) {
+        if (!bound && m->anim_idx >= 0 && m->anim_idx < m->n_anims) {
             pd_anim_t *A = &m->anims[m->anim_idx];
             float at = (t_ms - m->anim_t0) * m->anim_speed / 1000.0f;
             float env = 1.0f;   /* 无包络:轨道忠实还原 spine 时间轴(与 sim.js 一致) */
@@ -1856,6 +1925,9 @@ static void draw_band(pd_model_t *m, uint16_t *dst, int dw, int dh, uint32_t t_m
         int64_t t0p = esp_timer_get_time();
         blit(dst, dw, dh, tex, &M, bcx0, bcy0, bcx1, bcy1);
         int64_t t1p = esp_timer_get_time();
+        /* 2026-10-21 记录本帧最终矩阵(供 bind 子层继承) */
+        L->last_m[0] = M.a; L->last_m[1] = M.b; L->last_m[2] = M.c;
+        L->last_m[3] = M.d; L->last_m[4] = M.e; L->last_m[5] = M.f;
         L->prof_us += (uint32_t)(t1p - t0p);
         {
             /* 像素数估算：变换后内容 bbox 面积 */
@@ -1867,6 +1939,9 @@ static void draw_band(pd_model_t *m, uint16_t *dst, int dw, int dh, uint32_t t_m
             L->prof_px += (uint32_t)fmaxf(0, fabsf(px1 - px0) * fabsf(py1 - py0));
         }
     }
+    /* 2026-10-25 异步流水收尾:带内所有在飞 blend 完成(上屏管线读 fb 前
+       必须清空,否则 SRM 读到半混合帧) */
+    ppa_blend_wait();
 }
 
 /* 双核跑一条行带任务（gfilter: -1=全部, 0=身体, 1=头） */
@@ -1942,7 +2017,7 @@ void pd_render(pd_model_t *m, uint16_t *fb, int fw, int fh, uint32_t t_ms) {
         /* 钉在 CPU 0：纸偶渲染（pd_anim+pd_worker）必须与 AFE/音频错核——
            Live2D 单任务渲染天然让出另一个核给 AFE；纸偶双核渲染会把两核占满，
            AFE 检测拿不到节拍 → ringbuffer full → IDLE 饿死 → watchdog */
-        if (s_go && s_done) xTaskCreatePinnedToCore(worker_task, "pd_worker", 8192, NULL, 4, &s_worker, 1);  /* 渲染专用核 CPU 1；CPU 0 留给 LVGL+AFE（改到 core 0） */  // 8192 栈（渲染链深，4096 曾溢出踩坏 LVGL）+ 不 pin 让调度器避开 AFE（固定 CPU 1）
+        if (s_go && s_done) xTaskCreatePinnedToCore(worker_task, "pd_worker", 8192, NULL, 4, &s_worker, 1);  /* 2026-10-25 回退核 1:核 0 双核并行(13.5fps)导致 worker+LVGL+AFE 合计超 100% 负载,IDLE0 持续饿死 WDT 刷屏——1.3fps 收益不值。核 1 串行稳定 12.2fps 无告警 */
     }
 
     bool fast = m->hfb && m->half_res;   /* 快：全场景半分辨率 */

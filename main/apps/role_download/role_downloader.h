@@ -16,6 +16,18 @@ struct CloudRole {
     bool incomplete = false;   // 缺竖屏立绘(不可下载)
 };
 
+/* 下载进度附带信息(2026-10-25):UI 把 &RoleDlPageInfo 当 ud 传给
+   role_download_fetch*,下载核心在 bundle 模式逐页填充块号/总块数,
+   UI 据此显示"第N/M块"(pages>1 才显示)。逐文件/公共库路径不填充,
+   保持 1/1 即不显示。 */
+struct RoleDlPageInfo {
+    int page = 1;    /* 当前块号(1 起) */
+    int pages = 1;   /* 总块数 = ceil(总字节/8MB) */
+};
+
+/* 下载进行中标志(2026-10-24):WifiBoard 省电保护、UI 防叠下载共用 */
+bool role_download_busy(void);
+
 void role_downloader_show(void);
 void role_downloader_close(void);   /* 互斥:干员索引页打开前关闭下载页(LVGL 任务上下文) */
 void role_downloader_set_font(const lv_font_t *font);   /* 板级中文字体(防豆腐块) */
@@ -63,6 +75,25 @@ int role_download_check_user(int uid, const char *rel, int64_t *total_out);
 int role_download_fetch_user(int uid, const char *rel,
                              bool (*step_cb)(int pct, const char *file, void *ud), void *ud);
 
+/* ── 懒下载(2026-10-25,漫展快速展示) ──
+ * 角色分模块按需下载:首次只下默认集(cover 全部+standee+manifest.json),
+ * PPD 后台预取、PPD_Q 基座进 Q 模式时下、voice 点语音记录时下。
+ * prefixes = rel 前缀集(如 {"cover/","standee/","manifest.json"}),
+ * tags = 成功后写的模块标记名(如 {"cover","standee"},写 .done_<tag>)。
+ * check_user_set:只核对前缀集内文件,返回语义同 check_user,total_out=子集字节。
+ * module_ready:模块标记是否存在(离线可用,不拉 manifest)。 */
+int role_download_check_user_set(int uid, const char *rel,
+                                 const std::vector<std::string> &prefixes,
+                                 int64_t *total_out);
+int role_download_fetch_user_set(int uid, const char *rel,
+                                 const std::vector<std::string> &prefixes,
+                                 const std::vector<std::string> &tags,
+                                 bool (*step_cb)(int pct, const char *file, void *ud), void *ud);
+/* Q 模式基座:PPD_Q 顶层文件 + forms/基建(前缀集内部按 manifest 计算) */
+int role_download_fetch_user_qbase(int uid, const char *rel,
+                                   bool (*step_cb)(int pct, const char *file, void *ud), void *ud);
+bool role_download_module_ready(int uid, const char *rel, const char *tag);
+
 /* ── 公共共享资源三件套(背景/音乐,rel 相对 Arknights/main;2026-09-10) ──
  * 语义同公共库三件套:probe -1 网络/-2 云端无;check 1 齐全/0 缺失;fetch 0/1/2。
  * 落位 /sdcard/Arknights/main/<rel>/。 */
@@ -83,7 +114,30 @@ int role_download_clone(const char *voc, const char *star, const char *name);
  *       返回 ≥0=缺失首数(缺失名写入内部清单) -1=网络失败;
  * fetch:下载内部清单中缺失的 wav(存在且>0 跳过)。 */
 int role_download_check_music_missing(void);
+
+/* 2026-10-26 音乐下载块级进度上下文:fetch 内部每曲开始前更新 cur(1 起),
+   step_cb 可按 cur/total 显示"第 X/N 首"(复用角色下载块号 UI) */
+struct MusicDlCtx {
+    int cur;    // 当前曲号(1 起)
+    int total;  // 总曲数
+};
 int role_download_fetch_music_missing(bool (*step_cb)(int pct, const char *file, void *ud), void *ud);
+
+/* ── 开机曲自动下载(2026-10-21) ──
+ * 只下 Rhodes_Island.wav 到 music 目录:.part 半成品断点续传,完整后
+ * rename 原子完成(播放扫描不会遇到半截文件)。正式文件存在且 >0 即跳过。 */
+int role_download_fetch_music_boot(void);
+
+/* ── 键盘词组库自动下载(2026-10-26) ──
+ * 下载 ime_dict.txt(公开库根,~450KB)到 /sdcard/Arknights/main/。
+ * 存在且 >100KB 跳过;失败返回 -1(下次开机重试)。 */
+int role_download_fetch_ime_dict(void);
+
+/* ── 服务器可达性探测(2026-10-21) ──
+ * 拿到 IP 后确认服务器真实可达:GET manifest,响应含 '{'(JSON)才算通。
+ * 认证门户网络(校园 guest)有 IP 无外网,请求被门户劫持返回 HTML → 判不通。
+ * 返回:0=可达 -1=超时/门户/失败。仅在 netif 已有 IP 时调用(防 lwip assert)。 */
+int role_download_network_ok(int timeout_ms);
 
 /* ── 目录清空(换绑用户清理;2026-09-10) ── */
 void role_download_remove_dir(const char *path);   // 递归删除(包装静态 remove_dir_r)
@@ -93,3 +147,18 @@ int role_download_clear_operator(void);            // 清 operator 保留 INDEX;
  * C6 出厂 2.3.2 无 SW_AGGR → 流模式吞吐 ~20KB/s;开机网络就绪后自动
  * 下载官方 3.0.9 预编译固件 → SDIO OTA → 整机重启。版本匹配则静默跳过。 */
 void cp_ota_task(void *arg);
+
+/* ── 开机无竞争测速(2026-10-25) ──
+ * 网络就绪后下载一页 bundle(4MB)计时打日志:无雷达/UI/音频竞争的
+ * 下行天花板,用于区分"WiFi 受限"与"运行期竞争"。 */
+void role_download_speedtest(void);
+
+/* ── 兜底拿绑定 uid(2026-10-25) ──
+ * 词表接口独立同步拉一次解析 uid,不依赖开机流程时序(开机仪式等
+ * 点击导致词表延迟时,索引页点卡片 probe 前兜底取 uid);失败返回 0。 */
+int role_download_bound_uid_now(void);
+
+/* ── 等待下载任务结束(2026-10-25) ──
+ * 取消传播需要时间(乐观关闭弹窗后读循环未到检查点);启动新下载
+ * 前等待旧任务真正结束,避免"已有下载任务进行中"忽略新请求。 */
+void role_download_wait_idle(int timeout_ms);

@@ -73,6 +73,12 @@ dependencies:
     version: '*'
     rules:
     - if: target in [esp32p4]
+  # 2026-10-23 显式锁 3.0.9:esphome 3.0.9 CP 固件(稳定 WiFi + ESP-NOW overlay)
+  # 与 host 组件版本对齐;3.0.10 的 WiFi 事件/认证行为与 CP 不兼容
+  espressif/esp_hosted:
+    version: ==3.0.9
+    rules:
+    - if: target in [esp32p4]
   espfriends/servo_dog_ctrl:
     version: ^0.1.8
     rules:

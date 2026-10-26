@@ -11,7 +11,9 @@
 #include <freertos/task.h>
 #include <esp_network.h>
 #include <esp_log.h>
+#include <esp_wifi.h>
 #include <esp_netif.h>
+#include <esp_event.h>
 
 #include <wifi_station.h>
 #include <wifi_configuration_ap.h>
@@ -19,6 +21,32 @@
 #include "afsk_demod.h"
 
 static const char *TAG = "WifiBoard";
+
+namespace {
+/* 2026-10-21 esp-hosted 下 IP_EVENT_STA_GOT_IP 从不 post(WifiStation 的
+   IpEventHandler 永不触发),而 esp_wifi_sta_get_ap_info 即使关联中也返回
+   失败——两条常规判定都不可用。可靠信号只有两个:
+   ① 连接成功 = STA netif 拿到非零 IP(lwip 回调日志 14785 可证)
+   ② 断开 = WIFI_EVENT_STA_DISCONNECTED 事件(RPC 日志可证,可靠派发)
+   因此:纯 IP 判定 + 断开事件里主动清零 netif IP,根治 stale IP 误判 */
+bool wifi_sta_has_ip() {
+    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (!sta) return false;
+    esp_netif_ip_info_t ip;
+    if (esp_netif_get_ip_info(sta, &ip) != ESP_OK) return false;
+    return ip.ip.addr != 0;
+}
+
+void wifi_on_sta_disconnected(void *arg, esp_event_base_t base, int32_t id, void *data) {
+    /* 断开即清零 netif IP:防 stale(断网后旧 IP 残留导致"已连接"误判);
+       重连成功 esp_wifi_remote 会重新下发新 IP */
+    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (sta) {
+        esp_netif_ip_info_t zero = {};
+        esp_netif_set_ip_info(sta, &zero);
+    }
+}
+}  // namespace
 
 WifiBoard::WifiBoard() {
     Settings settings("wifi", true);
@@ -94,6 +122,32 @@ void WifiBoard::StartNetwork() {
 
     auto& ssid_manager = SsidManager::GetInstance();
 
+    /* 注册断开事件清零 handler(一次性;断网后 netif IP 归零,判定不再误判) */
+    static bool s_disc_registered = false;
+    if (!s_disc_registered) {
+        esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED,
+                                   wifi_on_sta_disconnected, nullptr);
+        s_disc_registered = true;
+    }
+
+    /* netif IP 轮询判定(见文件级 wifi_sta_has_ip 注释) */
+    auto wait_ip = [&](int timeout_ms) -> bool {
+        int waited = 0;
+        while (waited < timeout_ms) {
+            if (wifi_sta_has_ip()) {
+                /* 2026-10-21 连上即重关省电:重连/切换热点后 C6 侧省电
+                   恢复(MIN_MODEM)会掉到 ~1Mbps(手机热点实测 150KB/s vs
+                   royal7 实测 1.3MB/s)。esp_wifi_set_ps 幂等,多调无害 */
+                extern void wifi_power_save_off(void);
+                wifi_power_save_off();
+                return true;
+            }
+            vTaskDelay(pdMS_TO_TICKS(200));
+            waited += 200;
+        }
+        return wifi_sta_has_ip();
+    };
+
     /* 2026-09-20 新配网主路径:屏幕 WiFi 列表(手机式)。
        ① 有已存 SSID → 先自动尝试连接;
        ② 无已存/连接失败 → 弹屏幕 WiFi 列表(选网+密码键盘);
@@ -110,9 +164,16 @@ void WifiBoard::StartNetwork() {
     if (!ssid_manager.GetSsidList().empty()) {
         auto& ws_try = WifiStation::GetInstance();
         ws_try.Start();
-        /* 2026-09-21:窗口 60s→8s。LP 核 ~2.4s/轮持续扫描,已存 SSID 在范围内
-           第一轮即 Found AP→连接;8s(≈3 轮)未连上说明不在范围/密码错 */
-        auto_connected = ws_try.WaitForConnected(8 * 1000);
+        /* 2026-10-21 窗口 8s→12s→netif 轮询:CP 固件 3.0.9 下 C6 WiFi 栈
+           ~20s 才就绪,12s 内连不上很正常,点击后还有复查 */
+        auto_connected = wait_ip(12 * 1000);
+        /* 拿到 IP 再验证服务器可达:认证门户网络有 IP 无外网,不能算连上 */
+        if (auto_connected) {
+            extern int role_download_network_ok(int timeout_ms);
+            auto_connected = (role_download_network_ok(3000) == 0);
+            if (!auto_connected)
+                ESP_LOGW(TAG, "Got IP but server unreachable (captive portal?)");
+        }
     }
 
     /* 2026-09-29 加载完成:显示开始唤醒按钮(背景继续轮播),等用户点击 */
@@ -120,6 +181,16 @@ void WifiBoard::StartNetwork() {
     boot_ceremony_wait(300000);   /* 5 分钟兜底(用户不点也继续) */
     boot_ceremony_hide();
     boot_cover_stop();   /* 用户点击进入下一阶段:才停轮播(定格当前图垫底) */
+
+    if (!auto_connected) {
+        /* 2026-10-21 C6 WiFi 栈就绪晚:用户点击时(几秒~几十秒后)连接常已完成,
+           点击后复查 netif IP(3s),连上就不弹列表页 */
+        auto_connected = wait_ip(3 * 1000);
+        if (auto_connected) {
+            extern int role_download_network_ok(int timeout_ms);
+            auto_connected = (role_download_network_ok(3000) == 0);
+        }
+    }
 
     if (!auto_connected) {
         /* 2026-09-21:不 Stop!P4 LP 核 Stop→Start 会永久卡死(扫描恒 12289
@@ -132,11 +203,16 @@ void WifiBoard::StartNetwork() {
         /* 2026-09-26 配网页「离线模式」:设标志+跳过,不进 AP 兜底直接继续 */
         extern bool application_offline_mode(void);
         if (application_offline_mode()) return;
-    }
 
-    /* 列表页跳过(或没有可用 WiFi)→ 旧 AP 热点配网兜底 */
-    wifi_config_mode_ = true;
-    EnterWifiConfigMode();   // 等待配网完成，返回后 wifi_config_mode_ 已清
+        /* 列表页跳过 → 旧 AP 热点配网兜底 */
+        wifi_config_mode_ = true;
+        EnterWifiConfigMode();   // 等待配网完成，返回后 wifi_config_mode_ 已清
+    } else {
+        /* 2026-10-21 已自动连接:直接进主流程。原代码无条件执行
+           EnterWifiConfigMode,连上也被拉进 AP 并把刚连上的网踢断 */
+        ESP_LOGI(TAG, "WiFi already connected, skip config mode");
+        return;
+    }
 
     // 尝试连接已保存的WiFi
     if (ssid_manager.GetSsidList().empty()) {
@@ -158,10 +234,15 @@ void WifiBoard::StartNetwork() {
         std::string notification = Lang::Strings::CONNECTED_TO + ssid;
         display->ShowNotification(notification.c_str(), 30000);
     });
+    /* 2026-10-21 崩溃修复:配网 AP 退出后 Start 会重复创建同 key STA netif
+       → IDF 5.5 断言崩溃。Start 前统一销毁旧 STA netif(Stop 不销毁)。 */
+    if (esp_netif_get_handle_from_ifkey("WIFI_STA_DEF") != nullptr) {
+        esp_netif_destroy(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"));
+    }
     wifi_station.Start();
 
-    // 等60秒连接，失败则重新配网
-    if (!wifi_station.WaitForConnected(60 * 1000)) {
+    // 等60秒连接，失败则重新配网(netif IP 轮询判定)
+    if (!wait_ip(60 * 1000)) {
         ESP_LOGW(TAG, "WiFi connection failed, entering config mode...");
         wifi_station.Stop();
         wifi_config_mode_ = true;
@@ -172,9 +253,16 @@ void WifiBoard::StartNetwork() {
             esp_netif_destroy(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"));
         }
         wifi_station.Start();
-        if (!wifi_station.WaitForConnected(60 * 1000)) {
+        if (!wait_ip(60 * 1000)) {
             wifi_station.Stop();
-            ESP_LOGW(TAG, "Still failed, continuing without WiFi");
+            /* 2026-10-21 用户拍板:没连上 WiFi 不得静默进主界面。
+               最后再弹一次屏幕列表,选网成功正常进;再跳过则置离线模式
+               (状态栏明确显示离线,不加载唤醒词模型) */
+            extern bool wifi_ui_show(void);
+            if (wifi_ui_show()) return;
+            extern void application_set_offline_mode(void);
+            application_set_offline_mode();
+            ESP_LOGW(TAG, "No network after retries, entering offline mode");
         }
     }
 }
@@ -188,11 +276,10 @@ const char* WifiBoard::GetNetworkStateIcon() {
     if (wifi_config_mode_) {
         return FONT_AWESOME_WIFI;
     }
-    auto& wifi_station = WifiStation::GetInstance();
-    if (!wifi_station.IsConnected()) {
+    if (!wifi_sta_has_ip()) {
         return FONT_AWESOME_WIFI_OFF;
     }
-    int8_t rssi = wifi_station.GetRssi();
+    int8_t rssi = WifiStation::GetInstance().GetRssi();
     if (rssi >= -60) {
         return FONT_AWESOME_WIFI;
     } else if (rssi >= -70) {
@@ -220,6 +307,12 @@ std::string WifiBoard::GetBoardJson() {
 }
 
 void WifiBoard::SetPowerSaveMode(bool enabled) {
+    /* 2026-10-24 下载期间禁开省电:省电 MIN_MODEM 会把 WiFi 下行压到
+       ~1Mbps(实测 100KB/s);音频事件在下载中途重开省电会再次掉速 */
+    if (enabled) {
+        extern bool role_download_busy(void);
+        if (role_download_busy()) return;
+    }
     auto& wifi_station = WifiStation::GetInstance();
     wifi_station.SetPowerSaveMode(enabled);
 }

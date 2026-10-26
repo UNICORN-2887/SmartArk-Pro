@@ -44,6 +44,7 @@ public:
     void Start();
     DeviceState GetDeviceState() const { return device_state_; }
     int bound_user_uid() const { return bound_user_uid_; }
+    void SetBoundUserUid(int uid);   // 2026-10-25 兜底设置(词表延迟时由下载探测路径写入)
     bool IsVoiceDetected() const { return audio_service_.IsVoiceDetected(); }
     void Schedule(std::function<void()> callback);
     void SetDeviceState(DeviceState state);
@@ -59,6 +60,13 @@ public:
     void SendMcpMessage(const std::string& payload);
     void SetAecMode(AecMode mode);
     void SwitchAgent(const std::string& agent_id);
+    /* 2026-10-25 显示角色 ↔ 语音 agent 联动:进立绘时按 SD 路径反查词表
+       切换协议 agent + 持久化当前角色 + 重注册唤醒词(只留当前角色的词) */
+    void SwitchAgentByPath(const std::string& sd_path);
+    /* 2026-10-26 唤醒词策略位:立绘模式=false(静默),对话模式=true。
+       状态机 idle 转换等无条件重开检测的路径必须按此位判断 */
+    void SetWakeAllowed(bool allowed) { wake_allowed_ = allowed; }
+    bool WakeAllowed() const { return wake_allowed_; }
     AecMode GetAecMode() const { return aec_mode_; }
     void PlaySound(const std::string_view& sound);
     AudioService& GetAudioService() { return audio_service_; }
@@ -93,6 +101,10 @@ private:
     std::map<std::string, std::string> wake_word_agents_;   // 唤醒词显示名 → agent_id(服务器下发)
     std::map<std::string, std::string> wake_word_paths_;    // 唤醒词显示名 → 画面资源路径(相对 /sdcard/,服务器下发)
     std::map<std::string, std::string> wake_word_names_cn_; // 唤醒词显示名 → 干员中文名(2026-09-28 聊天框表头用)
+    std::string active_agent_name_;                         // 2026-10-25 当前角色显示名(NVS 持久化;只注册它的唤醒词)
+    std::string pending_agent_path_;                        // 2026-10-26 词表未到时暂存的待切换路径(词表到达后重试)
+    std::vector<std::pair<std::string, std::string>> wake_word_commands_;   // 全量词表缓存(重注册用)
+    bool wake_allowed_ = false;                             // 2026-10-26 唤醒词策略位(仅对话模式 true)
     std::string bound_username_;                            // 绑定用户账号名(2026-09-28 聊天框输入表头用;NVS 持久化)
     int bound_user_uid_ = 0;                                // 当前绑定用户 uid(2026-09-10:解析 wakewords 响应 uid 字段;换绑随词表刷新)
     bool pending_clear_operator_ = false;                   // 换绑待清空 operator(主循环安全执行,成功后才写 NVS)
@@ -102,6 +114,7 @@ private:
     void StartWakeWordBindPoll();
     void WakeWordBindPollTask();
     void ClearOperatorAfterRebind(int new_uid);   // 换绑清空 operator(主循环上下文,2026-09-10)
+    void ReapplyWakeWordCommands();               // 2026-10-25 按当前角色过滤注册唤醒词
 
     void MainEventLoop();
     void OnWakeWordDetected();

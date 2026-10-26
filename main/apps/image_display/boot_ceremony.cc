@@ -55,7 +55,15 @@ void boot_ceremony_loading(const lv_font_t *font) {
 
 void boot_ceremony_ready(void) {
     /* 加载完成:移除加载条,显示「开始唤醒」按钮(黄字半透明,上下跳动+呼吸) */
-    if (!lvgl_port_lock(pdMS_TO_TICKS(500))) return;
+    /* 2026-10-21 锁重试:单次 500ms 超时 return 会让按钮永不出现,用户卡在
+       loading(实测 cover 轮播+后台任务繁忙时抢不到锁);最多等 30s */
+    int tries = 0;
+    while (!lvgl_port_lock(pdMS_TO_TICKS(500))) {
+        if (++tries >= 60) {
+            ESP_LOGW(TAG, "ceremony ready: LVGL 锁 30s 不可得,放弃按钮");
+            return;
+        }
+    }
     if (s_loading_label) {
         lv_obj_del(s_loading_label);
         s_loading_label = NULL;

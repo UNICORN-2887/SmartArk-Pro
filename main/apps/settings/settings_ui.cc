@@ -17,6 +17,7 @@
 #include "board.h"
 #include "settings.h"
 #include "system_info.h"
+#include "radar_ui.h"
 #include "wifi_station.h"
 
 #define TAG "SettingsUI"
@@ -148,6 +149,9 @@ static lv_obj_t *make_slider(lv_obj_t *parent, int x, int y, int value, lv_obj_t
 void settings_ui_show(void) {
     if (s_overlay) return;
     if (!lvgl_port_lock(pdMS_TO_TICKS(500))) return;
+    /* 2026-10-22 设置页+cover 播放期间唤醒词 NN 连续占 CPU 超 5s → task_wdt
+       panic 实测:显示设置页时挂起唤醒词,退出恢复 */
+    Application::GetInstance().GetAudioService().EnableWakeWordDetection(false);
 
     s_overlay = lv_obj_create(lv_layer_top());
     lv_obj_set_size(s_overlay, 480, 800);
@@ -242,6 +246,24 @@ void settings_ui_show(void) {
     lv_obj_t *code_lbl = make_label(s_overlay, ("设备绑定码: " + bind_code).c_str(), 30, 630);
     lv_obj_set_style_text_color(code_lbl, lv_color_hex(0x7fd), 0);
 
+    // ── 交友雷达(2026-10-22) ──
+    {
+        lv_obj_t *rb = lv_btn_create(s_overlay);
+        lv_obj_set_size(rb, 180, 44);
+        /* 2026-10-26 移左上角:原 TOP_RIGHT(-20,160) 与"转发时本地静音"
+           开关(380,145)重叠,视觉乱摆 */
+        lv_obj_align(rb, LV_ALIGN_TOP_LEFT, 30, 52);
+        lv_obj_set_style_bg_color(rb, lv_color_hex(0x0a3a0a), 0);
+        lv_obj_t *rl = lv_label_create(rb);
+        lv_label_set_text(rl, "交友雷达");
+        lv_obj_set_style_text_color(rl, lv_color_hex(0x4dff6a), 0);
+        lv_obj_set_style_text_font(rl, efont(), 0);   /* 2026-10-26 修中文方框(曾漏设字体→默认 ASCII 字体) */
+        lv_obj_center(rl);
+        lv_obj_add_event_cb(rb, [](lv_event_t *e) {
+            radar_ui_show();
+        }, LV_EVENT_CLICKED, NULL);
+    }
+
     // ── 提示 ──
     lv_obj_t *hint = make_label(s_overlay, "提示：声纹过滤开启后只响应主人声音（网页注册声纹后生效）", 30, 675);
     lv_obj_set_style_text_color(hint, lv_color_hex(0x999999), 0);
@@ -255,6 +277,8 @@ void settings_ui_show(void) {
 void settings_ui_hide(void) {
     if (!s_overlay) return;
     if (!lvgl_port_lock(pdMS_TO_TICKS(500))) return;
+    /* 2026-10-22 退出设置页恢复唤醒词(显示时挂起防 task_wdt) */
+    Application::GetInstance().GetAudioService().EnableWakeWordDetection(true);
     if (s_timer) {
         lv_timer_del(s_timer);
         s_timer = NULL;

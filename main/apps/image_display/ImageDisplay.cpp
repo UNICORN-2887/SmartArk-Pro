@@ -52,6 +52,8 @@ extern void mjpeg_free_buffer(void);   // 2026-10-07 MjpegPlayer 预读缓冲彻
 #include "driver/jpeg_decode.h"
 #include "board.h"
 #include "application.h"
+#include "settings.h"   /* 2026-10-25 scan_bound_user_uid NVS 兜底 */
+#include "radar_ui.h"
 #include "display/lcd_display.h"   // LcdDisplay::GetPanelFrameBuffer（PPA 直写面板 fb）
 #include "driver/ppa.h"
 #include "esp_cache.h"
@@ -166,6 +168,24 @@ static void pdq_anim_ui_create(lv_obj_t *bg);   // 互动内动作按钮+列表�
 static void pdq_anim_panel_set(bool show);      // 面板展开/收起(联动形态按钮显隐)
 // ── 横屏立牌（standee）：cover 模式下的横屏 MJPEG 立绘展示 ──
 static bool s_standee_mode = false;        // 横屏立牌播放中
+/* 2026-10-25 立牌掉帧实验:进/出立牌暂停/恢复雷达(文件级 extern "C",
+   函数体内声明非法——曾编译报 expected unqualified-id) */
+extern "C" void radar_ble_pause(void);
+extern "C" void radar_ble_resume(void);
+
+/* 2026-10-25 立牌 PPA 直写:复用纸偶互动的上屏管线(C++ 静态变量即定义,
+   原定义移至此,函数声明保留) */
+static volatile bool s_pd_direct = false;        // PPA 直写模式激活(panel fb 可用 + PPA 注册成功)
+static uint16_t* s_pd_panel_fb = NULL;           // 面板 framebuffer(480×800 RGB565,PSRAM)
+static uint16_t* s_pd_fb[3] = {NULL, NULL, NULL};// 480×800 RGB565:fb[0/1]=渲染双缓冲(防撕裂)
+                                                 // fb[2]=干净底图(PPA 每帧拷入,canvas 指向它)
+static LcdDisplay* s_pd_lcd = NULL;              // 直写期间的 LcdDisplay 句柄(隐藏/恢复状态栏用)
+static int s_pd_direct_owner = 0;                // 2026-10-25 直写归属:0无 1纸偶 2立牌 3立绘
+                                                 // (各入口互斥,退出只清自己的,防 video 退出误杀纸偶直写)
+static bool pd_ppa_init(void);
+static void pd_ppa_present(uint16_t* src, uint16_t* dst);
+static void pd_ppa_wait_idle(void);
+static bool cover_direct_try_present(uint8_t* buf);   // 2026-10-25 立绘直写(定义在文件后部)
 static volatile bool s_standee_starting = false;  // 进入中守卫（防双点）
 static volatile bool s_standee_cancel = false;    // 加载中取消（唤醒对话等入口打断：task 完成后不进 standee）
 static int s_standee_prev_count = 0;       // 进入前 cover 帧数（active 槽帧不动，退出秒恢复）
@@ -266,11 +286,38 @@ static void chat_overlay_set_landscape(bool land);   // 横屏对话：聊天框
 // PPA抠图合成+显示（frame_index，自动MJPEG或缓存模式）
 static bool decode_and_display_image(int frame_index)
 {
+    /* 2026-10-25 DMA2D 通道互斥:上一帧 PPA SRM 段仍在飞行时,本帧 JPEG 解码
+       的 dma2d_connect 会 reset 通道——通道事务悬挂时 reset 永不就绪 →
+       死转 → INT WDT panic(实测 Core1 dma2d_hal_tx_reset_channel 死转,
+       连带 Core0 LVGL wait_for_flushing 卡死)。解码前先排空 SRM,
+       JPEG 与 PPA 严格串行,杜绝并发抢 2D-DMA 通道 */
+    if (s_pd_direct) pd_ppa_wait_idle();
     // 横屏立牌分支：480×800 竖帧（PC 端已转好 90°）直通解码 → canvas（与竖屏 cover 同构）；
     // 动作测试播放中走普通分支（active 槽动画帧），不能走 standee 分支（会播立牌帧）
     if (s_standee_mode && !s_anim_play) {
         uint8_t *out = ppa_composite_standee_frame(frame_index);
         if (!out) return false;
+        /* 2026-10-25 PPA 直写上屏(与纸偶互动同管线):解码帧 DMA 直写面板 fb,
+           UI 按钮保护区跳过。零 CPU 全帧 → 30fps 可达;失败回退下面
+           LVGL 老路(限频 ~12fps) */
+        if (s_pd_direct && s_pd_panel_fb && s_pd_fb[2]) {
+            pd_ppa_wait_idle();
+            esp_cache_msync((void*)out, 480 * 800 * 2,
+                            ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+            pd_ppa_present((uint16_t*)out, s_pd_panel_fb);
+            esp_cache_msync((void*)s_pd_panel_fb, 480 * 800 * 2,
+                            ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+            return true;
+        }
+        /* 2026-10-25 LVGL 软件混合瓶颈(WDT 实拍 taskLVGL 卡在 argb8888 blend):
+           全帧走 LVGL 重绘 ~80ms/帧,30fps 无效化 → LVGL 任务饱和、锁风暴、
+           IDLE0 饿死 → WDT。限频 ~12fps(每 80ms 提交一次):LVGL 负载 ~65%,
+           稳定无 WDT;视觉 ~12fps(原 2fps 的 6 倍)。30fps 需 PPA 直写方案 */
+        static int64_t s_sd_last_present_ms = 0;
+        int64_t now_ms = esp_timer_get_time() / 1000;
+        if (now_ms - s_sd_last_present_ms < 80) return true;   // 跳过本次上屏(合成缓冲已更新)
+        s_sd_last_present_ms = now_ms;
+        int64_t t_lv0 = esp_timer_get_time();
         if (!lvgl_port_lock(pdMS_TO_TICKS(100))) {
             // LVGL 忙丢帧统计（5fps 排查：旋转按钮增加 LVGL 重绘负担？）
             static int s_standee_lock_drop = 0;
@@ -283,6 +330,13 @@ static bool decode_and_display_image(int frame_index)
                 s_standee_lock_drop++;
             }
             return false;
+        }
+        int64_t t_lv1 = esp_timer_get_time();
+        /* 2026-10-25 掉帧排查:LVGL 锁等待计时(每 10 帧) */
+        static int s_sd_lvgl_tick = 0;
+        if (++s_sd_lvgl_tick >= 10) {
+            s_sd_lvgl_tick = 0;
+            ESP_LOGI(TAG, "standee lvgl lock %d ms", (int)((t_lv1 - t_lv0) / 1000));
         }
         if (s_image_canvas) {
             lv_canvas_set_buffer(s_image_canvas, out, 480, 800, LV_COLOR_FORMAT_RGB565);
@@ -302,6 +356,16 @@ static bool decode_and_display_image(int frame_index)
             comp_buf += skip;
         }
     }
+
+    /* 2026-10-25 立绘 PPA 直写上屏(与立牌同管线):成功则跳过 LVGL 老路 */
+    if (cover_direct_try_present(comp_buf)) return true;
+
+    /* 2026-10-25 立绘限频止血(直写初始化失败时):LVGL 软件混合 ~35-80ms/帧,
+       满速 30fps 无效化 → LVGL 饱和 → 不定期 IDLE0 饿死 WDT。限频 20fps */
+    static int64_t s_cv_last_present_ms = 0;
+    int64_t cv_now_ms = esp_timer_get_time() / 1000;
+    if (cv_now_ms - s_cv_last_present_ms < 50) return true;   // 跳过本次上屏
+    s_cv_last_present_ms = cv_now_ms;
 
     if (!lvgl_port_lock(pdMS_TO_TICKS(100))) {
         // LVGL 任务繁忙，丢弃本帧（避免竞态崩溃）
@@ -363,6 +427,44 @@ static int search_image_files(void)
 static lv_obj_t *s_batt_icon = NULL;   // 充电闪电符号
 static lv_obj_t *s_batt_pct = NULL;    // 百分比数字
 static lv_obj_t *s_batt_box = NULL;    // 2026-10-03 胶囊容器:渲染循环逐帧失效(防滑动闪烁)
+static lv_obj_t *s_wake_dot = NULL;    // 2026-10-26 唤醒状态指示点(胶囊左侧)
+static lv_obj_t *s_wake_lbl = NULL;    // 2026-10-26 唤醒状态文字(点右侧)
+
+/* 2026-10-26 唤醒状态指示(Application 状态机/唤醒回调调用):
+   0=待机灰 1=唤醒成功绿 2=聆听蓝 3=回应橙。点色+文字同步更新 */
+extern "C" void application_wake_status_update(int state) {
+    if (!s_wake_dot || !lv_obj_is_valid(s_wake_dot)) return;
+    /* 2026-10-26 双保险:显示与唤醒策略位(wake_allowed_)同源——仅对话模式
+       显示。状态机 idle 转换无条件调 update(0)(立绘/开机页也会走到),
+       若不放行前压住,任何漏 hook 的入口都会让标志出现在非对话页面 */
+    if (!Application::GetInstance().WakeAllowed()) {
+        if (lvgl_port_lock(pdMS_TO_TICKS(100))) {
+            lv_obj_add_flag(s_wake_dot, LV_OBJ_FLAG_HIDDEN);
+            if (s_wake_lbl && lv_obj_is_valid(s_wake_lbl))
+                lv_obj_add_flag(s_wake_lbl, LV_OBJ_FLAG_HIDDEN);
+            lvgl_port_unlock();
+        }
+        return;
+    }
+    static const lv_color_t cols[] = {
+        lv_color_hex(0x555555),   /* 0 待机 */
+        lv_color_hex(0x33CC66),   /* 1 唤醒成功 */
+        lv_color_hex(0x3399FF),   /* 2 聆听 */
+        lv_color_hex(0xFF9933),   /* 3 回应 */
+    };
+    static const char *names[] = {"待机", "唤醒", "聆听", "回应"};   /* 2026-10-26 全部两字:20px 字体三字 60px > 42px 宽,换行难看 */
+    int s = (state < 0 || state > 3) ? 0 : state;
+    if (lvgl_port_lock(pdMS_TO_TICKS(100))) {
+        lv_obj_remove_flag(s_wake_dot, LV_OBJ_FLAG_HIDDEN);   /* 对话模式内:跟随状态机显示 */
+        lv_obj_set_style_border_color(s_wake_dot, cols[s], 0);   /* 空心圆环颜色(透明底) */
+        if (s_wake_lbl && lv_obj_is_valid(s_wake_lbl)) {
+            lv_obj_remove_flag(s_wake_lbl, LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text(s_wake_lbl, names[s]);
+            lv_obj_set_style_text_color(s_wake_lbl, cols[s], 0);
+        }
+        lvgl_port_unlock();
+    }
+}
 static bool s_batt_land = false;       // 2026-10-06 胶囊当前横屏态(与 s_pdq_mode 同步)
 static void batt_ui_tick(lv_timer_t *timer);   // 前向声明(横屏切换函数重建后立即刷新)
 
@@ -408,14 +510,43 @@ static void batt_apply_orientation(void) {
         lv_obj_set_flex_flow(s_batt_box, LV_FLEX_FLOW_ROW);
         lv_obj_align(s_batt_box, LV_ALIGN_TOP_RIGHT, -6, 2);
     }
+    /* 2026-10-26 唤醒指示点+文字跟随方向:竖屏胶囊左侧,横屏随胶囊旋转 */
+    if (s_wake_dot) {
+        if (land) {
+            lv_obj_set_parent(s_wake_dot, lv_screen_active());
+            lv_obj_set_pos(s_wake_dot, 435, 701);   /* 2026-10-26 上移 3px */
+            lv_obj_set_style_transform_pivot_x(s_wake_dot, 10, 0);
+            lv_obj_set_style_transform_pivot_y(s_wake_dot, 10, 0);
+            lv_obj_set_style_transform_rotation(s_wake_dot, 900, 0);
+            if (s_wake_lbl) {
+                lv_obj_set_parent(s_wake_lbl, lv_screen_active());
+                lv_obj_set_pos(s_wake_lbl, 414, 700);   /* 2026-10-26 文本再上移 3px */
+                lv_obj_set_style_transform_pivot_x(s_wake_lbl, 21, 0);
+                lv_obj_set_style_transform_pivot_y(s_wake_lbl, 12, 0);
+                lv_obj_set_style_transform_rotation(s_wake_lbl, 900, 0);
+            }
+        } else {
+            lv_obj_set_parent(s_wake_dot, lv_layer_sys());
+            lv_obj_set_pos(s_wake_dot, 308, 5);   /* 2026-10-26 上移 3px */
+            lv_obj_set_style_transform_rotation(s_wake_dot, 0, 0);
+            if (s_wake_lbl) {
+                lv_obj_set_parent(s_wake_lbl, lv_layer_sys());
+                lv_obj_set_pos(s_wake_lbl, 330, 4);   /* 2026-10-26 文本再上移 3px(用户要求) */
+                lv_obj_set_style_transform_rotation(s_wake_lbl, 0, 0);
+            }
+        }
+    }
     s_batt_icon = lv_label_create(s_batt_box);
     lv_label_set_text(s_batt_icon, "");
     s_batt_pct = lv_label_create(s_batt_box);
     lv_label_set_text(s_batt_pct, "");
     if (land) {
-        /* 2026-10-07 横屏手动定位(rot+flex 组合曾不渲染内容):图标左、数字右 */
+        /* 2026-10-25 横屏胶囊:rot900 后视觉宽仅 32px,电池图标(宽字形)
+           旋转挤压成竖条"长方形"+每帧重绘闪烁。图标隐藏只留百分比,
+           百分比位置与 2026-10-07 定版一致(Q 模式已验收) */
         lv_obj_set_pos(s_batt_icon, 6, 4);
-        lv_obj_set_width(s_batt_icon, 24);
+        lv_obj_set_width(s_batt_icon, 1);
+        lv_obj_add_flag(s_batt_icon, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_pos(s_batt_pct, 32, 4);
         lv_obj_set_size(s_batt_pct, 62, 24);
     } else {
@@ -535,6 +666,30 @@ bool image_display_init(void)
         lv_label_set_text(s_batt_pct, "");
         lv_obj_set_width(s_batt_pct, 64);   /* 2026-10-05 百分比固定宽居中:100%→99% 不再改胶囊宽度 */
         lv_obj_set_style_text_align(s_batt_pct, LV_TEXT_ALIGN_CENTER, 0);
+        /* 2026-10-26 唤醒状态指示点(胶囊左侧):0=待机灰 1=唤醒成功绿
+           2=聆听蓝 3=回应橙。随 batt_apply_orientation 同旋转/同层 */
+        s_wake_dot = lv_obj_create(lv_layer_sys());
+        lv_obj_set_size(s_wake_dot, 20, 20);
+        lv_obj_set_pos(s_wake_dot, 308, 5);   /* 2026-10-26 上移 3px:点+文字整组避开胶囊 */
+        /* 2026-10-26 透明背景+空心圆环:直接叠加在画面上(旧实心灰底块
+           在直写保护矩形内像一块背景,用户要求透明) */
+        lv_obj_set_style_bg_opa(s_wake_dot, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_radius(s_wake_dot, 10, 0);
+        lv_obj_set_style_border_width(s_wake_dot, 3, 0);
+        lv_obj_set_style_border_color(s_wake_dot, lv_color_hex(0x555555), 0);
+        lv_obj_set_style_pad_all(s_wake_dot, 0, 0);
+        lv_obj_clear_flag(s_wake_dot, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(s_wake_dot, LV_OBJ_FLAG_HIDDEN);   /* 2026-10-26 仅对话模式显示 */
+        /* 2026-10-26 状态文字(点右侧):半透明底条,随点同显隐同色 */
+        s_wake_lbl = lv_label_create(lv_layer_sys());
+        lv_obj_set_pos(s_wake_lbl, 330, 4);   /* 2026-10-26 上移 3px + 再上移 3px */
+        lv_obj_set_width(s_wake_lbl, 42);
+        lv_label_set_text(s_wake_lbl, "待机");
+        lv_obj_set_style_text_color(s_wake_lbl, lv_color_hex(0x555555), 0);
+        lv_obj_set_style_text_font(s_wake_lbl,
+            Board::GetInstance().GetDisplay()->GetTextFont(), 0);
+        lv_obj_set_style_text_align(s_wake_lbl, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_add_flag(s_wake_lbl, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_style_text_font(s_batt_pct,
             Board::GetInstance().GetDisplay()->GetTextFont(), 0);
     }
@@ -783,6 +938,21 @@ static void fashion_panel_hide(void) {
 bool cover_display_start(const char *agent_sd_path) {
     // agent 切换中（expression_display_start 持有锁）→ 跳过
     if (s_in_expression_start) return true;
+    /* 2026-10-25 显示↔语音联动:进立绘即切语音 agent + 只留当前角色的
+       唤醒词(用户要求:选哪个角色就只能唤醒哪个)。同一角色幂等零动作 */
+    Application::GetInstance().SwitchAgentByPath(agent_sd_path);
+    /* 2026-10-25 立绘展示模式 = 静默:唤醒词只在对话模式(PPD/表情/聊天)
+       开启(用户拍板)。立绘待机零误触、省 CPU */
+    application_set_wake_word_detection(false);
+    /* 2026-10-26 唤醒指示点仅对话模式显示:立绘隐藏 */
+    if (s_wake_dot && lv_obj_is_valid(s_wake_dot)) {
+        if (lvgl_port_lock(pdMS_TO_TICKS(100))) {
+            lv_obj_add_flag(s_wake_dot, LV_OBJ_FLAG_HIDDEN);
+            if (s_wake_lbl && lv_obj_is_valid(s_wake_lbl))
+                lv_obj_add_flag(s_wake_lbl, LV_OBJ_FLAG_HIDDEN);
+            lvgl_port_unlock();
+        }
+    }
     // 如果 cover 已经在跑了（mode_switch_task 先切了），跳过但确保按钮可见
     // （本函数现在可能跑在后台 cover_switch_task 里，此分支的 LVGL 调用必须加锁）
     if (s_cover_mode && strcmp(s_agent_path, agent_sd_path) == 0) {
@@ -850,9 +1020,10 @@ bool cover_display_start(const char *agent_sd_path) {
         if (s_standee_btn) lv_obj_remove_flag(s_standee_btn, LV_OBJ_FLAG_HIDDEN);
         if (s_lv2_interact_btn) lv_obj_add_flag(s_lv2_interact_btn, LV_OBJ_FLAG_HIDDEN);
         if (s_ppd_interact_btn) lv_obj_add_flag(s_ppd_interact_btn, LV_OBJ_FLAG_HIDDEN);
-        /* 2026-09-28 对话模式就绪:立绘显示完成后才开唤醒词检测(用户拍板:
-           进入对话模式前不检测,防未克隆角色/切换流程窗口的误唤醒) */
-        application_set_wake_word_detection(true);
+        /* 2026-10-26 立绘展示页=非对话模式:唤醒检测保持关闭(函数开头已关),
+           唤醒指示点保持隐藏(仅 pd_interaction_start/lv2_interaction_start
+           这两个对话模式入口才开启)。旧版此处开检测+显示指示点,导致
+           竖屏立绘页出现状态标志并误唤醒——已删 */
 
         // Voice text box (create once, reuse)
         if (!s_voice_text_obj) {
@@ -1153,7 +1324,11 @@ static void cover_restore(void) {
         if (s_kb_btn)    lv_obj_add_flag(s_kb_btn, LV_OBJ_FLAG_HIDDEN);
         if (s_standee_btn) lv_obj_remove_flag(s_standee_btn, LV_OBJ_FLAG_HIDDEN);
         if (s_mode_label) lv_label_set_text(s_mode_label, "对话模式");
-        application_set_wake_word_detection(true);   /* 2026-09-28 返回对话模式:立绘恢复后开检测 */
+        application_set_wake_word_detection(false);   /* 2026-10-25 立绘静默:返回通行证即关检测(旧版此处是开,用户拍板反转为关——唤醒词只在对话模式) */
+        /* 2026-10-26 唤醒指示点:退出对话模式隐藏(曾漏此路径 → 立绘仍显示) */
+        if (s_wake_dot && lv_obj_is_valid(s_wake_dot)) lv_obj_add_flag(s_wake_dot, LV_OBJ_FLAG_HIDDEN);
+        if (s_wake_lbl && lv_obj_is_valid(s_wake_lbl)) lv_obj_add_flag(s_wake_lbl, LV_OBJ_FLAG_HIDDEN);
+        if (s_wake_lbl && lv_obj_is_valid(s_wake_lbl)) lv_obj_add_flag(s_wake_lbl, LV_OBJ_FLAG_HIDDEN);
         lvgl_port_unlock();
     }
 
@@ -1298,6 +1473,11 @@ static void mode_switch_task(void *arg) {
         bool has_pd = (stat(pd_scene, &st) == 0);
         if (has_pd || lv2_agent_supported(s_agent_path)) {
             ESP_LOGI(TAG, "对话模式 → 优先 %s 交互", has_pd ? "PPD" : "Live2D");
+            /* 2026-10-25 进交互前释放立牌槽(10MB):立牌退出保留槽是为重进秒开,
+               但槽 + 背景槽 + 模型纹理叠加让 PSRAM 只剩 ~1.7MB,背景解码
+               768KB 对齐块分不出、pd_start 28KB 任务也因 SRAM 碎片失败
+               (实测"内存不足 请重启设备")。立牌下次进入重新加载即可 */
+            ppa_free_standee_slot();
             // 记录角色 emoji 缺失（退出交互后 expression_restart_mjpeg 失败会自动回 cover；
             // 模式按钮"返回通行证"据此跳过 s_req_cover，避免多余一轮切换）
             char neutral_path[300];
@@ -1416,8 +1596,11 @@ static void video_playback_task(void *arg)
         }
         /* 2026-10-05 电量胶囊每帧重绘:cover/对话模式直写帧覆盖面板 fb,
            胶囊此前只在 10s tick 重绘 → 闪烁。与 pd_render 路径同款修复
-           (84×32 小区域,持 LVGL 锁防跨核失效链表破坏)。 */
-        if (s_batt_box && lvgl_port_lock(pdMS_TO_TICKS(4))) {
+           (84×32 小区域,持 LVGL 锁防跨核失效链表破坏)。
+           2026-10-25 直写模式跳过:PPA 保护区已保住胶囊像素,每帧无效化
+           反而让 LVGL 重绘与 PPA 直写竞速(横屏胶囊闪烁根因之一);
+           电量变化由 10s tick 的 label 更新自行触发重绘 */
+        if (!s_pd_direct && s_batt_box && lvgl_port_lock(pdMS_TO_TICKS(4))) {
             if (lv_obj_is_valid(s_batt_box)) lv_obj_invalidate(s_batt_box);
             lvgl_port_unlock();
         }
@@ -1456,6 +1639,17 @@ static void video_playback_task(void *arg)
 
     // ── 创建独立的大栈低优先级任务做 SD I/O，本任务立即退出 ──
     s_video_running = false;
+    /* 2026-10-25 立绘直写收尾(仅归属 3):播放循环退出 → 先排空本管线 DMA
+       (防转场尾段悬挂),再恢复状态栏+复位。面板 fb 由下一帧 LVGL 全屏
+       重绘自然接管;纸偶(1)/立牌(2)归属不受影响 */
+    if (s_pd_direct && s_pd_direct_owner == 3) {
+        pd_ppa_wait_idle();
+        if (s_pd_lcd) s_pd_lcd->SetStatusBarVisible(true);
+        s_pd_direct = false;
+        s_pd_panel_fb = NULL;
+        s_pd_lcd = NULL;
+        s_pd_direct_owner = 0;
+    }
     if (s_req_expression) {
         s_req_expression = false;
         xTaskCreate(mode_switch_task, "mode_sw_expr", 10240, (void*)true, 3, NULL);
@@ -1489,7 +1683,11 @@ bool video_playback_start(int fps)
     s_video_fps = (fps > 0 && fps <= 120) ? fps : 30;
     ESP_LOGI(TAG, "Starting video playback at %d FPS (total: %d images)", s_video_fps, s_image_count);
 
-    xTaskCreatePinnedToCore(video_playback_task, "video_play", 4096, NULL, 2, &s_video_task, 0);
+    /* 2026-10-25 立牌 2fps 排查:锁/解码全快但循环 500ms/次 → 核心 0 被
+       LVGL/音频等更高优先级任务饿死(任务 prio 2 钉核 0)。实验:钉核 1
+       (空闲核);LVGL 调用均持 port 锁、JPEG 引擎有全局互斥锁,跨核安全。
+       FPS 恢复 → 坐实核心 0 饥饿,再决定长期方案(提优先级或永久挪核) */
+    xTaskCreatePinnedToCore(video_playback_task, "video_play", 4096, NULL, 2, &s_video_task, 1);
     return true;
 }
 
@@ -1614,16 +1812,46 @@ static void standee_task(void* arg) {
     s_image_count = count;
     s_current_index = 0;
     s_standee_mode = true;
+    /* 2026-10-25 立牌掉帧实验:播放期间暂停雷达(NimBLE 扫描/nearby 上报),
+       验证"雷达持续读取"是否掉帧根因。FPS 恢复 → 雷达与立牌需互斥或降频;
+       无变化 → 移除本实验。注意:与下载的 pause 无引用计数,重叠场景
+       (下载中退出立牌)会提前 resume——实验性代码,确认结论后重设计 */
+    radar_ble_pause();
+
+    /* 2026-10-25 立牌 PPA 直写上屏(与纸偶互动同管线):绕过 LVGL 全屏软件
+       blend(~80ms/帧 → 锁风暴+WDT 的元凶),解码帧经 PPA SRM 硬件 DMA 直写
+       面板 fb,UI 按钮保护区跳过。失败回退 LVGL 老路(限频兜底) */
+    s_pd_direct = false;
+    s_pd_panel_fb = NULL;
+    s_pd_lcd = NULL;
+    if (pd_ppa_init()) {
+        LcdDisplay* lcd = (LcdDisplay*)Board::GetInstance().GetDisplay();
+        s_pd_panel_fb = lcd->GetPanelFrameBuffer();
+        if (s_pd_panel_fb) { s_pd_direct = true; s_pd_lcd = lcd; }
+    }
+    if (s_pd_direct && !s_pd_fb[2])   /* 干净底图(PPA 每帧拷入,LVGL UI 重绘自拷) */
+        s_pd_fb[2] = (uint16_t*)heap_caps_aligned_alloc(64, 480 * 800 * 2 + 4096, MALLOC_CAP_SPIRAM);
+    if (s_pd_direct && !s_pd_fb[2]) { s_pd_direct = false; s_pd_panel_fb = NULL; }
+    if (s_pd_direct && s_pd_lcd) s_pd_lcd->SetStatusBarVisible(false);
+    if (s_pd_direct) s_pd_direct_owner = 2;   /* 2026-10-25 立牌归属 */
+    ESP_LOGI(TAG, "standee present path: %s", s_pd_direct ? "PPA DIRECT" : "LVGL fallback");
 
     // UI：按钮文字切换 + 右上按钮组转 90° 排顶边
     lvgl_port_lock(0);
     if (s_standee_lbl) lv_label_set_text(s_standee_lbl, "竖屏通行证模式");
     standee_ui_rotate(true);
+    /* 2026-10-25 直写模式:canvas 缓冲重绑 fb[2](PPA 每帧同步的干净底图),
+       LVGL 重绘 UI 矩形(电量胶囊等)时从它自拷,不会读旧帧/自叠加 */
+    if (s_pd_direct && s_image_canvas && s_pd_fb[2])
+        lv_canvas_set_buffer(s_image_canvas, (uint8_t*)s_pd_fb[2], 480, 800, LV_COLOR_FORMAT_RGB565);
     lvgl_port_unlock();
 
     loading_hide();
     video_playback_start(30);
     s_standee_starting = false;
+    /* 2026-10-26 立牌=动态展示(非对话):唤醒指示隐藏,点"对话模式"进 Q 互动才显示 */
+    if (s_wake_dot && lv_obj_is_valid(s_wake_dot)) lv_obj_add_flag(s_wake_dot, LV_OBJ_FLAG_HIDDEN);
+    if (s_wake_lbl && lv_obj_is_valid(s_wake_lbl)) lv_obj_add_flag(s_wake_lbl, LV_OBJ_FLAG_HIDDEN);
     ESP_LOGI(TAG, "Standee mode ON: %s (%d frames)", path, count);
     vTaskDelete(NULL);
 }
@@ -1658,6 +1886,19 @@ static void standee_exit(bool restart_cover) {
     }
     video_playback_stop();
     s_standee_mode = false;   // 先清标志：decode 分支回主路径
+    /* 2026-10-25 立牌掉帧实验:退出立牌恢复雷达 */
+    radar_ble_resume();
+    /* 2026-10-25 直写收尾:先等本管线 DMA 排空(与纸偶退出同纪律,防转场
+       尾段 DMA 悬挂连锁阻塞下一个归属的 wait_idle),再恢复状态栏+复位。
+       面板 fb 由下一帧 LVGL 全屏重绘自然覆盖(canvas 每帧重绑 comp 缓冲) */
+    if (s_pd_direct && s_pd_direct_owner == 2) {
+        pd_ppa_wait_idle();
+        if (s_pd_lcd) s_pd_lcd->SetStatusBarVisible(true);
+        s_pd_direct = false;
+        s_pd_panel_fb = NULL;
+        s_pd_lcd = NULL;
+        s_pd_direct_owner = 0;
+    }
     // standee 槽缓存保留：同角色重进秒开（PSRAM 32MB 充裕）
     // UI 复原（文字/位置/旋转）
     lvgl_port_lock(0);
@@ -1951,8 +2192,14 @@ static void voice_ui_hide(void) {
 // 轻提示(实现见背景音乐区 ui_toast;语音拦截/背景音乐共用)
 static void ui_toast(const char *msg);
 
+/* 2026-10-25 懒下载模块守卫(定义在下载区,语音面板此处提前引用) */
+static bool module_gate(int kind, const char *tag);
+static void module_popup_show(int kind);
+
 void voice_ui_show(void) {
     if (s_voice_overlay || s_profile_overlay || settings_ui_is_open() || menu_ui_is_open()) return;
+    /* 2026-10-25 懒下载守卫:语音模块未下载 → 弹提示(成功自动重开语音面板) */
+    if (!module_gate(2, "voice")) return;
     // 对话模式允许播语音(2026-09-13 用户拍板):判定同音乐——只要没开始对话就可播。
     // 播放期间状态机切 speaking,唤醒回调在 idle 才处理,播放不会被对话打断;
     // 对话中(idle 之外)禁止打开,避免与对话音频冲突。
@@ -2433,6 +2680,122 @@ void music_ui_show(void) {
 static int kb_update_candidates(void);
 static void kb_select_candidate(int idx);
 
+/* ─── 2026-10-26 词组库(开源 zh_pinyin_decoder 词库生成,24883 词,≤4 字) ───
+   文件:/sdcard/Arknights/main/ime_dict.txt(每行 "拼音(空格分隔)\t词\n",
+   按拼音排序,tools/ime_dict.txt 由生成脚本产出,放 SD 卡根目录下
+   Arknights/main/ 即可)。懒加载:键盘首次打开时后台任务读入 PSRAM
+   (blob py\0word\0 + 偏移表 + 首字母桶,~550KB)。
+   候选:整段拼音切音节(394 音节最长匹配)≥2 音节时查词组,
+   词表顺序即词频序。加载未完成时回退单字。 */
+static uint8_t *s_ime_blob = NULL;      // py\0word\0 连续
+static int32_t *s_ime_off = NULL;       // 词条偏移(按 py 字典序)
+static int s_ime_count = 0;
+static int s_ime_bucket[27];            // 首字母桶起止(26 字母 + 尾哨兵)
+static volatile bool s_ime_tried = false;
+static bool s_kb_cur_is_word = false;   // 当前候选是词组模式
+static char s_kb_syl[8][8]; static int s_kb_syl_n = 0;
+
+static void kb_ime_load(void) {
+    if (s_ime_tried) return;
+    s_ime_tried = true;
+    FILE *f = fopen("/sdcard/Arknights/main/ime_dict.txt", "rb");
+    if (!f) { ESP_LOGW(TAG, "ime_dict.txt 不存在,词组功能不可用"); return; }
+    fseek(f, 0, SEEK_END);
+    size_t size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (size == 0 || size > 1024 * 1024) { fclose(f); return; }
+    uint8_t *raw = (uint8_t*)heap_caps_malloc(size + 1, MALLOC_CAP_SPIRAM);
+    if (!raw) { fclose(f); return; }
+    if (fread(raw, 1, size, f) != size) { fclose(f); free(raw); return; }
+    fclose(f);
+    raw[size] = 0;
+    int lines = 0;
+    for (size_t i = 0; i < size; i++) if (raw[i] == '\n') lines++;
+    s_ime_blob = (uint8_t*)heap_caps_malloc(size + lines * 2 + 16, MALLOC_CAP_SPIRAM);
+    s_ime_off = (int32_t*)heap_caps_malloc(lines * 4, MALLOC_CAP_SPIRAM);
+    if (!s_ime_blob || !s_ime_off) {
+        free(raw); free(s_ime_blob); free(s_ime_off);
+        s_ime_blob = NULL; s_ime_off = NULL; return;
+    }
+    size_t o = 0;
+    int cnt = 0;
+    for (int b = 0; b < 26; b++) s_ime_bucket[b] = lines;
+    char last_letter = 0;
+    const char *p = (const char*)raw;
+    while (*p && cnt < lines) {
+        const char *nl = strchr(p, '\n');
+        size_t len = nl ? (size_t)(nl - p) : strlen(p);
+        const char *tab = (const char*)memchr(p, '\t', len);
+        if (!tab || tab == p) { p = nl ? nl + 1 : p + len; continue; }
+        char letter = p[0];
+        if (letter != last_letter && letter >= 'a' && letter <= 'z') {
+            s_ime_bucket[letter - 'a'] = cnt;
+            last_letter = letter;
+        }
+        s_ime_off[cnt] = (int32_t)o;
+        memcpy(s_ime_blob + o, p, (size_t)(tab - p)); o += (size_t)(tab - p); s_ime_blob[o++] = 0;
+        size_t wlen = len - (size_t)(tab - p) - 1;
+        memcpy(s_ime_blob + o, tab + 1, wlen); o += wlen; s_ime_blob[o++] = 0;
+        cnt++;
+        p = nl ? nl + 1 : p + len;
+    }
+    s_ime_count = cnt;
+    /* 空字母桶继承下一非空桶起点(如 v 无词 → 与 w 同区间) */
+    for (int b = 24; b >= 0; b--)
+        if (s_ime_bucket[b] == lines) s_ime_bucket[b] = s_ime_bucket[b + 1];
+    s_ime_bucket[26] = cnt;
+    free(raw);
+    ESP_LOGI(TAG, "ime 词库加载: %d 词 (%u KB PSRAM)", cnt, (unsigned)(o / 1024));
+}
+
+static void kb_ime_load_task(void *arg) {
+    kb_ime_load();
+    vTaskDelete(NULL);
+}
+
+/* 连续拼音串 → 音节数组(394 音节最长前缀匹配);失败返回 -1 */
+static int kb_split_syl(const char *p, char syl[][8], int max_n) {
+    int n = 0;
+    while (*p && n < max_n) {
+        int best = 0;
+        for (int i = 0; i < 394; i++) {
+            const char *py = (const char*)(PY_STRINGS + PY_OFFSETS[i]);
+            int len = strlen(py);
+            if (len > best && strncmp(p, py, len) == 0) best = len;
+        }
+        if (best == 0) return -1;
+        memcpy(syl[n], p, best); syl[n][best] = '\0';
+        n++; p += best;
+    }
+    return *p ? -1 : n;
+}
+
+/* 音节序列 → 词组列表(词表顺序=词频序),返回词组数。
+   词库未就绪时启动后台加载并返回 0(回退单字,不阻塞 LVGL) */
+static int kb_ime_query(const char syl[][8], int n, char out[][40], int max_out) {
+    if (!s_ime_count) {
+        if (!s_ime_tried)
+            xTaskCreate(kb_ime_load_task, "ime_load", 8192, NULL, 2, NULL);
+        return 0;
+    }
+    char key[48] = {0};
+    for (int i = 0; i < n; i++) { if (i) strcat(key, " "); strcat(key, syl[i]); }
+    int b = key[0] - 'a';
+    if (b < 0 || b > 25) return 0;
+    int lo = s_ime_bucket[b], hi = s_ime_bucket[b + 1];
+    int m = 0;
+    for (int i = lo; i < hi && m < max_out; i++) {
+        const char *e = (const char*)(s_ime_blob + s_ime_off[i]);
+        if (strcmp(e, key) != 0) continue;
+        const char *w = e + strlen(e) + 1;
+        size_t wl = strlen(w);
+        if (wl > 39) wl = 39;
+        memcpy(out[m], w, wl); out[m][wl] = 0;
+        m++;
+    }
+    return m;
+}
+
 static void keyboard_ui_hide(void) {
     if (!s_kb_overlay) return;
     if (lvgl_port_lock(pdMS_TO_TICKS(500))) {
@@ -2566,9 +2929,34 @@ static const char* kb_last_word(void) {
 
 static int kb_update_candidates(void) {
     s_kb_cand_page = 0;
+    s_kb_cur_is_word = false;
     const char *last = kb_last_word();
     int plen = strlen(last);
-    if (plen < 1 || plen > 7) { for (int i = 0; i < 6; i++) if (s_kb_cand_labels[i]) lv_label_set_text(s_kb_cand_labels[i], ""); s_kb_cand_total = 0; return 0; }
+    if (plen < 1 || plen > 16) { for (int i = 0; i < 6; i++) if (s_kb_cand_labels[i]) lv_label_set_text(s_kb_cand_labels[i], ""); s_kb_cand_total = 0; return 0; }
+    /* 2026-10-26 词组优先:整段拼音切音节 ≥2 且词表命中 → 词组候选
+       (词表顺序=词频序);未命中/未加载 → 原单字逻辑 */
+    if (plen >= 2) {
+        int n = kb_split_syl(last, s_kb_syl, 8);
+        if (n >= 2) {
+            char words[12][40];
+            int nw = kb_ime_query(s_kb_syl, n, words, 12);
+            if (nw > 0) {
+                s_kb_syl_n = n;
+                s_kb_cur_is_word = true;
+                s_kb_cand_total = nw;
+                int show = (nw > 6) ? 5 : nw;
+                for (int i = 0; i < 5; i++)
+                    if (i < show && s_kb_cand_labels[i]) lv_label_set_text(s_kb_cand_labels[i], words[i]);
+                    else if (s_kb_cand_labels[i]) lv_label_set_text(s_kb_cand_labels[i], "");
+                if (s_kb_cand_labels[5]) {
+                    if (nw > 6) lv_label_set_text(s_kb_cand_labels[5], ">");
+                    else if (nw == 6) lv_label_set_text(s_kb_cand_labels[5], words[5]);
+                    else lv_label_set_text(s_kb_cand_labels[5], "");
+                }
+                return nw;
+            }
+        }
+    }
     const uint8_t *data = py_lookup(last);
     if (!data) { for (int i = 0; i < 6; i++) if (s_kb_cand_labels[i]) lv_label_set_text(s_kb_cand_labels[i], ""); s_kb_cand_total = 0; return 0; }
     int count = data[0]; data++; s_kb_cand_total = count;
@@ -2590,6 +2978,21 @@ static int kb_update_candidates(void) {
 }
 
 static void kb_show_cand_page(int page) {
+    /* 2026-10-26 词组模式翻页 */
+    if (s_kb_cur_is_word) {
+        char words[12][40];
+        int nw = kb_ime_query(s_kb_syl, s_kb_syl_n, words, 12);
+        int start = page * 5;
+        for (int i = 0; i < 5; i++) {
+            int idx = start + i;
+            if (idx < nw && s_kb_cand_labels[i]) lv_label_set_text(s_kb_cand_labels[i], words[idx]);
+            else if (s_kb_cand_labels[i]) lv_label_set_text(s_kb_cand_labels[i], "");
+        }
+        if (s_kb_cand_labels[5])
+            lv_label_set_text(s_kb_cand_labels[5], ((page + 1) * 5 < nw) ? ">" : (page > 0 ? "<" : ""));
+        s_kb_cand_page = page;
+        return;
+    }
     const char *last = kb_last_word();
     const uint8_t *data = py_lookup(last);
     if (!data) return;
@@ -2612,6 +3015,24 @@ static void kb_show_cand_page(int page) {
 
 // Replace last pinyin word with selected Chinese character
 static void kb_select_candidate(int idx) {
+    /* 2026-10-26 词组模式:idx 对应词组表,整段拼音替换为词组 */
+    if (s_kb_cur_is_word) {
+        char words[12][40];
+        int nw = kb_ime_query(s_kb_syl, s_kb_syl_n, words, 12);
+        if (idx >= nw) return;
+        const char *last = kb_last_word();
+        int last_start = last - s_kb_input;
+        int plen = strlen(last);
+        const char *w = words[idx];
+        int clen = strlen(w);
+        memmove(s_kb_input + last_start + clen, s_kb_input + last_start + plen, s_kb_pos - last_start - plen + 1);
+        memcpy(s_kb_input + last_start, w, clen);
+        s_kb_pos = last_start + clen + (s_kb_pos - last_start - plen);
+        s_kb_last_key = -1;
+        ESP_LOGI(TAG, "KB select word: '%s'", w);
+        keyboard_sync_to_input();
+        return;
+    }
     const char *last = kb_last_word();
     int last_start = last - s_kb_input;
     int plen = strlen(last);
@@ -3306,33 +3727,61 @@ static void dl_speed_reset(int64_t total) {
     s_dl_speed_kbps = 0;
 }
 static void dl_speed_fmt(int pct, char *out, size_t n) {
-    /* 2026-10-07 窗口内缓存:小条与弹窗每步都调用本函数,若每次调用都重置
-       窗口/字节基准,两个调用者互相抢窗口 → 速度恒 0(展开弹窗"速度停止"的另一半原因)。
-       改为 1 秒窗口内首个调用计算并缓存,其余调用复用缓存值 */
+    /* 2026-10-26 改 5 秒滑动窗口:原窗口=两次调用间隔(bundle 下载/写卡
+       交替,瞬时采样撞写卡期显示 0-85KB/s,实际吞吐 300KB/s+,用户误判
+       "下载降到 50KB")。5 秒平均覆盖下载+写卡完整周期,反映真实吞吐 */
+    static int64_t s_dl_win_start = 0, s_dl_win_bytes = 0;
     int64_t now = esp_timer_get_time();
-    if (s_dl_speed_ts > 0 && now > s_dl_speed_ts) {
-        int64_t bytes = g_dl_bytes_done - s_dl_speed_last_bytes;
-        s_dl_speed_kbps = (int)(bytes * 1000000 / (now - s_dl_speed_ts) / 1024);
+    if (s_dl_win_start == 0) {
+        s_dl_win_start = now;
+        s_dl_win_bytes = g_dl_bytes_done;
+    }
+    int64_t win = now - s_dl_win_start;
+    if (win >= 5000000) {
+        int64_t bytes = g_dl_bytes_done - s_dl_win_bytes;
+        s_dl_speed_kbps = (int)(bytes * 1000000 / win / 1024);
         if (s_dl_speed_kbps < 0) s_dl_speed_kbps = 0;
-        s_dl_speed_ts = now;
-        s_dl_speed_last_bytes = g_dl_bytes_done;
+        s_dl_win_start = now;
+        s_dl_win_bytes = g_dl_bytes_done;
         /* 2026-10-07 速度入日志(用户要求:进度条不显示时可从串口判断) */
-        if (s_dl_speed_kbps > 0) ESP_LOGI(TAG, "dl speed: %d%% %dKB/s", pct, s_dl_speed_kbps);
-    } else if (s_dl_speed_ts == 0) {
-        s_dl_speed_ts = now;   // 首帧只建窗口
+        if (s_dl_speed_kbps > 0) ESP_LOGI(TAG, "dl speed: %d%% %dKB/s(5s均值)", pct, s_dl_speed_kbps);
     }
     /* 2026-10-06 -Werror=format-truncation 可证安全写法:
        n>=28 才拼速度(最坏 27 字节),否则退化为纯百分比。
        2026-10-07 窗口建立后无条件拼速度(可为 0KB/s):停滞可见 */
-    if (s_dl_speed_ts > 0 && n >= 28) snprintf(out, n, "%d%% %dKB/s", pct, s_dl_speed_kbps);
+    if (s_dl_win_start > 0 && n >= 28) snprintf(out, n, "%d%% %dKB/s", pct, s_dl_speed_kbps);
     else snprintf(out, n, "%d%%", pct);
 }
 static lv_obj_t *s_pp_popup = NULL, *s_pp_title = NULL, *s_pp_bar = NULL; // 前台进度弹窗(lv_layer_top)
 static lv_obj_t *s_pp_speed = NULL; // 2026-10-07 弹窗内速度标签(展开弹窗也能看速度)
 static lv_obj_t *s_pp_mini = NULL, *s_pp_mini_bar = NULL, *s_pp_mini_lbl = NULL; // 顶部小条
+static RoleDlPageInfo s_dl_pg;   // 2026-10-25 块号/总块数(下载核心经 ud 逐页填充)
+/* 2026-10-25 懒下载默认集:全部立绘(皮肤数因角色而异,按 manifest 全部收)
+   + 立牌 + 根文件 manifest.json;成功后写 cover/standee 模块标记 */
+static const std::vector<std::string> kDlDefaultPfx = {"cover/", "standee/", "manifest.json"};
+static const std::vector<std::string> kDlDefaultTags = {"cover", "standee"};
 static void pp_popup_show(void);     // 前台进度弹窗(含[后台下载][取消下载])
 static void pp_mini_show(void);      // 顶部小条(点击展开回弹窗)
 static void pp_hide_all(void);       // 关闭进度弹窗+小条
+
+/* 2026-10-25 下载进度标题:第N/M块 + 阶段(下载中/正在写卡)+ 文件名。
+   用户需求:进度条保留页内百分比,但要提示块号;96-100% 停顿时(写卡
+   阶段 pct<0)明确显示"正在写卡",小条同步改"写卡中"防看起来卡死 */
+static void pp_progress_title(int pct, const char *file) {
+    if (!s_pp_title || !lv_obj_is_valid(s_pp_title)) return;
+    const char *phase = (pct < 0) ? "正在写卡" : "下载中";
+    if (s_dl_pg.pages > 1) {
+        if (file) lv_label_set_text_fmt(s_pp_title, "第%d/%d块 %s…\n%.40s",
+                                        s_dl_pg.page, s_dl_pg.pages, phase, file);
+        else      lv_label_set_text_fmt(s_pp_title, "第%d/%d块 %s…",
+                                        s_dl_pg.page, s_dl_pg.pages, phase);
+    } else {
+        if (file) lv_label_set_text_fmt(s_pp_title, "%s…\n%.40s", phase, file);
+        else      lv_label_set_text_fmt(s_pp_title, "%s…", phase);
+    }
+    if (pct < 0 && s_pp_mini_lbl && lv_obj_is_valid(s_pp_mini_lbl))
+        lv_label_set_text(s_pp_mini_lbl, "写卡中…");
+}
 static void dl_lock_buttons(bool lock);   // 下载期间禁用侧边按钮列,完成自动解锁
 static void index_dl_popup_show(int ai, int mode, int64_t total);   // 前向声明(确认回调引用)
 static void index_check_task(void *arg);   // 有立绘无 .done:核对云端清单
@@ -3369,6 +3818,10 @@ static bool agent_has_done(const char *agent_path) {
  * 词表未就绪(离线/首次开机)时兜底扫本地 /sdcard/_users/u<数字>。 */
 static int scan_bound_user_uid(void) {
     int uid = Application::GetInstance().bound_user_uid();
+    if (uid > 0) return uid;
+    /* 2026-10-25 NVS 持久化兜底(SetBoundUserUid 写入;词表延迟时
+       重启后也能立刻拿到 uid,不再等词表) */
+    uid = Settings("wakewords", false).GetInt("bound_uid", 0);
     if (uid > 0) return uid;
     DIR *d = opendir("/sdcard/_users");
     if (!d) return 0;
@@ -3517,6 +3970,9 @@ static void thumb_fail_log(const char *why, int idx, const char *path) {
 }
 
 static lv_img_dsc_t* load_jpg_thumbnail_ex(const char *path, int idx, jpeg_decoder_handle_t handle) {
+    /* 2026-10-25 与 PPA SRM 串行:直写播放期间缩略图解码(他核)与 SRM 段并发
+       抢 2D-DMA 通道 → 通道悬挂 → dma2d_connect 死转 panic。解码前排空 */
+    if (s_pd_direct) pd_ppa_wait_idle();
     char fs_path[300];
     snprintf(fs_path, sizeof(fs_path), "/sdcard%s", path + 2);
     FILE *fp = fopen(fs_path, "rb");
@@ -3921,6 +4377,13 @@ static void index_hint_update(void) {
 void agent_index_show(void) {
     if (s_index_page) { agent_index_hide(); return; }
 
+    /* 2026-10-22 索引页(角色选择)不是对话模式:挂起唤醒词,防此页说话
+       触发唤醒抢流程(雷达页同理);退出时检测由 cover 流程统一恢复。
+       2026-10-23 修复:仅在检测运行中才挂起——未初始化(词表前)调用 Stop
+       会阻塞主流程(启动卡死在索引页) */
+    if (Application::GetInstance().GetAudioService().IsWakeWordRunning())
+        Application::GetInstance().GetAudioService().EnableWakeWordDetection(false);
+
     bg_music_stop();   /* 2026-10-04 开机音乐(生命流)播到配网结束、进入选择角色页面的这一刻即停 */
 
     s_index_building = true;
@@ -4170,10 +4633,29 @@ void agent_index_show(void) {
     }
 
     // ── 页码指示器（2026-10-06 左移避让右上角电量胶囊 [374,474]×[2,34]）──
+    // 交友雷达入口(2026-10-22 用户拍板:角色页右上角直达,不必进角色)
+    {
+        lv_obj_t *rb = lv_btn_create(bar);
+        lv_obj_set_size(rb, 60, 30);
+        lv_obj_align(rb, LV_ALIGN_RIGHT_MID, -112, 0);   /* 电量胶囊宽 100 在右上,左移到其左侧 */
+        lv_obj_set_style_bg_color(rb, lv_color_hex(0x0a3a0a), 0);
+        lv_obj_set_style_radius(rb, 6, 0);
+        lv_obj_set_style_border_width(rb, 1, 0);
+        lv_obj_set_style_border_color(rb, lv_color_hex(0x07E0), 0);
+        lv_obj_t *rl2 = lv_label_create(rb);
+        lv_label_set_text(rl2, "雷达");
+        lv_obj_set_style_text_color(rl2, lv_color_hex(0x4dff6a), 0);
+        lv_obj_set_style_text_font(rl2, s_chat_font, 0);
+        lv_obj_center(rl2);
+        lv_obj_add_event_cb(rb, [](lv_event_t *e) {
+            radar_ui_show();
+        }, LV_EVENT_CLICKED, NULL);
+    }
+
     s_index_pg_label = lv_label_create(bar);
     lv_obj_set_style_text_color(s_index_pg_label, lv_color_hex(0x888888), 0);
     lv_obj_set_style_text_font(s_index_pg_label, s_chat_font, 0);
-    lv_obj_align(s_index_pg_label, LV_ALIGN_RIGHT_MID, -120, 0);
+    lv_obj_align(s_index_pg_label, LV_ALIGN_RIGHT_MID, -68, 0);   /* 2026-10-22 左移给雷达按钮让位 */
 
     // ── 底部"切换立绘"确认按钮（两段式：点卡片选中后出现）──
     s_confirm_btn = lv_btn_create(page);
@@ -4300,7 +4782,27 @@ static void index_dl_probe_task(void *arg) {
     if (s_dl_user_uid > 0 && s_dl_user_rel[0]) {
         user_total = role_download_probe_user(s_dl_user_uid, s_dl_user_rel);
     } else {
-        user_unbound = true;
+        /* 2026-10-25 竞态修复:update check 异步未完成时 uid/rel 尚空,
+           快速点击卡片会误走"未克隆"。现场从绑定信息构造 rel 重探;
+           uid 仍为 0(词表还没拉到)时同步拉词表接口兜底取 uid */
+        int uid2 = scan_bound_user_uid();
+        if (uid2 <= 0) {
+            extern int role_download_bound_uid_now(void);
+            uid2 = role_download_bound_uid_now();
+            if (uid2 > 0) Application::GetInstance().SetBoundUserUid(uid2);
+        }
+        if (uid2 > 0 && s_dl_voc[0] && s_dl_name[0]) {
+            char rel2[160];
+            snprintf(rel2, sizeof(rel2), "Arknights/main/operator/%s/%s/%s",
+                     s_dl_voc, s_dl_star, s_dl_name);
+            user_total = role_download_probe_user(uid2, rel2);
+            if (user_total >= 0) {
+                s_dl_user_uid = uid2;
+                snprintf(s_dl_user_rel, sizeof(s_dl_user_rel), "%s", rel2);
+            }
+        } else {
+            user_unbound = true;
+        }
     }
     if (user_total == -2) {
         pub_total = role_download_probe(s_dl_voc, s_dl_star, s_dl_name);
@@ -4309,16 +4811,32 @@ static void index_dl_probe_task(void *arg) {
     if (!s_dl_popup) { lvgl_port_unlock(); vTaskDelete(NULL); return; }  // 用户已离开索引页
     if (user_total >= 0) {
         s_dl_user_mode = true;
-        int mins = role_download_estimate_minutes(user_total);
-        char buf[64];
-        s_dl_state = 0;   // 确认下载(用户仓库)
-        lv_label_set_text(s_dl_title, "该角色未缓存");
-        snprintf(buf, sizeof(buf), "预计约 %d 分钟", mins);
-        lv_label_set_text(s_dl_sub, buf);
-        lv_label_set_text(s_dl_yes_lbl, "下载完整资源");
-        lv_obj_remove_flag(s_dl_yes, LV_OBJ_FLAG_HIDDEN);
-        lv_label_set_text(s_dl_no_lbl, "取消选中");
-        lv_obj_remove_flag(s_dl_no, LV_OBJ_FLAG_HIDDEN);
+        if (s_dl_mode == 1) {
+            /* 2026-10-21 第二档 + 已克隆:保留"继续展示/下载完整资源" */
+            s_dl_state = 3;
+            lv_label_set_text(s_dl_title, "该角色立绘可用,\n其他资源不完整");
+            if (user_total > 0) {
+                int mins = role_download_estimate_minutes(user_total);
+                char buf[64];
+                snprintf(buf, sizeof(buf), "下载完整资源预计约 %d 分钟", mins);
+                lv_label_set_text(s_dl_sub, buf);
+            }
+            lv_label_set_text(s_dl_yes_lbl, "继续展示");
+            lv_obj_remove_flag(s_dl_yes, LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text(s_dl_no_lbl, "下载完整资源");
+            lv_obj_remove_flag(s_dl_no, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            int mins = role_download_estimate_minutes(user_total);
+            char buf[64];
+            s_dl_state = 0;   // 确认下载(用户仓库)
+            lv_label_set_text(s_dl_title, "该角色未缓存");
+            snprintf(buf, sizeof(buf), "预计约 %d 分钟", mins);
+            lv_label_set_text(s_dl_sub, buf);
+            lv_label_set_text(s_dl_yes_lbl, "下载完整资源");
+            lv_obj_remove_flag(s_dl_yes, LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text(s_dl_no_lbl, "取消选中");
+            lv_obj_remove_flag(s_dl_no, LV_OBJ_FLAG_HIDDEN);
+        }
     } else if (user_total == -2 && pub_total >= 0) {
         // 2026-09-30 方案B(用户拍板):设备端不再自助克隆,仅提示到网页/后台克隆
         s_dl_state = 6;   // 未克隆:仅提示(无克隆按钮)
@@ -4451,6 +4969,10 @@ static void pp_popup_show(void) {
         /* 2026-10-07 防点击穿透:弹窗刚创建 800ms 内的点击视为穿透忽略 */
         if (esp_timer_get_time() - s_pp_popup_ts < 800000) return;
         s_dl_cancel = true;   // 下载任务回调检测后中止;收尾恢复锁
+        /* 2026-10-25 乐观关闭:取消后立即隐藏弹窗+小条(曾出现取消后
+           弹窗卡前台不消失;下载任务在后台走 cancelled 收尾,重复
+           pp_hide_all 无害) */
+        pp_hide_all();
     }, LV_EVENT_CLICKED, NULL);
     lv_obj_move_foreground(s_pp_popup);
 }
@@ -4487,13 +5009,67 @@ static void pp_mini_show(void) {
     lv_obj_move_foreground(s_pp_mini);
 }
 
+/* 2026-10-21 下载前统一准备:探测用户仓库并设置 s_dl_user_mode。
+   返回 false = 不可用(未克隆/未绑定),已弹提示,调用方应中止下载。
+   公共库只是克隆源不是下载源;未克隆提示到网页后台克隆(9-30 方案B)。 */
+static void dl_show_clone_tip(void) {
+    lv_obj_t *tip = lv_label_create(lv_layer_top());
+    lv_label_set_text(tip, "该角色尚未克隆到您的私人仓库,\n请前往网站后台【仓库】克隆后下载");
+    lv_obj_set_style_bg_color(tip, lv_color_hex(0x222222), 0);
+    lv_obj_set_style_bg_opa(tip, LV_OPA_90, 0);
+    lv_obj_set_style_text_color(tip, lv_color_white(), 0);
+    lv_obj_set_style_text_font(tip, s_chat_font, 0);
+    lv_obj_set_style_text_align(tip, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_pad_all(tip, 16, 0);
+    lv_obj_set_style_radius(tip, 12, 0);
+    lv_obj_center(tip);
+    lv_obj_move_foreground(tip);
+    xTaskCreate([](void *p) {
+        vTaskDelay(pdMS_TO_TICKS(4000));
+        if (lvgl_port_lock(pdMS_TO_TICKS(1000))) {
+            if (lv_obj_is_valid((lv_obj_t *)p)) lv_obj_del((lv_obj_t *)p);
+            lvgl_port_unlock();
+        }
+        vTaskDelete(NULL);
+    }, "clone_need_tip", 4096, tip, 5, NULL);
+}
+
+static bool dl_prepare_user_mode(void) {
+    if (s_dl_user_mode) return true;
+    if (s_dl_user_uid > 0 && s_dl_user_rel[0]) {
+        int64_t ut = role_download_probe_user(s_dl_user_uid, s_dl_user_rel);
+        if (ut >= 0) {
+            s_dl_user_mode = true;
+            ESP_LOGI(TAG, "dl: 用户仓库可用(%ld KB),走 user 模式下载", (long)(ut / 1024));
+            return true;
+        }
+        ESP_LOGW(TAG, "dl: 用户仓库不可用(probe=%ld),拒绝下载(需先克隆)", (long)ut);
+    } else {
+        ESP_LOGW(TAG, "dl: 无绑定用户/无 rel,拒绝下载");
+    }
+    dl_show_clone_tip();
+    return false;
+}
+
 static void index_dl_start(void) {
+    /* 2026-10-21 下载模式统一探测(第三档/第二档/更新弹窗都走这里或
+       更新按钮内联调用);不可用 → 提示克隆并中止 */
+    if (!dl_prepare_user_mode()) {
+        if (s_dl_popup) {
+            lv_obj_del(s_dl_popup);
+            s_dl_popup = s_dl_title = s_dl_sub = s_dl_bar = s_dl_yes = s_dl_yes_lbl = s_dl_no = s_dl_no_lbl = NULL;
+        }
+        return;
+    }
     /* 关确认弹窗 → 统一进度弹窗 + 锁定页面 → 起下载任务 */
     if (s_dl_popup) {
         lv_obj_del(s_dl_popup);
         s_dl_popup = s_dl_title = s_dl_sub = s_dl_bar = s_dl_yes = s_dl_yes_lbl = s_dl_no = s_dl_no_lbl = NULL;
     }
     s_dl_cancel = false;
+    /* 2026-10-25 等旧任务真正结束(取消传播需要时间):避免"已有下载
+       任务进行中,忽略新请求" */
+    role_download_wait_idle(8000);
     pp_popup_show();
     dl_lock_buttons(true);
     video_playback_stop();   /* 2026-10-07 下载优先:暂停封面播放(30FPS JPEG 解码
@@ -4619,20 +5195,15 @@ static void index_dl_popup_show(int ai, int mode, int64_t total) {
         }
     }, LV_EVENT_CLICKED, NULL);
 
-    if (mode == 1) {
-        /* 第二档:有立绘,其他资源不完整(check 任务已 probe,total 有效) */
-        s_dl_state = 3;
-        lv_label_set_text(s_dl_title, "该角色立绘可用,\n其他资源不完整");
-        if (total > 0) {
-            int mins = role_download_estimate_minutes(total);
-            char buf[64];
-            snprintf(buf, sizeof(buf), "下载完整资源预计约 %d 分钟", mins);
-            lv_label_set_text(s_dl_sub, buf);
-        }
-        lv_label_set_text(s_dl_yes_lbl, "继续展示");
-        lv_obj_remove_flag(s_dl_yes, LV_OBJ_FLAG_HIDDEN);
-        lv_label_set_text(s_dl_no_lbl, "下载完整资源");
-        lv_obj_remove_flag(s_dl_no, LV_OBJ_FLAG_HIDDEN);
+    if (s_dl_mode == 1) {
+        /* 2026-10-21 第二档也先探测用户仓库:未克隆(-2)→ probe 任务显示
+           "尚未克隆"提示(9-30 方案B);已克隆 → 保留第二档界面。
+           禁止未克隆直接下载(公共库只是克隆源,不是下载源) */
+        s_dl_state = 2;
+        lv_label_set_text(s_dl_title, "正在检查角色…");
+        lv_obj_add_flag(s_dl_yes, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_dl_no, LV_OBJ_FLAG_HIDDEN);
+        xTaskCreate(index_dl_probe_task, "dl_probe", 10240, NULL, 5, NULL);
     } else {
         /* 第三档:无立绘 → 检查后给下载/取消 */
         s_dl_state = 2;
@@ -4653,8 +5224,8 @@ static void index_check_task(void *arg) {
     int uid = scan_bound_user_uid();
     char rel[160];
     snprintf(rel, sizeof(rel), "Arknights/main/operator/%s/%s/%s", voc, star, s_agents[ai].name);
-    int r = (uid > 0) ? role_download_check_user(uid, rel, &total) : -1;
-    ESP_LOGI(TAG, "dl check: %s r=%d(0=部分缺失 -1=网络失败 -2=云端无包 1=齐全)",
+    int r = (uid > 0) ? role_download_check_user_set(uid, rel, kDlDefaultPfx, &total) : -1;
+    ESP_LOGI(TAG, "dl check: %s r=%d(0=默认集缺失 -1=网络失败 -2=云端无包 1=默认集齐全)",
              s_agents[ai].name, r);
     /* 弹窗/切换需要 LVGL 锁;曾单次 2 秒拿不到锁直接放弃(用户点确认后无反应)——改循环等 15s */
     bool got = false;
@@ -4716,6 +5287,10 @@ static void index_update_check_task(void *arg) {
         int uid = scan_bound_user_uid();
         char rel[160];
         snprintf(rel, sizeof(rel), "Arknights/main/operator/%s/%s/%s", voc, star, name);
+        /* 2026-10-21 存全局:更新弹窗的下载按钮探测用户仓库用 */
+        s_dl_user_uid = uid;
+        snprintf(s_dl_user_rel, sizeof(s_dl_user_rel), "%s", rel);
+        s_dl_user_mode = false;
         if (uid > 0) {
             r = role_download_check_user(uid, rel, &total);
             ESP_LOGI(TAG, "update check(user repo): %s r=%d(0=有更新 -1=网络失败 -2=云端无包 1=齐全)",
@@ -4799,6 +5374,7 @@ static void index_update_popup_show(const char* name, const char* voc, const cha
     lv_obj_center(yes_lbl);
     lv_obj_add_event_cb(yes_btn, [](lv_event_t* e) {
         /* 前台下载:进度弹窗 + 锁定页面 + 暂停封面(下载优先) */
+        if (!dl_prepare_user_mode()) return;   /* 2026-10-21 未克隆 → 提示并中止 */
         if (s_upd_popup) { lv_obj_del(s_upd_popup); s_upd_popup = NULL; }
         s_dl_cancel = false;
         pp_popup_show();
@@ -4823,6 +5399,7 @@ static void index_update_popup_show(const char* name, const char* voc, const cha
         /* 后台下载:顶部小条 + 锁定页面。2026-10-07 不再切立绘(重载 cover
            抢 PSRAM/CPU 拖慢下载,实测 20KB/s),并暂停封面播放(下载优先);
            下载完成收尾自动进新立绘 */
+        if (!dl_prepare_user_mode()) return;   /* 2026-10-21 未克隆 → 提示并中止 */
         if (s_upd_popup) { lv_obj_del(s_upd_popup); s_upd_popup = NULL; }
         pp_mini_show();
         dl_lock_buttons(true);
@@ -4852,7 +5429,225 @@ static void index_update_popup_show(const char* name, const char* voc, const cha
     lv_obj_move_foreground(s_upd_popup);
 }
 
+/* ── 2026-10-25 懒下载:模块按需下载(PPD/PPD_Q基座/voice) ──
+   兜底原则:任何模块缺失都只弹提示/提示语,绝不加载缺失文件、绝不蓝屏;
+   下载成功后自动进入原功能。 */
+static int s_mod_kind = -1;          /* 0=ppd 1=ppdq 2=voice;-1=未激活 */
+static char s_mod_rel[160] = {0};
+static int s_mod_uid = 0;
+static lv_obj_t *s_mod_popup = NULL;
+
+static void module_fetch_task(void *arg);
+static void pdq_interaction_start(void);   /* 前向声明(定义在横屏 Q 版入口) */
+
+static void module_popup_show(int kind) {
+    if (!s_agent_path[0]) return;
+    if (s_mod_popup) { lv_obj_del(s_mod_popup); s_mod_popup = NULL; }
+    const char *title, *desc;
+    if (kind == 0)      { title = "纸偶互动数据未下载"; desc = "下载后即可互动(约 8MB),\n是否现在下载?"; }
+    else if (kind == 1) { title = "Q版互动数据未下载"; desc = "下载 Q 版基座+默认形态(约 28MB),\n是否现在下载?"; }
+    else                { title = "语音数据未下载"; desc = "下载语音记录(约 18MB),\n是否现在下载?"; }
+    s_mod_popup = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(s_mod_popup, 320, 180);
+    lv_obj_center(s_mod_popup);
+    lv_obj_set_style_bg_color(s_mod_popup, lv_color_hex(0x222222), 0);
+    lv_obj_set_style_bg_opa(s_mod_popup, LV_OPA_90, 0);
+    lv_obj_set_style_radius(s_mod_popup, 10, 0);
+    lv_obj_set_style_border_width(s_mod_popup, 0, 0);
+    lv_obj_set_style_pad_all(s_mod_popup, 10, 0);
+    lv_obj_t *tl = lv_label_create(s_mod_popup);
+    lv_label_set_text(tl, title);
+    lv_obj_set_style_text_color(tl, lv_color_white(), 0);
+    lv_obj_set_style_text_font(tl, s_chat_font, 0);
+    lv_obj_align(tl, LV_ALIGN_TOP_MID, 0, 16);
+    lv_obj_t *dl = lv_label_create(s_mod_popup);
+    lv_label_set_text(dl, desc);
+    lv_obj_set_style_text_color(dl, lv_color_hex(0xcccccc), 0);
+    lv_obj_set_style_text_font(dl, s_chat_font, 0);
+    lv_obj_set_style_text_align(dl, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(dl, LV_ALIGN_TOP_MID, 0, 56);
+    lv_obj_t* yes_btn = lv_btn_create(s_mod_popup);
+    lv_obj_set_size(yes_btn, 120, 34);
+    lv_obj_align(yes_btn, LV_ALIGN_BOTTOM_LEFT, 24, -14);
+    lv_obj_set_style_bg_color(yes_btn, lv_color_hex(0x2b6cb0), 0);
+    lv_obj_set_style_radius(yes_btn, 6, 0);
+    lv_obj_set_style_border_width(yes_btn, 0, 0);
+    lv_obj_t* yes_lbl = lv_label_create(yes_btn);
+    lv_label_set_text(yes_lbl, "下载");
+    lv_obj_set_style_text_color(yes_lbl, lv_color_white(), 0);
+    lv_obj_set_style_text_font(yes_lbl, s_chat_font, 0);
+    lv_obj_center(yes_lbl);
+    lv_obj_add_event_cb(yes_btn, [](lv_event_t* e) {
+        int kind = s_mod_kind;
+        if (s_mod_popup) { lv_obj_del(s_mod_popup); s_mod_popup = NULL; }
+        /* 已有下载在跑(PPD 预取等):提示稍候,不叠第二个下载 */
+        if (role_download_busy()) {
+            ui_toast("已有下载进行中,请稍候");
+            return;
+        }
+        s_mod_kind = kind;
+        s_mod_uid = scan_bound_user_uid();
+        if (s_mod_uid <= 0) s_mod_uid = Application::GetInstance().bound_user_uid();
+        /* 去 "/sdcard/" 前缀(%.*s 精度防 -Werror=format-truncation) */
+        snprintf(s_mod_rel, sizeof(s_mod_rel), "%.*s", (int)(sizeof(s_mod_rel) - 1), s_agent_path + 8);
+        s_dl_cancel = false;
+        pp_popup_show();
+        dl_lock_buttons(true);
+        video_playback_stop();   // 2026-10-07 下载优先(恢复在 fetch 收尾)
+        ppa_release_expendable_caches();
+        xTaskCreate(module_fetch_task, "mod_dl", 16384, NULL, 5, NULL);
+    }, LV_EVENT_CLICKED, NULL);
+    lv_obj_t* no_btn = lv_btn_create(s_mod_popup);
+    lv_obj_set_size(no_btn, 120, 34);
+    lv_obj_align(no_btn, LV_ALIGN_BOTTOM_RIGHT, -24, -14);
+    lv_obj_set_style_bg_color(no_btn, lv_color_hex(0x555555), 0);
+    lv_obj_set_style_radius(no_btn, 6, 0);
+    lv_obj_set_style_border_width(no_btn, 0, 0);
+    lv_obj_t* no_lbl = lv_label_create(no_btn);
+    lv_label_set_text(no_lbl, "取消");
+    lv_obj_set_style_text_color(no_lbl, lv_color_white(), 0);
+    lv_obj_set_style_text_font(no_lbl, s_chat_font, 0);
+    lv_obj_center(no_lbl);
+    lv_obj_add_event_cb(no_btn, [](lv_event_t* e) {
+        if (s_mod_popup) { lv_obj_del(s_mod_popup); s_mod_popup = NULL; }
+    }, LV_EVENT_CLICKED, NULL);
+    lv_obj_move_foreground(s_mod_popup);
+}
+
+/* 模块入口通用守卫:标记就绪 → true;缺失 → 弹提示(返回 false 不进入) */
+static bool module_gate(int kind, const char *tag) {
+    if (!s_agent_path[0]) return false;
+    char rel[160];
+    /* 去 "/sdcard/" 前缀(%.*s 精度防 -Werror=format-truncation) */
+    snprintf(rel, sizeof(rel), "%.*s", (int)(sizeof(rel) - 1), s_agent_path + 8);
+    int uid = scan_bound_user_uid();
+    if (uid <= 0) uid = Application::GetInstance().bound_user_uid();
+    if (uid > 0 && role_download_module_ready(uid, rel, tag)) return true;
+    /* 预取/下载进行中:提示稍候,不弹重复下载框 */
+    if (role_download_busy()) {
+        ui_toast("数据下载中,请稍候…");
+        return false;
+    }
+    s_mod_kind = kind;
+    module_popup_show(kind);
+    return false;
+}
+
+static void module_fetch_task(void *arg) {
+    int kind = s_mod_kind;
+    if (s_mod_uid <= 0 || !s_mod_rel[0]) { vTaskDelete(NULL); return; }
+    Application::GetInstance().GetAudioService().EnableWakeWordDetection(false);
+    extern void wifi_power_save_off(void);
+    wifi_power_save_off();
+    s_dl_pg = RoleDlPageInfo();
+    role_download_wait_idle(8000);   /* 预取刚结束等它释放互斥 */
+    auto step_cb = [](int pct, const char *file, void *ud) -> bool {
+        if (s_dl_cancel) return false;
+        if (!lvgl_port_lock(pdMS_TO_TICKS(100))) return true;
+        if (pct >= 0) {
+            if (s_pp_bar && lv_obj_is_valid(s_pp_bar))
+                lv_bar_set_value(s_pp_bar, pct, LV_ANIM_OFF);
+            if (s_pp_mini_bar && lv_obj_is_valid(s_pp_mini_bar))
+                lv_bar_set_value(s_pp_mini_bar, pct, LV_ANIM_OFF);
+            if (s_pp_mini_lbl && lv_obj_is_valid(s_pp_mini_lbl)) {
+                char pb[32];
+                dl_speed_fmt(pct, pb, sizeof(pb));
+                lv_label_set_text(s_pp_mini_lbl, pb);
+            }
+            if (s_pp_speed && lv_obj_is_valid(s_pp_speed)) {
+                char sp[32];
+                dl_speed_fmt(pct, sp, sizeof(sp));
+                lv_label_set_text(s_pp_speed, sp);
+            }
+        }
+        pp_progress_title(pct, file);
+        lvgl_port_unlock();
+        return true;
+    };
+    int r;
+    if (kind == 0)
+        r = role_download_fetch_user_set(s_mod_uid, s_mod_rel,
+                                         std::vector<std::string>{"PPD/"},
+                                         std::vector<std::string>{"ppd"},
+                                         step_cb, &s_dl_pg);
+    else if (kind == 1)
+        r = role_download_fetch_user_qbase(s_mod_uid, s_mod_rel, step_cb, &s_dl_pg);
+    else
+        r = role_download_fetch_user_set(s_mod_uid, s_mod_rel,
+                                         std::vector<std::string>{"voice/"},
+                                         std::vector<std::string>{"voice"},
+                                         step_cb, &s_dl_pg);
+    Application::GetInstance().GetAudioService().EnableWakeWordDetection(true);
+    if (lvgl_port_lock(pdMS_TO_TICKS(5000))) {
+        pp_hide_all();
+        dl_lock_buttons(false);
+        if (r == 0) {
+            ESP_LOGI(TAG, "模块下载成功 kind=%d,进入原功能", kind);
+            if (kind == 0) pd_interaction_start();
+            else if (kind == 1) pdq_interaction_start();
+            else voice_ui_show();
+        } else if (r == 2) {
+            ESP_LOGI(TAG, "模块下载已取消 kind=%d", kind);
+            video_playback_start(30);
+        } else {
+            ESP_LOGW(TAG, "模块下载失败 kind=%d r=%d", kind, r);
+            video_playback_start(30);
+            ui_toast("下载失败,请检查网络\n(已下载部分已保留)");
+        }
+        lvgl_port_unlock();
+    }
+    s_mod_kind = -1;
+    vTaskDelete(NULL);
+}
+
+/* PPD 后台静默预取(懒下载):立绘展示后低优先级补下 PPD,点按钮时大概率已就绪;
+   未就绪由 module_gate 弹提示兜底。成功/取消即停,失败 10s 后重试(≤6 次)。 */
+static void ppd_prefetch_launch(void) {
+    /* 2026-10-25 立牌掉帧排查:预取暂关(疑似与立牌解码抢 PSRAM/CPU/SD)。
+       确认掉帧原因后重新设计触发条件。PPD 按钮的 module_gate 兜底不变:
+       点按钮时若未下载会弹提示补下。 */
+    return;
+#if 0
+    int uid = s_dl_user_uid;
+    xTaskCreate([](void *p) {
+        vTaskDelay(pdMS_TO_TICKS(5000));   // 等立绘起播,避免抢网络
+        int uid = (int)(intptr_t)p;
+        if (uid <= 0 || !s_dl_user_rel[0]) { vTaskDelete(NULL); return; }
+        for (int tries = 0; tries < 6; tries++) {
+            if (role_download_busy()) { vTaskDelay(pdMS_TO_TICKS(5000)); continue; }
+            if (role_download_module_ready(uid, s_dl_user_rel, "ppd")) break;
+            extern void wifi_power_save_off(void);
+            wifi_power_save_off();
+            int r = role_download_fetch_user_set(uid, s_dl_user_rel,
+                                                 std::vector<std::string>{"PPD/"},
+                                                 std::vector<std::string>{"ppd"},
+                                                 nullptr, nullptr);
+            ESP_LOGI(TAG, "PPD 预取: r=%d", r);
+            if (r == 0 || r == 2) break;
+            vTaskDelay(pdMS_TO_TICKS(10000));
+        }
+        vTaskDelete(NULL);
+    }, "ppd_prefetch", 8192, (void*)(intptr_t)uid, 3, NULL);
+#endif
+}
+
+/* PPD 按钮入口(竖屏表达模式):懒下载守卫 */
+static void ppd_button_start(void) {
+    if (!module_gate(0, "ppd")) return;
+    s_pdq_mode = false;
+    if (s_lv2_interaction) lv2_interaction_stop();
+    pd_interaction_start();
+}
+
 static void index_dl_fetch_task(void *arg) {
+    /* 2026-10-21 下载期间挂起唤醒词:NN 推理(esp_sr conv2d)连续占 CPU 超 5s
+       曾饿死 IDLE0 → task_wdt panic(下载与检测抢 CPU 实测崩溃) */
+    Application::GetInstance().GetAudioService().EnableWakeWordDetection(false);
+    /* 2026-10-21 下载前重关 WiFi 省电:重连/长时间后 C6 侧省电恢复会把
+       吞吐压到 ~1Mbps(150KB/s);下载全程保持 PS_NONE */
+    extern void wifi_power_save_off(void);
+    wifi_power_save_off();
+    s_dl_pg = RoleDlPageInfo();   /* 2026-10-25 块号/总块数复位(下载核心逐页填充) */
     dl_speed_reset(s_upd_total);   /* 2026-10-07 更新下载也要速度统计(曾恒 0 不显示) */
     auto step_cb = [](int pct, const char *file, void *ud) -> bool {
         if (s_dl_cancel) return false;
@@ -4873,24 +5668,30 @@ static void index_dl_fetch_task(void *arg) {
                 lv_label_set_text(s_pp_speed, sp);
             }
         }
-        if (file && s_pp_title && lv_obj_is_valid(s_pp_title)) {
-            lv_label_set_text_fmt(s_pp_title, "下载中…\n%.40s", file);
-        }
+        pp_progress_title(pct, file);   /* 2026-10-25 第N/M块+阶段+文件名 */
         lvgl_port_unlock();
         return true;
     };
     int r;
     if (s_dl_user_mode) {
-        /* 用户仓库下载:Arknights 类落位统一路径 /sdcard/<rel>/(OC 仍落 _users) */
-        r = role_download_fetch_user(s_dl_user_uid, s_dl_user_rel, step_cb, nullptr);
+        /* 用户仓库下载:Arknights 类落位统一路径 /sdcard/<rel>/(OC 仍落 _users)。
+           2026-10-25 懒下载:默认集 = 立绘+立牌+根文件(PPD 由后台预取) */
+        r = role_download_fetch_user_set(s_dl_user_uid, s_dl_user_rel,
+                                         kDlDefaultPfx, kDlDefaultTags, step_cb, &s_dl_pg);
         if (strncmp(s_dl_user_rel, "Arknights/", 10) == 0)
             snprintf(s_dl_path, sizeof(s_dl_path), "/sdcard/%s", s_dl_user_rel);
         else
             snprintf(s_dl_path, sizeof(s_dl_path), "/sdcard/_users/u%d/%s",
                      s_dl_user_uid, s_dl_user_rel);
     } else {
-        r = role_download_fetch(s_dl_voc, s_dl_star, s_dl_name, step_cb, nullptr);
+        /* 2026-10-21 公共库不是下载源(仅克隆源):走到这里是状态异常,
+           按失败处理并提示(正常流程已在 index_dl_start 拦截) */
+        ESP_LOGE(TAG, "dl: s_dl_user_mode=false, 禁止公共库下载");
+        r = 1;
     }
+
+    /* 2026-10-21 下载结束:恢复唤醒词检测(下载期间挂起防 task_wdt) */
+    Application::GetInstance().GetAudioService().EnableWakeWordDetection(true);
 
     if (lvgl_port_lock(pdMS_TO_TICKS(5000))) {
         if (r == 0) {
@@ -4900,6 +5701,7 @@ static void index_dl_fetch_task(void *arg) {
             dl_lock_buttons(false);
             agent_index_hide();                    // 索引页已关时无害
             cover_display_start_async(s_dl_path);
+            ppd_prefetch_launch();   // 2026-10-25 懒下载:立绘展示后静默预取 PPD
         } else if (r == 1) {
             /* 失败:解锁 + 提示(.part 保留,下次续传);恢复封面播放(下载期暂停) */
             ESP_LOGE(TAG, "dl: %s 失败(.part 保留可续传)", s_dl_name);
@@ -4959,6 +5761,7 @@ static void index_clone_start(void) {
 }
 
 static void index_clone_fetch_task(void *arg) {
+    s_dl_pg = RoleDlPageInfo();   /* 2026-10-25 块号/总块数复位(下载核心逐页填充) */
     auto step_cb = [](int pct, const char *file, void *ud) -> bool {
         if (s_dl_cancel) return false;
         if (!lvgl_port_lock(pdMS_TO_TICKS(100))) return true;
@@ -4973,8 +5776,7 @@ static void index_clone_fetch_task(void *arg) {
                 lv_label_set_text(s_pp_mini_lbl, pb);
             }
         }
-        if (file && s_pp_title && lv_obj_is_valid(s_pp_title))
-            lv_label_set_text_fmt(s_pp_title, "下载中…\n%.40s", file);
+        pp_progress_title(pct, file);   /* 2026-10-25 第N/M块+阶段+文件名 */
         lvgl_port_unlock();
         return true;
     };
@@ -5023,7 +5825,8 @@ static void index_clone_fetch_task(void *arg) {
     }
 
     /* 2. 用户仓库下载(克隆后 manifest 实时可见) */
-    int r = role_download_fetch_user(s_dl_user_uid, s_dl_user_rel, step_cb, nullptr);
+    int r = role_download_fetch_user_set(s_dl_user_uid, s_dl_user_rel,
+                                         kDlDefaultPfx, kDlDefaultTags, step_cb, &s_dl_pg);
     snprintf(s_dl_path, sizeof(s_dl_path), "/sdcard/%s", s_dl_user_rel);
 
     /* 3. 收尾同 index_dl_fetch_task */
@@ -5034,6 +5837,7 @@ static void index_clone_fetch_task(void *arg) {
             dl_lock_buttons(false);
             agent_index_hide();
             cover_display_start_async(s_dl_path);
+            ppd_prefetch_launch();   // 2026-10-25 懒下载:克隆后同样静默预取 PPD
         } else if (r == 1) {
             ESP_LOGE(TAG, "clone+dl: %s 下载失败(.part 保留)", s_dl_name);
             pp_hide_all();
@@ -5335,9 +6139,8 @@ void chat_overlay_init(const lv_font_t *font) {
     ESP_LOGI(TAG, "PPD交互按钮已创建 (ptr=%p)", (void*)s_ppd_interact_btn);
     lv_obj_add_event_cb(s_ppd_interact_btn, [](lv_event_t *e) {
         if (!s_pd_interaction) {
-            s_pdq_mode = false;   // 竖屏入口：确保非 Q 版模式（stop 已复位，防御残留）
-            if (s_lv2_interaction) lv2_interaction_stop();   // 互斥：先关 Live2D 再开 PPD
-            pd_interaction_start();
+            ppd_button_start();   /* 2026-10-25 懒下载守卫(缺失弹提示,成功自动进入) */
+            if (!s_pd_interaction && !s_pd_starting) return;   /* 未进入(弹了下载提示) */
             lv_label_set_text(s_ppd_interact_lbl, "关闭PPD");
             lv_obj_set_style_bg_color(s_ppd_interact_btn, lv_color_hex(0x884444), 0);
             if (s_lv2_interact_btn) lv_obj_add_state(s_lv2_interact_btn, LV_STATE_DISABLED);  // 开 PPD 期间 Live2D 置灰
@@ -5880,6 +6683,21 @@ static bool lv2_agent_supported(const char* agent) {
 
 static void lv2_interaction_start(void) {
     if (s_lv2_interaction || s_lv2_starting) return;
+    /* 2026-10-26 兜底:与 pd_interaction_start 一致,进对话模式强制按当前
+       显示角色注册唤醒词(选角色链路可能断) */
+    Application::GetInstance().SwitchAgentByPath(s_agent_path);
+    /* 2026-10-25 唤醒词只在对话模式:Live2D 交互同样开检测 */
+    application_set_wake_word_detection(true);
+    /* 2026-10-26 唤醒指示点:对话模式显示,且重置为待机(与 PPD 入口一致) */
+    if (s_wake_dot && lv_obj_is_valid(s_wake_dot)) {
+        if (lvgl_port_lock(pdMS_TO_TICKS(100))) {
+            lv_obj_remove_flag(s_wake_dot, LV_OBJ_FLAG_HIDDEN);
+            if (s_wake_lbl && lv_obj_is_valid(s_wake_lbl))
+                lv_obj_remove_flag(s_wake_lbl, LV_OBJ_FLAG_HIDDEN);
+            lvgl_port_unlock();
+        }
+    }
+    application_wake_status_update(0);   /* 重置待机(灰) */
     // Auto-switch to correct character based on agent path
     extern char s_agent_path[256];
     int chr = -1;
@@ -6049,9 +6867,8 @@ static lv_obj_t* s_pd_name_lbl = NULL;
 static TaskHandle_t s_pd_task = NULL;
 static bool s_pd_running = false;
 static volatile bool s_pd_task_exited = false;   // pd_anim_task 退出确认(vTaskDelete 前置位;stop 轮询防竞态)
-static uint16_t* s_pd_fb[3] = {NULL, NULL, NULL};  // 480×800 RGB565：fb[0/1]=渲染双缓冲（防撕裂）
-                                                    // fb[2]=干净底图（PPA 每帧拷入，canvas 指向它——
-                                                    // LVGL 重绘 UI 矩形时读干净帧再叠半透明，不会自叠加）
+/* 2026-10-25 s_pd_fb/s_pd_direct/s_pd_panel_fb/s_pd_lcd 定义已上移至文件顶部
+   (立牌直写前向引用;C++ 静态变量声明即定义,不可重复) */
 static int s_pd_fb_idx = 0;
 static char s_pd_dirs[64][160];           // 角色目录完整路径(统一根 /sdcard/Arknights/main/operator/...,2026-09-10)
                                            // 上限 64:曾限 8,VANGUARD 等靠后职业凑满 8 个后永远扫不到
@@ -6064,13 +6881,12 @@ static volatile bool s_pd_throttle = false;   /* 2026-10-03 volatile:强制绝�
 // DMA 直写面板 fb，按钮列/画质按钮矩形跳过（保留 fb 上 LVGL 画的按钮像素，按钮不闪不遮）。
 // LVGL 只做按钮状态重绘：canvas 缓冲直接指向面板 fb，按钮矩形重绘时底图自洽（同址自拷）。
 // CPU 0 每帧零参与（PPA 是硬件 DMA），帧率 = 渲染 58ms + 2×msync ~4ms ≈ 16fps。
-static volatile bool s_pd_direct = false;     /* 2026-10-03 volatile 同上 */              // PPA 直写模式激活（panel fb 可用 + PPA 注册成功）
+// 2026-10-25 立牌直写复用本管线:s_pd_direct/s_pd_panel_fb/s_pd_fb/s_pd_lcd
+// 定义已上移至文件顶部(立牌任务前向引用)
 static ppa_client_handle_t s_pd_ppa_srm = NULL;
 static SemaphoreHandle_t s_pd_ppa_sem = NULL;
 static int s_pd_ppa_pending = 0;              // 已提交未完成的 DMA 段数（临界区保护跨 ISR 共享）
 static portMUX_TYPE s_pd_ppa_crit = portMUX_INITIALIZER_UNLOCKED;   // 保护 pending 计数（任务/ISR 双端更新）
-static uint16_t* s_pd_panel_fb = NULL;        // 面板 framebuffer（480×800 RGB565，PSRAM）
-static LcdDisplay* s_pd_lcd = NULL;           // 直写期间的 LcdDisplay 句柄（隐藏/恢复状态栏用）
 
 // 掩码保护区（不拷贝，保留 fb 上 LVGL 画的 UI 像素）：
 // 侧边按钮 110×35（设置5/菜单45/模式85/隐藏125/Live2D165/PPD205/键盘245，x 366-476）
@@ -6081,7 +6897,8 @@ static bool pd_ppa_trans_done_cb(ppa_client_handle_t client, ppa_event_data_t *e
     /* ISR 上下文：spinlock 临界区保护计数（提交侧 ++ 在任务上下文，丢更新会导致死等）。
        宏用 IDF 扩展名 portENTER_CRITICAL_ISR（带 mux 参数），非内核无参 task 版 */
     portENTER_CRITICAL_ISR(&s_pd_ppa_crit);
-    s_pd_ppa_pending--;
+    if (s_pd_ppa_pending > 0)   /* 2026-10-25 悬挂自愈清零后晚到的完成回调:防负数 */
+        s_pd_ppa_pending--;
     portEXIT_CRITICAL_ISR(&s_pd_ppa_crit);
     BaseType_t hp = pdFALSE;
     xSemaphoreGiveFromISR(s_pd_ppa_sem, &hp);
@@ -6106,36 +6923,16 @@ static bool pd_ppa_init(void) {
 }
 
 static void pd_ppa_wait_idle(void) {
-    while (s_pd_ppa_pending > 0) xSemaphoreTake(s_pd_ppa_sem, portMAX_DELAY);
+    /* 2026-10-26 CPU 拷贝上屏:无异步 DMA 事务,等待为空 */
 }
 
-// 一段矩形 SRM 拷贝（1:1 无旋转缩放，RGB565；异步提交，完成回调计数）
+// 一段矩形拷贝(2026-10-26 改 CPU memcpy:SRM 段提交与 2D-DMA 通道竞态
+//   悬挂 → dma2d_connect 死转 panic(高频复现,段合并仅降频不除根)。
+//   CPU 拷贝 ~15ms/帧(768KB),核心 1 帧预算 33ms 内,彻底绕开 2D-DMA)
 static void pd_ppa_copy_rect(uint16_t* src, uint16_t* dst, int x0, int y0, int x1, int y1) {
-    if (!s_pd_ppa_srm || !src || !dst || x0 >= x1 || y0 >= y1) return;
-    ppa_srm_oper_config_t cfg = {};
-    cfg.in.buffer = src;
-    cfg.in.pic_w = 480; cfg.in.pic_h = 800;
-    cfg.in.block_w = (uint32_t)(x1 - x0); cfg.in.block_h = (uint32_t)(y1 - y0);
-    cfg.in.block_offset_x = (uint32_t)x0; cfg.in.block_offset_y = (uint32_t)y0;
-    cfg.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
-    cfg.out.buffer = dst;
-    cfg.out.buffer_size = 480 * 800 * 2;
-    cfg.out.pic_w = 480; cfg.out.pic_h = 800;
-    cfg.out.block_offset_x = (uint32_t)x0; cfg.out.block_offset_y = (uint32_t)y0;
-    cfg.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
-    cfg.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
-    cfg.scale_x = 1.0f; cfg.scale_y = 1.0f;
-    cfg.mirror_x = false; cfg.mirror_y = false;
-    cfg.rgb_swap = false; cfg.byte_swap = false;
-    cfg.alpha_update_mode = PPA_ALPHA_NO_CHANGE;
-    cfg.mode = PPA_TRANS_MODE_NON_BLOCKING;
-    if (ppa_do_scale_rotate_mirror(s_pd_ppa_srm, &cfg) == ESP_OK) {
-        portENTER_CRITICAL(&s_pd_ppa_crit);
-        s_pd_ppa_pending++;
-        portEXIT_CRITICAL(&s_pd_ppa_crit);
-    } else {
-        ESP_LOGW("PD", "PPA SRM submit fail @(%d,%d)", x0, y0);
-    }
+    if (!src || !dst || x0 >= x1 || y0 >= y1) return;
+    for (int y = y0; y < y1; y++)
+        memcpy(dst + (size_t)y * 480 + x0, src + (size_t)y * 480 + x0, (size_t)(x1 - x0) * 2);
 }
 
 // 分块全屏拷贝：行带扫描，跳过保护矩形（UI 元素像素自保，其余区域每帧覆盖）
@@ -6145,6 +6942,7 @@ static void pd_ppa_present(uint16_t* src, uint16_t* dst) {
         /* 2026-10-02 右上角按钮列整体下移(Live2D 按钮已删),保护矩形同步 */
         {374, 0,   480, 34},    // 电量胶囊(2026-10-06 补全:胶囊实际 [374,474]×[2,34],
                                 // 曾只护 x≥396 → 左 22px/下 2px 每帧被直写覆盖 → 左/下边缘闪烁)
+        {306, 4,   376, 32},    // 唤醒状态指示(2026-10-26 点+文字整组,胶囊左侧)
         {366, 35,  476, 70},    // 设置
         {366, 75,  476, 110},   // 菜单
         {366, 115, 476, 150},   // 模式
@@ -6164,6 +6962,7 @@ static void pd_ppa_present(uint16_t* src, uint16_t* dst) {
     // 隐藏时不保护——否则直写跳过的区域纸偶画面冻结）
     static const protect_rect_t PROTECT_LANDSCAPE[] = {
         {448, 700, 480, 800},  // 电量胶囊(横屏 rot 900,视觉右上角=逻辑右下角,2026-10-06 用户拍板)
+        {396, 686, 460, 730},  // 唤醒状态指示(2026-10-26 点+文字横屏旋转整组)
         {155, 10, 190, 120},   // 设置
         {195, 10, 230, 120},   // 菜单
         {235, 10, 270, 120},   // 模式
@@ -6173,12 +6972,32 @@ static void pd_ppa_present(uint16_t* src, uint16_t* dst) {
         {395, 10, 430, 120},   // 形态切换(横屏 Q 版,顶部横条第 7 位)
         {0,   10, 480, 160},   // 动作列表面板（展开时顶部横条）
     };
-    protect_rect_t rects[14];
+    /* 2026-10-25 横屏立牌直写保护区:只护立牌实际存在的控件
+       (动作按钮/形态按钮/动作面板在立牌不存在——若照抄 Q 版列表,
+       整条顶部 y∈[10,160] 会冻结旧帧) */
+    static const protect_rect_t PROTECT_STANDEE[] = {
+        {448, 700, 480, 800},  // 电量胶囊(横屏 rot 900)
+        {396, 686, 460, 730},  // 唤醒状态指示(2026-10-26 点+文字横屏旋转整组)
+        {155, 10, 190, 120},   // 设置
+        {195, 10, 230, 120},   // 菜单
+        {235, 10, 270, 120},   // 模式
+        {275, 10, 310, 120},   // 横屏立牌
+        {315, 10, 350, 120},   // 显示/隐藏聊天框
+    };
+    protect_rect_t rects[18];   /* 2026-10-26 14→18:竖屏 12 静态 + 3 背景钮 + 余量 */
     int nr = 0;
     if (s_pdq_mode) {
         memcpy(rects, PROTECT_LANDSCAPE, sizeof(PROTECT_LANDSCAPE));
         nr = (int)(sizeof(PROTECT_LANDSCAPE) / sizeof(PROTECT_LANDSCAPE[0]));
         // 横屏侧边栏聊天框：可见时保护（竖帧 y 610-800 整块区域）
+        if (s_chat_landscape && s_chat_user_box &&
+            !lv_obj_has_flag(s_chat_user_box, LV_OBJ_FLAG_HIDDEN)) {
+            rects[nr++] = {275, 610, 480, 800};
+        }
+    } else if (s_standee_mode) {
+        memcpy(rects, PROTECT_STANDEE, sizeof(PROTECT_STANDEE));
+        nr = (int)(sizeof(PROTECT_STANDEE) / sizeof(PROTECT_STANDEE[0]));
+        // 横屏对话侧边栏:可见时保护(与 Q 版同区域)
         if (s_chat_landscape && s_chat_user_box &&
             !lv_obj_has_flag(s_chat_user_box, LV_OBJ_FLAG_HIDDEN)) {
             rects[nr++] = {275, 610, 480, 800};
@@ -6209,16 +7028,21 @@ static void pd_ppa_present(uint16_t* src, uint16_t* dst) {
             pd_ppa_copy_rect(src, s_pd_fb[2], PROTECT[i].x0, PROTECT[i].y0, PROTECT[i].x1, PROTECT[i].y1);
     }
     // 收集 y 边界并排序去重 → 行带
-    int ys[28]; int ny = 0;   // 2 + 2×N(N≤12) = 26 上限
+    int ys[36]; int ny = 0;   /* 2 + 2×N(竖屏 N≤16:11按钮+点+3背景钮) = 34 上限 */
     ys[ny++] = 0; ys[ny++] = 800;
     for (int i = 0; i < N; i++) { ys[ny++] = PROTECT[i].y0; ys[ny++] = PROTECT[i].y1; }
     for (int i = 0; i < ny; i++)
         for (int j = i + 1; j < ny; j++)
             if (ys[j] < ys[i]) { int t = ys[i]; ys[i] = ys[j]; ys[j] = t; }
-    int uniq[28]; int nu = 0;
+    int uniq[36]; int nu = 0;
     for (int i = 0; i < ny; i++)
         if (nu == 0 || ys[i] != uniq[nu - 1]) uniq[nu++] = ys[i];
     // 每带内：x 区间减去带内保护矩形 → 拷贝段
+    /* 2026-10-26 段合并:相邻行带的切分段集相同 → 合并 y 范围成一个大段。
+       SRM 提交数从 ~30 降到 ~10,减少 dma2d 通道重连次数
+       (悬挂 panic 的高频根因:每次提交都可能踩中驱动的通道竞态) */
+    int seg_x0[8], seg_x1[8];
+    int seg_n = -1, seg_y0 = 0, seg_y1 = 0;
     for (int k = 0; k + 1 < nu; k++) {
         int y0 = uniq[k], y1 = uniq[k + 1];
         if (y1 <= y0) continue;
@@ -6226,6 +7050,7 @@ static void pd_ppa_present(uint16_t* src, uint16_t* dst) {
         for (int i = 0; i < N; i++) {
             if (PROTECT[i].y0 <= y0 && PROTECT[i].y1 >= y1) { x0s[nx] = PROTECT[i].x0; x1s[nx] = PROTECT[i].x1; nx++; }
         }
+        int bx0[8], bx1[8]; int bn = 0;
         int x = 0;
         while (x < 480) {
             int xEnd = 480;
@@ -6235,9 +7060,74 @@ static void pd_ppa_present(uint16_t* src, uint16_t* dst) {
                 if (x0s[i] > x && x0s[i] < xEnd) xEnd = x0s[i];
             }
             if (skip) continue;
-            if (xEnd > x) { pd_ppa_copy_rect(src, dst, x, y0, xEnd, y1); x = xEnd; }
+            if (xEnd > x) { bx0[bn] = x; bx1[bn] = xEnd; bn++; x = xEnd; }
+        }
+        /* 与上一带的段集一致 → 合并;否则先提交上一段 */
+        bool same = (bn == seg_n);
+        if (same)
+            for (int i = 0; i < bn; i++)
+                if (bx0[i] != seg_x0[i] || bx1[i] != seg_x1[i]) { same = false; break; }
+        if (!same) {
+            if (seg_n > 0)
+                for (int i = 0; i < seg_n; i++)
+                    pd_ppa_copy_rect(src, dst, seg_x0[i], seg_y0, seg_x1[i], seg_y1);
+            seg_n = bn;
+            seg_y0 = y0;
+            for (int i = 0; i < bn; i++) { seg_x0[i] = bx0[i]; seg_x1[i] = bx1[i]; }
+        }
+        seg_y1 = y1;
+    }
+    if (seg_n > 0)
+        for (int i = 0; i < seg_n; i++)
+            pd_ppa_copy_rect(src, dst, seg_x0[i], seg_y0, seg_x1[i], seg_y1);
+}
+
+/* 2026-10-25 立绘直写(cover/expression 共用):惰性初始化 + 冻结判断 + 上屏。
+   与纸偶/立牌互斥(归属标记);面板弹窗打开时冻结(与纸偶同规则),
+   防直写每帧冲掉未入保护区的覆盖层。成功返回 true(跳过 LVGL 老路) */
+static bool cover_direct_try_present(uint8_t *buf) {
+    /* 纸偶/Live2D 交互中:其自有上屏管线,立绘直写不介入 */
+    if (s_pd_interaction || s_lv2_interaction) return false;
+    /* 冻结:设置/菜单/键盘/语音/音乐/资料页/暂停 或 背景弹窗/下载进度/
+       加载遮罩/时装面板(cover 模式)打开时,跳过上屏(画面停最后一帧) */
+    bool ui_open = settings_ui_is_open() || menu_ui_is_open() || s_kb_overlay || s_voice_overlay ||
+                   s_music_overlay || s_profile_overlay || s_pd_suspend;
+    bool bg_ui = s_bg_panel || s_bg_upd_popup || s_bg_check_popup ||
+                 s_pp_popup || s_pp_mini || loading_is_active() || s_pd_skin_panel ||
+                 (s_fashion_panel && !lv_obj_has_flag(s_fashion_panel, LV_OBJ_FLAG_HIDDEN));
+    if (ui_open || bg_ui) return true;   // 冻结:直接吞帧,不更新画布也不上屏
+    /* 惰性初始化(首次帧):注册管线 + 面板 fb + fb[2] 底图 + 状态栏隐藏 */
+    if (!s_pd_direct) {
+        if (pd_ppa_init()) {
+            LcdDisplay* lcd = (LcdDisplay*)Board::GetInstance().GetDisplay();
+            s_pd_panel_fb = lcd->GetPanelFrameBuffer();
+            if (s_pd_panel_fb) { s_pd_direct = true; s_pd_lcd = lcd; }
+        }
+        if (s_pd_direct && !s_pd_fb[2])
+            s_pd_fb[2] = (uint16_t*)heap_caps_aligned_alloc(64, 480 * 800 * 2 + 4096, MALLOC_CAP_SPIRAM);
+        if (s_pd_direct && !s_pd_fb[2]) { s_pd_direct = false; s_pd_panel_fb = NULL; }
+        if (s_pd_direct) {
+            s_pd_direct_owner = 3;   /* 立绘归属 */
+            if (s_pd_lcd) s_pd_lcd->SetStatusBarVisible(false);
+            /* canvas 重绑 fb[2](UI 重绘自拷干净底图) */
+            if (s_image_canvas) {
+                if (lvgl_port_lock(pdMS_TO_TICKS(100))) {
+                    lv_canvas_set_buffer(s_image_canvas, (uint8_t*)s_pd_fb[2], 480, 800, LV_COLOR_FORMAT_RGB565);
+                    lvgl_port_unlock();
+                }
+            }
+            ESP_LOGI(TAG, "cover direct: PPA DIRECT enabled");
         }
     }
+    if (!s_pd_direct || !s_pd_panel_fb || !s_pd_fb[2]) return false;   // 初始化失败 → LVGL 老路
+    /* 上屏:等待 DMA → msync → PPA 直写(保护区跳过,含 fb[2] 底图同步) */
+    pd_ppa_wait_idle();
+    esp_cache_msync((void*)buf, 480 * 800 * 2,
+                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    pd_ppa_present((uint16_t*)buf, s_pd_panel_fb);
+    esp_cache_msync((void*)s_pd_panel_fb, 480 * 800 * 2,
+                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    return true;
 }
 
 /* 文件规范（2026-08）：PPD 角色数据位于
@@ -6821,6 +7711,13 @@ static void bg_update_popup_show(int64_t total) {
 
 // 下载背景(public 三件套;进度走 pp_popup/pp_mini;完成→重扫+解锁)
 static void bg_fetch_task(void *arg) {
+    /* 2026-10-26 PPD 对话模式下 PSRAM 被模型+图层吃满(实测 free 6.8MB),
+       音乐 bundle 需 8MB 页缓冲 → 分配失败回退逐文件(8-54KB/s 慢速)。
+       下载前释放播放缓存 + 长背景槽(~4.6MB,下载完成重扫时自动重建)
+       给 bundle 页缓冲让路 */
+    ppa_release_playback_caches();
+    ppa_long_bg_free();
+    s_dl_pg = RoleDlPageInfo();   /* 2026-10-25 块号/总块数复位(公共库不填充,保持无块号显示) */
     auto step_cb = [](int pct, const char *file, void *ud) -> bool {
         if (s_dl_cancel) return false;
         if (!lvgl_port_lock(pdMS_TO_TICKS(100))) return true;
@@ -6838,19 +7735,50 @@ static void bg_fetch_task(void *arg) {
                 lv_label_set_text(s_pp_speed, sp);
             }
         }
-        if (file && s_pp_title && lv_obj_is_valid(s_pp_title))
-            lv_label_set_text_fmt(s_pp_title, "下载中…\n%.40s", file);   // 角色下载同款标题
+        pp_progress_title(pct, file);   /* 2026-10-25 阶段+文件名(公共库无块号) */
         lvgl_port_unlock();
         return true;
     };
-    int r = role_download_fetch_public("background", step_cb, nullptr);
+    int r = role_download_fetch_public("background", step_cb, &s_dl_pg);
     /* 背景下载后继续下载缺失音乐。注意 fetch_public 内部会重建共享清单 s_files
        (parse_manifest),把背景文件名覆盖成背景清单——必须重新检查音乐缺失,
        否则会把背景文件当音乐下载(2026-09-13 修:404 风暴根因) */
     if (r == 0 && s_bg_missing_music > 0) {
         s_bg_missing_music = role_download_check_music_missing();
         if (s_bg_missing_music > 0) {
-            int mr = role_download_fetch_music_missing(step_cb, nullptr);
+            /* 2026-10-26 音乐块级进度:复用角色下载"第 X/N 块"UI,每曲一块
+               (此前只显示百分比慢爬,9 首大 wav 串行时像卡死——用户实测) */
+            MusicDlCtx mc = {0, 0};
+            auto music_step = [](int pct, const char *file, void *ud) -> bool {
+                MusicDlCtx *mc = (MusicDlCtx*)ud;
+                if (s_dl_cancel) return false;
+                if (!lvgl_port_lock(pdMS_TO_TICKS(100))) return true;
+                /* bundle 模式下 cur 不更新(=0)→ 不显示块号;逐文件回退时
+                   每曲开始前由 fetch 更新 cur → 显示"第 X/N 首" */
+                if (mc->cur > 0) {
+                    s_dl_pg.page = mc->cur;
+                    s_dl_pg.pages = mc->total;
+                }
+                if (pct >= 0) {
+                    if (s_pp_bar && lv_obj_is_valid(s_pp_bar)) lv_bar_set_value(s_pp_bar, pct, LV_ANIM_OFF);
+                    if (s_pp_mini_bar && lv_obj_is_valid(s_pp_mini_bar)) lv_bar_set_value(s_pp_mini_bar, pct, LV_ANIM_OFF);
+                    if (s_pp_mini_lbl && lv_obj_is_valid(s_pp_mini_lbl)) {
+                        char pb[32];
+                        dl_speed_fmt(pct, pb, sizeof(pb));
+                        lv_label_set_text(s_pp_mini_lbl, pb);
+                    }
+                    if (s_pp_speed && lv_obj_is_valid(s_pp_speed)) {
+                        char sp[32];
+                        dl_speed_fmt(pct, sp, sizeof(sp));
+                        lv_label_set_text(s_pp_speed, sp);
+                    }
+                }
+                pp_progress_title(pct, file);
+                lvgl_port_unlock();
+                return true;
+            };
+            int mr = role_download_fetch_music_missing(music_step, &mc);
+            s_dl_pg.page = 0; s_dl_pg.pages = 0;   /* 音乐段结束,块号复位 */
             if (mr != 0) ESP_LOGW(TAG, "bg 音乐下载不完整: %d", mr);
         }
     }
@@ -6866,7 +7794,15 @@ static void bg_fetch_task(void *arg) {
             xTaskCreate([](void*) {
                 vTaskDelay(pdMS_TO_TICKS(300));
                 bg_scan_list();
-                if (s_pd_interaction) bg_unlock_finish();
+                if (s_pd_interaction) {
+                    /* 2026-10-26 bg_unlock_finish 内部操作 LVGL 对象,必须持锁:
+                       无锁并发渲染任务 → lv_inv_area 数据竞争死循环 → task_wdt
+                       反复崩溃(用户实测下载完成后几秒崩一次) */
+                    if (lvgl_port_lock(pdMS_TO_TICKS(5000))) {
+                        bg_unlock_finish();
+                        lvgl_port_unlock();
+                    }
+                }
                 vTaskDelete(NULL);
             }, "bg_post", 8192, NULL, 5, NULL);
         } else if (r == 1) {
@@ -7029,7 +7965,13 @@ static void bg_panel_hide(void) {
 #define PD_S11_SAFE() asm volatile("" ::: "s11")
 
 static void pd_anim_task(void*) {
+    /* 2026-10-25 预创建(见 pd_interaction_task 顶部):加载期间空转,
+       模型+帧缓冲就绪后开始渲染循环 */
+    while (s_pd_running && (!s_pd_model || !s_pd_fb[0]))
+        vTaskDelay(pdMS_TO_TICKS(20));
     int64_t start_us = esp_timer_get_time();
+    /* 2026-10-25 上屏相位累计(每 5s 随 FPS 行输出后清零) */
+    static int64_t s_ph_wait = 0, s_ph_msync = 0, s_ph_submit = 0, s_ph_mem = 0;
     int fps_frame = 0; int64_t fps_last = 0;
     while (s_pd_running) {
         PD_S11_SAFE();
@@ -7045,6 +7987,9 @@ static void pd_anim_task(void*) {
         } else {
             cur = s_pd_fb[s_pd_fb_idx];
         }
+        /* 2026-10-25 DMA2D 通道互斥(已回退):渲染前等待会诱发每帧 1 段
+           SRM 悬挂(孤儿事务残留 → BLEND 排队 → 渲染 241→355ms 恶性退化)。
+           改为关闭渲染的 PPA 混合(PD_USE_PPA=0)绕开通道争夺 */
         int64_t t0 = esp_timer_get_time();
         if (s_pd_mutex && xSemaphoreTake(s_pd_mutex, portMAX_DELAY) == pdTRUE) {
             PD_S11_SAFE();
@@ -7054,12 +7999,31 @@ static void pd_anim_task(void*) {
         }
         PD_S11_SAFE();
         int64_t t1 = esp_timer_get_time();
+        /* 2026-10-25 自适应画质:大模型(Wisadel 21 层大贴图)全分辨率渲染
+           240ms+ → 连续 5 帧超 120ms 自动切半分辨率(hfb 2× 放大,渲染 ~60ms)。
+           慢模型快画质、快模型高画质(逻各斯 68ms 不受影响);形态切换复位
+           half_res 后本逻辑自动重新判定 */
+        static int s_slow_frames = 0;
+        if (s_pd_model && s_pd_model->hfb) {
+            if ((t1 - t0) > 120000) {
+                if (++s_slow_frames >= 5 && !s_pd_model->half_res) {
+                    s_pd_model->half_res = true;
+                    ESP_LOGI("PD", "auto half-res: render %dms → 半分辨率", (int)((t1 - t0) / 1000));
+                    s_slow_frames = 0;
+                }
+            } else {
+                s_slow_frames = 0;
+            }
+        }
         fps_frame++;
         if (fps_last == 0) fps_last = t1;
         if (t1 - fps_last > 5000000) {
-            ESP_LOGI("PD", "FPS: %.1f (render: %d ms) stack hw %u",
+            int n = fps_frame > 0 ? fps_frame : 1;
+            ESP_LOGI("PD", "FPS: %.1f (render: %d ms) ph: wait %d / msync %d / submit %d / mem %d (us/f)",
                      fps_frame * 1000000.0f / (t1 - fps_last), (int)((t1 - t0) / 1000),
-                     (unsigned)uxTaskGetStackHighWaterMark(NULL));   /* 2026-10-03 诊断:验证 16K 栈余量 */
+                     (int)(s_ph_wait / n), (int)(s_ph_msync / n),
+                     (int)(s_ph_submit / n), (int)(s_ph_mem / n));
+            s_ph_wait = s_ph_msync = s_ph_submit = s_ph_mem = 0;
             fps_frame = 0; fps_last = t1;
         }
         if (s_pd_direct) {
@@ -7119,27 +8083,48 @@ static void pd_anim_task(void*) {
                 /* PPA 直写上屏：等上一帧 DMA 完成 → msync（CPU 写 s_pd_fb 对 PPA 可见 /
                    PPA 写 fb 对扫描 DMA 可见）→ 行带扫描硬件拷贝（跳过 UI 保护矩形）。
                    CPU 0 零参与；上帧 DMA 与下帧渲染重叠（双缓冲异区），帧率 ~16fps。
-                   撕裂防护：渲染写 idx 与 DMA 读 idx^1 异区；写回同区要等 2 帧周期 */
+                   撕裂防护：渲染写 idx 与 DMA 读 idx^1 异区；写回同区要等 2 帧周期。
+                   2026-10-25 相位计时(每 5s 随 FPS 行输出):wait=等DMA
+                   msync=两次缓存同步 submit=SRM 提交 mem=fb[2] 同步拷 */
+                int64_t ph0 = esp_timer_get_time();
                 pd_ppa_wait_idle();
+                int64_t ph1 = esp_timer_get_time();
                 esp_cache_msync((void*)s_pd_panel_fb, 480 * 800 * 2, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
                 esp_cache_msync((void*)cur, 480 * 800 * 2, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+                int64_t ph2 = esp_timer_get_time();
                 pd_ppa_present(cur, s_pd_panel_fb);
+                int64_t ph3 = esp_timer_get_time();
                 /* 同步干净底图 fb[2](canvas buffer):侧边按钮栏/时钟等 UI 矩形的 LVGL
                    重绘 flush 会从 fb[2] 自拷覆盖面板 fb——不更新则按钮栏区域画面冻结在
                    首帧(新约能天使的枪在按钮栏附近被"切断"的根因:注释曾声称每帧拷入,
-                   实现漏了)。768KB memcpy ~1-2ms,帧率影响可忽略。 */
+                   实现漏了)。768KB memcpy ~1-2ms,帧率影响可忽略。
+                   2026-10-25 相位计时打脸:全帧 768KB memcpy+msync 实测 22.5ms/帧
+                   (mem=22466us,占帧时 22%)。pd_ppa_present 已同步保护区(~90KB);
+                   全帧拷只为半透明对话框(聊天/语音文字,y∈[505,800])的 flush 自拷。
+                   改为仅对话框可见时拷底部 295 行(283KB ~7ms),空闲态零拷贝 */
                 if (s_pd_fb[2] && s_pd_fb[2] != cur) {
-                    /* 2026-10-06 加锁:bg_switch_task 持锁 pd_render(fb[2]) 与本循环
-                       memcpy 并发写同一缓冲(此前 memcpy 不持锁),数据竞争 →
-                       背景切换瞬间胶囊/UI 区读到撕裂混合帧(闪烁)。互斥后 fb[2]
-                       内容始终完整,胶囊逐帧失效看到的面板与底图一致 */
-                    if (s_pd_mutex && xSemaphoreTake(s_pd_mutex, portMAX_DELAY) == pdTRUE) {
-                        memcpy(s_pd_fb[2], cur, 480 * 800 * 2);
-                        esp_cache_msync((void*)s_pd_fb[2], 480 * 800 * 2,
-                                        ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
-                        xSemaphoreGive(s_pd_mutex);
+                    bool chat_on = (s_chat_user_box &&
+                                    !lv_obj_has_flag(s_chat_user_box, LV_OBJ_FLAG_HIDDEN)) ||
+                                   (s_voice_text_obj &&
+                                    !lv_obj_has_flag(s_voice_text_obj, LV_OBJ_FLAG_HIDDEN));
+                    if (chat_on) {
+                        /* 2026-10-06 加锁:bg_switch_task 持锁 pd_render(fb[2]) 与本循环
+                           memcpy 并发写同一缓冲(此前 memcpy 不持锁),数据竞争 →
+                           背景切换瞬间胶囊/UI 区读到撕裂混合帧(闪烁)。互斥后 fb[2]
+                           内容始终完整,胶囊逐帧失效看到的面板与底图一致 */
+                        if (s_pd_mutex && xSemaphoreTake(s_pd_mutex, portMAX_DELAY) == pdTRUE) {
+                            memcpy(s_pd_fb[2] + 505 * 480 * 2, cur + 505 * 480 * 2, 295 * 480 * 2);
+                            esp_cache_msync((void*)(s_pd_fb[2] + 505 * 480 * 2), 295 * 480 * 2,
+                                            ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+                            xSemaphoreGive(s_pd_mutex);
+                        }
                     }
                 }
+                int64_t ph4 = esp_timer_get_time();
+                s_ph_wait   += (ph1 - ph0);
+                s_ph_msync  += (ph2 - ph1);
+                s_ph_submit += (ph3 - ph2);
+                s_ph_mem    += (ph4 - ph3);
                 /* 2026-09-13 修"上动下静"割裂:UI 保护区(半透明对话框/按钮列)的像素
                    只在 LVGL flush 时从 fb[2] 自拷——静止时无 invalidate 就不重绘,
                    被对话框遮挡的人物下半部分帧冻结(滑动时 bg_invalidate_ui 每帧
@@ -7153,8 +8138,14 @@ static void pd_anim_task(void*) {
                    自拷,300ms 节流让胶囊背景与滑动背景不同步(闪烁)。
                    84×32 小区域重绘代价可忽略。
                    必须持 LVGL 锁:跨核无锁 invalidate 会破坏失效链表
-                   (lv_inv_area 死循环 → IDLE1 饿死 WDT)。 */
-                if (s_batt_box && lvgl_port_lock(pdMS_TO_TICKS(4))) {
+                   (lv_inv_area 死循环 → IDLE1 饿死 WDT)。
+                   2026-10-25 锁等待 4ms→1ms:LVGL 忙时本帧放弃(10s tick
+                   兜底刷新),每帧省最多 3ms 的锁等待。
+                   2026-10-26 直写模式跳过逐帧失效:每帧重绘整组按钮区
+                   (圆角外直角区闪白,用户实测)+软件混合占满 CPU0 → taskLVGL
+                   卡死 task_wdt。直写下保护区像素由 fb[2] 同步保底,
+                   电量变化由 10s tick 的 label 更新自行触发重绘 */
+                if (!s_pd_direct && s_batt_box && lvgl_port_lock(pdMS_TO_TICKS(1))) {
                     if (s_batt_box && lv_obj_is_valid(s_batt_box)) {
                         if ((s_pdq_mode || s_standee_mode) != s_batt_land) batt_apply_orientation();   /* 2026-10-06 横屏跟随(含立牌) */
                         lv_obj_invalidate(s_batt_box);
@@ -7577,6 +8568,20 @@ static void pd_skin_panel_show(void) {
 }
 
 static void pd_interaction_task(void* arg) {
+    /* 2026-10-25 预创建渲染任务:模型加载会把内部 SRAM 打碎(实测加载后
+       maxblk 13.8KB < pd_anim 16KB 栈 → 创建失败 → 画面冻结、机器卡死)。
+       在堆还干净时先占好栈,渲染任务空转等待模型与帧缓冲就绪。
+       栈改 PSRAM 分配:SRAM 碎片化与栈大小彻底解耦 */
+    if (!s_pd_task) {
+        s_pd_running = true;
+        if (xTaskCreatePinnedToCoreWithCaps(pd_anim_task, "pd_anim", 16384, NULL, 3, &s_pd_task, 1, MALLOC_CAP_SPIRAM) != pdPASS) {
+            ESP_LOGE(TAG, "pd_anim pre-create FAILED (free %u, maxblk %u)",
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+            s_pd_running = false;
+            s_pd_task = NULL;
+        }
+    }
     // 角色扫描与选择：必须在本任务里做——SD 卡 opendir/readdir/stat 调用链很深，
     // 在 LVGL 任务（按钮回调）里执行会撑爆其栈（Stack dump → LVGL 状态损坏 → 疯狂重绘 → watchdog）
     const char* sub = s_pdq_mode ? "PPD_Q" : "PPD";
@@ -7687,6 +8692,7 @@ static void pd_interaction_task(void* arg) {
             if (s_pd_panel_fb) { s_pd_direct = true; s_pd_lcd = lcd; }
         }
     }
+    if (s_pd_direct) s_pd_direct_owner = 1;   /* 2026-10-25 纸偶归属 */
     if (s_pd_direct && s_pd_lcd) {
         /* 直写绕过 LVGL 后，screen 层的时钟重绘 flush 会覆盖直写帧（无每帧重绘兜底）——
            隐藏状态栏（视觉上本来就被全屏 canvas 遮住，与 Live2D 交互观感一致） */
@@ -8058,7 +9064,7 @@ static void pd_interaction_task(void* arg) {
        不存在 → 画面冻结/滑动失效。创建失败已日志兜底。 */
     if (!s_pd_task) {
         s_pd_running = true;
-        if (xTaskCreatePinnedToCore(pd_anim_task, "pd_anim", 16384, NULL, 3, &s_pd_task, 1) != pdPASS) {
+        if (xTaskCreatePinnedToCoreWithCaps(pd_anim_task, "pd_anim", 16384, NULL, 3, &s_pd_task, 1, MALLOC_CAP_SPIRAM) != pdPASS) {
             ESP_LOGE(TAG, "pd_anim create FAILED (free %u, maxblk %u)",
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
@@ -8074,6 +9080,25 @@ static void pd_interaction_task(void* arg) {
 
 static void pd_interaction_start(void) {
     if (s_pd_interaction || s_pd_starting) return;
+    /* 2026-10-26 兜底:进对话模式强制按当前显示角色注册唤醒词。选角色
+       (cover_display_start)时若词表未到/路径反查失败/开机自动恢复未走
+       选择流程,active 会空/旧 → 保底 9 词 FST,当前角色无法唤醒
+       (用户实测维是戴尔)。此处词表必已到达(进对话模式远晚于词表),
+       幂等:已是当前角色则零动作 */
+    Application::GetInstance().SwitchAgentByPath(s_agent_path);
+    /* 2026-10-25 唤醒词只在对话模式:进 PPD 交互即开检测(立绘模式已关) */
+    application_set_wake_word_detection(true);
+    /* 2026-10-26 唤醒指示点:对话模式显示,且重置为待机(上次退出若停在
+       聆听/回应,重进对话模式不得残留旧状态——用户实测维是戴尔残留"聆听中") */
+    if (s_wake_dot && lv_obj_is_valid(s_wake_dot)) {
+        if (lvgl_port_lock(pdMS_TO_TICKS(100))) {
+            lv_obj_remove_flag(s_wake_dot, LV_OBJ_FLAG_HIDDEN);
+            if (s_wake_lbl && lv_obj_is_valid(s_wake_lbl))
+                lv_obj_remove_flag(s_wake_lbl, LV_OBJ_FLAG_HIDDEN);
+            lvgl_port_unlock();
+        }
+    }
+    application_wake_status_update(0);   /* 重置待机(灰) */
     /* 注意：本函数运行在 LVGL 任务（按钮回调）栈上——只做轻量启动，
        任何 SD 卡 IO（扫描/选角色/加载）都在 pd_interaction_task（10240 栈）里执行 */
     s_pd_starting = true;
@@ -8084,7 +9109,7 @@ static void pd_interaction_start(void) {
        2026-10-03:48K 回退 32K——P4 内部 SRAM 空闲仅 ~130K(panel fb 占 768K),
        48K 在碎片堆分配失败导致卡加载页;本任务 JPEG 解码/pd_load/pd_render
        串行执行,最大深度 ~22-28K,32K 够。失败必须兜底,不得静默卡死。 */
-    BaseType_t ret = xTaskCreate(pd_interaction_task, "pd_start", 28672, NULL, 2, NULL);   /* 2026-10-04 32K→28K:Mon3tr 等角色封面流程碎片化重(maxblk 29K),32K 分不出;实测峰值 24.3K,28K 留 3.7K 余量 */
+    BaseType_t ret = xTaskCreateWithCaps(pd_interaction_task, "pd_start", 28672, NULL, 2, NULL, MALLOC_CAP_SPIRAM);   /* 2026-10-04 32K→28K:Mon3tr 等角色封面流程碎片化重(maxblk 29K),32K 分不出;实测峰值 24.3K,28K 留 3.7K 余量。2026-10-25 栈改 PSRAM:SRAM 碎片化(maxblk 23.5KB)与栈大小解耦 */
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "pd_start create FAILED (free %u, maxblk %u)",
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
@@ -8099,6 +9124,8 @@ static void pd_interaction_start(void) {
 // 复用 PPD 交互框架加载 PPD_Q（PC 预旋转横屏布局，渲染零旋转），退出回横屏立牌
 static void pdq_interaction_start(void) {
     if (s_pd_interaction || s_pd_starting) return;
+    /* 2026-10-25 懒下载守卫:Q 基座未下载 → 弹提示(成功自动重入) */
+    if (!module_gate(1, "ppdq")) return;
     s_pdq_mode = true;
     pd_interaction_start();
 }
@@ -8112,6 +9139,15 @@ static void pd_interaction_stop_internal(bool restart_mjpeg) {
     guard = 0;
     while (s_pd_form_switching && guard++ < 300) vTaskDelay(pdMS_TO_TICKS(50));
     if (!s_pd_interaction) return;
+    /* 2026-10-26 退出对话模式统一断开对话(关音频通道+状态机回 idle)。
+       此前仅"互动中再点退出按钮"一条路径断对话,其他退出路径(动作/形态/
+       下载弹窗等)残留 listening 状态 → 重进对话模式显示旧状态且服务端
+       通道未关(用户实测:逻各斯退出后进维是戴尔残留"聆听中") */
+    extern void application_end_conversation(void);
+    application_end_conversation();
+    /* 2026-10-26 唤醒指示复位待机(状态机回 idle 后 update(0) 也会到,
+       此处提前显式复位,防 idle 转换与画面切换之间的窗口残留旧色) */
+    application_wake_status_update(0);
     // 动作动画播放中退出互动：先停播放（否则与 standee_resume 的播放冲突）
     if (s_anim_play) {
         video_playback_stop();
@@ -8143,6 +9179,7 @@ static void pd_interaction_stop_internal(bool restart_mjpeg) {
     s_pd_interaction = false;
     if (s_pd_direct) pd_ppa_wait_idle();   // 等 pending DMA 完成，防下方 free fb 时 DMA 还在读
     s_pd_direct = false;
+    s_pd_direct_owner = 0;   /* 2026-10-25 纸偶退出,归还归属 */
     if (s_pd_lcd) { s_pd_lcd->SetStatusBarVisible(true); s_pd_lcd = NULL; }   // 恢复状态栏
     // 按钮必须先移出 bg 再删 bg（教训：它们是 bg 的子对象）
     lvgl_port_lock(0);

@@ -42,6 +42,12 @@ typedef struct {
     pd_tex_t ppa_tex;    // PPA 预缩放纹理（全身帧 1:1，BGRA 字节序=硬件 ARGB8888）
     int16_t ppa_x, ppa_y;  // 烘焙的屏幕位置（导出时按设备数学精确计算）
     bool has_ppa;
+    /* 2026-10-21 图层绑定:子层(如剑)跟随父层(如手)运动。
+       bind_name = scene.json bind 字段;bind_idx = 解析后的目标层索引(-1=无)。
+       last_m = 本帧最终矩阵(blit 后记录),bind 子层继承它(父 z 低先绘制)。 */
+    char bind_name[40];
+    int16_t bind_idx;
+    float last_m[6];
 } pd_layer_t;
 
 /* ---- Spine 动画 → PPD 原生动画（anims.json）：每层旋转/位移增量时间轴 ---- */

@@ -31,3 +31,19 @@ CONFIG_LV_FS_FATFS_CACHE_SIZE=0
 
 # LVGL LODEPNG解码器支持（用于加载PNG图片）
 CONFIG_LV_USE_LODEPNG=y
+
+# ── 雷达 BLE(2026-10-26 持久化:sdkconfig 重生成曾丢 BT 配置导致 radar_ble.cc
+#    编译失败 nimble/nimble_port.h 找不到)──
+# 蓝牙控制器在 C6 协处理器(esp_hosted HCI over SDIO),P4 只跑 NimBLE 主机栈。
+# 配置与 esp_hosted 官方示例 esp_hosted_nimble/bleprph_minimal/mcu_host 对齐
+CONFIG_ESP_HOSTED_HOST_FEAT_BT=y
+CONFIG_BT_ENABLED=y
+CONFIG_BT_CONTROLLER_DISABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_TRANSPORT_UART=n
+CONFIG_BT_NIMBLE_42_FEATURE_SUPPORT=y
+CONFIG_BT_NIMBLE_50_FEATURE_SUPPORT=n
+
+# 雷达 ESP-NOW 数据通道(2026-10-26 持久化:同上,重生成曾丢,radar_esnow.cc
+# 整个被 #if CONFIG_ESP_HOSTED_HOST_FEAT_PEER_DATA 屏蔽 → 链接 undefined)
+CONFIG_ESP_HOSTED_HOST_FEAT_PEER_DATA=y

@@ -75,7 +75,7 @@ def release(board_type, board_config, config_filename="config.json"):
     project_version = get_project_version()
     print(f"Project Version: {project_version}", config_path)
 
-    with open(config_path, "r") as f:
+    with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
     target = config["target"]
     builds = config["builds"]
@@ -103,7 +103,10 @@ def release(board_type, board_config, config_filename="config.json"):
             print("set-target failed")
             sys.exit(1)
         # Append sdkconfig
-        with open("sdkconfig", "a") as f:
+        # 2026-10-26 必须 utf-8:config.json 含中文(唤醒词显示名),Windows 默认
+        # GBK 打开会把 GBK 字节混写进 UTF-8 的 sdkconfig → idf.py 读 sdkconfig
+        # 直接 UnicodeDecodeError 崩(实测 0xc4 invalid continuation byte)
+        with open("sdkconfig", "a", encoding="utf-8") as f:
             f.write("\n")
             for append in sdkconfig_append:
                 f.write(f"{append}\n")

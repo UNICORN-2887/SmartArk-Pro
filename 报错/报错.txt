@@ -1,65 +1,113 @@
-Leaving...
-Hard resetting via RTS pin...
-Executing action: monitor
-Running idf_monitor in directory E:\Passport\espp4\sparepart\JC4880P443C_I_W\1-Demo\idf_examples\ESP-IDF\xiaozhi-esp32sp1
-Executing "C:\Users\HP\.espressif\python_env\idf5.5_py3.10_env\Scripts\python.exe E:\Passport\esp32\v5.5.1\esp-idf\tools/idf_monitor.py -p COM12 -b 115200 --toolchain-prefix riscv32-esp-elf- --target esp32p4 --revision 1 --decode-panic backtrace E:\Passport\espp4\sparepart\JC4880P443C_I_W\1-Demo\idf_examples\ESP-IDF\xiaozhi-esp32sp1\build\xiaozhi.elf E:\Passport\espp4\sparepart\JC4880P443C_I_W\1-Demo\idf_examples\ESP-IDF\xiaozhi-esp32sp1\build\bootloader\bootloader.elf --force-color -m 'C:\Users\HP\.espressif\python_env\idf5.5_py3.10_env\Scripts\python.exe' 'E:\Passport\esp32\v5.5.1\esp-idf\tools\idf.py' '-p' 'COM12'"...       
---- Warning: GDB cannot open serial ports accessed as COMx
---- Using \\.\COM12 instead...
---- esp-idf-monitor 1.9.0 on \\.\COM12 115200
---- Quit: Ctrl+] | Menu: Ctrl+T | Help: Ctrl+T followed by Ctrl+H
+E (1086055) EspTcp: Failed to connect to 192.168.1.37:7863
+E (1086055) HttpClient: TCP connection failed
+W (1086055) AgentTools: HTTP Open 失败（电脑桥可达性）
+I (1086601) AppImageDisplay: dl speed: 77% 24KB/s
+I (1089060) AgentTools: HTTP GET http://192.168.1.37:7863/agent/events?token=abf77554dd2a&since=-1
+I (1090497) AppImageDisplay: dl speed: 78% 24KB/s
+I (1092240) SystemInfo: free sram: 37659 minimal sram: 4223
+I (1094236) jc4880p443: batt: raw=2504 mv=2468 pct=109 trend_chg=0
+I (1094382) AppImageDisplay: dl speed: 79% 24KB/s
+I (1098179) AppImageDisplay: dl speed: 80% 25KB/s
+I (1102167) AppImageDisplay: dl speed: 81% 24KB/s
+I (1102241) SystemInfo: free sram: 37659 minimal sram: 4223
+I (1105336) AppImageDisplay: dl speed: 82% 20KB/s
+E (1107555) EspTcp: Failed to connect to 192.168.1.37:7863
+E (1107555) HttpClient: TCP connection failed
+W (1107555) AgentTools: HTTP Open 失败（电脑桥可达性）
+I (1110560) AgentTools: HTTP GET http://192.168.1.37:7863/agent/events?token=abf77554dd2a&since=-1
+I (1110673) AppImageDisplay: dl speed: 83% 17KB/s
+I (1112240) SystemInfo: free sram: 37659 minimal sram: 4223
+I (1112629) AppImageDisplay: TOUCH PRESS (-1,-1) | page=1 building=0 | press=(457,198) moved=1 handled=0
+I (1112629) AppImageDisplay: TOUCH PRESS (-1,-1) | page=1 building=0 | press=(457,198) moved=0 handled=0
+I (1112636) AppImageDisplay: TOUCH PRESS (-1,-1) | page=1 building=0 | press=(457,198) moved=0 handled=0
+I (1112688) AppImageDisplay: TOUCH RELEASE (-1,-1) | page=1 building=0 | press=(457,198) moved=0 handled=0
+I (1112688) AppImageDisplay: TOUCH RELEASE (-1,-1) | page=1 building=0 | press=(457,198) moved=0 handled=0
+I (1112696) AppImageDisplay: TOUCH RELEASE (-1,-1) | page=1 building=0 | press=(457,198) moved=0 handled=0
+W (1114676) RoleDownload: bundle 页下载失败: cancelled
+W (1114677) RoleDownload: bundle 未用(-1),走逐文件下载
+I (1115243) RoleDownload: fetch cover/Lumen_II09.mjpeg: 清单大小=8560175, 断点=0
+I (1122242) SystemInfo: free sram: 38287 minimal sram: 4223
+I (1125236) jc4880p443: batt: raw=2505 mv=2469 pct=109 trend_chg=0
+E (1129055) EspTcp: Failed to connect to 192.168.1.37:7863
+E (1129055) HttpClient: TCP connection failed
+W (1129055) AgentTools: HTTP Open 失败（电脑桥可达性）
+I (1132060) AgentTools: HTTP GET http://192.168.1.37:7863/agent/events?token=abf77554dd2a&since=-1
+I (1132241) SystemInfo: free sram: 39123 minimal sram: 4223
+I (1142241) SystemInfo: free sram: 39123 minimal sram: 4223
+E (1150558) EspTcp: Failed to connect to 192.168.1.37:7863
+E (1150558) HttpClient: TCP connection failed
+W (1150558) AgentTools: HTTP Open 失败（电脑桥可达性）
+I (1152240) SystemInfo: free sram: 41139 minimal sram: 4223
+I (1153563) AgentTools: HTTP GET http://192.168.1.37:7863/agent/events?token=abf77554dd2a&since=-1
+I (1155237) jc4880p443: batt: raw=2504 mv=2468 pct=109 trend_chg=0
+I (1162252) SystemInfo: free sram: 37255 minimal sram: 4223
+E (1172058) EspTcp: Failed to connect to 192.168.1.37:7863
+E (1172058) HttpClient: TCP connection failed
+W (1172058) AgentTools: HTTP Open 失败（电脑桥可达性）
+I (1172240) SystemInfo: free sram: 41139 minimal sram: 4223
+I (1175063) AgentTools: HTTP GET http://192.168.1.37:7863/agent/events?token=abf77554dd2a&since=-1
+I (1182241) SystemInfo: free sram: 39107 minimal sram: 4223
+I (1186236) jc4880p443: batt: raw=2505 mv=2469 pct=109 trend_chg=0
+I (1192241) SystemInfo: free sram: 39107 minimal sram: 4223
+E (1193559) EspTcp: Failed to connect to 192.168.1.37:7863
+E (1193559) HttpClient: TCP connection failed
+W (1193559) AgentTools: HTTP Open 失败（电脑桥可达性）
+I (1196564) AgentTools: HTTP GET http://192.168.1.37:7863/agent/events?token=abf77554dd2a&since=-1
+I (1202240) SystemInfo: free sram: 39107 minimal sram: 4223
+E (1205423) RoleDownload: 下载 90 秒无进展(SD 卡疑似坏块持忙),重启自愈
 ESP-ROM:esp32p4-eco2-20240710
 Build:Jul 10 2024
-rst:0x17 (CHIP_USB_UART_RESET),boot:0x30e (SPI_FAST_FLASH_BOOT)
-Core0 Saved PC:0x4ff04f3e
---- 0x4ff04f3e: esp_cpu_wait_for_intr at E:/Passport/esp32/v5.5.1/esp-idf/components/esp_hw_support/cpu.c:57
-Core1 Saved PC:0x4ff04f3e
---- 0x4ff04f3e: esp_cpu_wait_for_intr at E:/Passport/esp32/v5.5.1/esp-idf/components/esp_hw_support/cpu.c:57
+rst:0xc (SW_CPU_RESET),boot:0xc (SPI_FAST_FLASH_BOOT)
+Core0 Saved PC:0x401dde98
+--- 0x401dde98: protobuf_c_message_unpack at E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/managed_components/espressif__esp_hosted/common/serializers/third_party/msg_codec/protobuf-c/protobuf-c/protobuf-c.c:3141
+Core1 Saved PC:0x4ff09fd4
+--- 0x4ff09fd4: esp_restart_noos at E:/Passport/esp32/v5.5.1/esp-idf/components/esp_system/port/soc/esp32p4/system_internal.c:218
 SPI mode:DIO, clock div:1
 load:0x4ff33ce0,len:0x5a0
 load:0x4ff29ed0,len:0xca0
 --- 0x4ff29ed0: call_start_cpu0 at E:/Passport/esp32/v5.5.1/esp-idf/components/bootloader/subproject/main/bootloader_start.c:25
 load:0x4ff2cbd0,len:0x3160
 --- 0x4ff2cbd0: esp_flash_encryption_enabled at E:/Passport/esp32/v5.5.1/esp-idf/components/bootloader_support/src/flash_encrypt.c:89
-entry 0x4ff29ed0
 --- 0x4ff29ed0: call_start_cpu0 at E:/Passport/esp32/v5.5.1/esp-idf/components/bootloader/subproject/main/bootloader_start.c:25
+entry 0x4ff29ed0
 I (44) hex_psram: vendor id    : 0x0d (AP)
-I (44) hex_psram: Latency      : 0x01 (Fixed)
+I (45) hex_psram: Latency      : 0x01 (Fixed)
 I (45) hex_psram: DriveStr.    : 0x00 (25 Ohm)
-I (45) hex_psram: dev id       : 0x03 (generation 4)
-I (49) hex_psram: density      : 0x07 (256 Mbit)
+I (46) hex_psram: dev id       : 0x03 (generation 4)
+I (50) hex_psram: density      : 0x07 (256 Mbit)
 I (54) hex_psram: good-die     : 0x06 (Pass)
 I (58) hex_psram: SRF          : 0x02 (Slow Refresh)
-I (62) hex_psram: BurstType    : 0x00 ( Wrap)
+I (63) hex_psram: BurstType    : 0x00 ( Wrap)
 I (67) hex_psram: BurstLen     : 0x03 (2048 Byte)
 I (71) hex_psram: BitMode      : 0x01 (X16 Mode)
-I (75) hex_psram: Readlatency  : 0x04 (14 cycles@Fixed)
-I (80) hex_psram: DriveStrength: 0x00 (1/1)
-I (84) MSPI DQS: tuning success, best phase id is 0
-I (256) MSPI DQS: tuning success, best delayline id is 17
+I (76) hex_psram: Readlatency  : 0x04 (14 cycles@Fixed)
+I (81) hex_psram: DriveStrength: 0x00 (1/1)
+I (85) MSPI DQS: tuning success, best phase id is 0
+I (257) MSPI DQS: tuning success, best delayline id is 17
 I (257) esp_psram: Found 32MB PSRAM device
-I (257) esp_psram: Speed: 200MHz
-I (258) hex_psram: psram CS IO is dedicated
+I (258) esp_psram: Speed: 200MHz
+I (259) hex_psram: psram CS IO is dedicated
 I (261) cpu_start: Multicore app
-I (275) cpu_start: Pro cpu start user code
+I (276) cpu_start: Pro cpu start user code
 I (276) cpu_start: cpu freq: 360000000 Hz
 I (276) app_init: Application information:
 I (276) app_init: Project name:     xiaozhi
-I (279) app_init: App version:      1.8.55
-I (283) app_init: Compile time:     Oct  6 2026 14:50:57
-I (288) app_init: ELF file SHA256:  fa97daee4...
+I (280) app_init: App version:      1.8.56
+I (283) app_init: Compile time:     Oct 26 2026 11:47:03
+I (288) app_init: ELF file SHA256:  ff767a066...
 I (293) app_init: ESP-IDF:          v5.5.1-dirty
 I (297) efuse_init: Min chip rev:     v0.1
 I (301) efuse_init: Max chip rev:     v1.99
 I (305) efuse_init: Chip rev:         v1.3
 I (309) heap_init: Initializing. RAM available for dynamic allocation:
-I (315) heap_init: At 4FF2A680 len 00010940 (66 KiB): RAM
+I (315) heap_init: At 4FF2AAB0 len 00010510 (65 KiB): RAM
 I (320) heap_init: At 4FF3AFC0 len 00004BF0 (18 KiB): RAM
-I (325) heap_init: At 4FF46B30 len 000594D0 (357 KiB): RAM
-I (330) heap_init: At 501080AC len 00007F54 (31 KiB): RTCRAM
+I (325) heap_init: At 4FF49D70 len 00056290 (344 KiB): RAM
+I (331) heap_init: At 501080AC len 00007F54 (31 KiB): RTCRAM
 I (336) heap_init: At 30100068 len 00001F98 (7 KiB): TCM
 I (341) esp_psram: Adding pool of 32768K of PSRAM memory to heap allocator
 W (348) spi_flash: Detected boya flash chip but using generic driver. For optimal functionality, enable `SPI_FLASH_SUPPORT_BOYA_CHIP` in menuconfig
-I (360) spi_flash: detected chip: generic
+I (361) spi_flash: detected chip: generic
 I (364) spi_flash: flash io: qio
 I (369) eh_mcu_transport: transport_init: probing bus backend
 I (373) eh_sdio: transport[host]: SDIO 4-bit 40000 kHz CLK=18 CMD=19 D0=14 D1=15 D2=16 D3=17 RESET=54
@@ -69,381 +117,59 @@ I (383) main_task: Started on CPU0
 W (392) eh_sdio: Reset co-processor using GPIO[54]
 I (400) esp_psram: Reserving pool of 48K of internal memory for DMA/internal allocations
 I (407) main_task: Calling app_main()
-I (421) Board: UUID=4cc5ba94-4a7d-4f45-81bd-e84784314f7b SKU=guition-jc4880p443
-I (421) button: IoT Button Version: 4.1.7
-I (422) jc4880p443: MIPI DSI PHY Powered on
-I (426) jc4880p443: Install MIPI DSI LCD control panel
-I (430) st7701: version: 2.0.2
-I (471) st7701_mipi: LCD ID: FF FF FF
-I (471) st7701_mipi:  st7701->madctl_val: 0x0, st7701->colmod_val: 0x55
-I (611) Display: Power management not supported
-I (611) LcdDisplay: Turning display on
-I (611) LcdDisplay: Initialize LVGL library
-I (611) LcdDisplay: Initialize LVGL port
-I (615) LVGL: Starting LVGL task
-I (618) LcdDisplay: Adding LCD display
-E (623) lcd_panel: esp_lcd_panel_swap_xy(50): swap_xy is not supported by this panel
-I (759) GT911: I2C address initialization procedure skipped - using default GT9xx setup
-I (759) GT911: TouchPad_ID:0x39,0x31,0x31
-I (760) GT911: TouchPad_Config_Version:250
-I (763) jc4880p443: GT911 touch registered
-I (767) Backlight: Set brightness to 100
-I (770) Application: STATE: starting
-I (775) SD_TEST: Initializing SD card via SDMMC...
-I (778) SD_TEST: Pins: CLK=43, CMD=44, D0=39, D1=40, D2=41, D3=42
-W (784) ldo: The voltage value 0 is out of the recommended range [500, 2700]
-I (791) SD_TEST: LDO power control initialized successfully
-I (1019) SD_TEST: SD card mounted successfully!
+I (422) Board: UUID=4cc5ba94-4a7d-4f45-81bd-e84784314f7b SKU=guition-jc4880p443
+I (423) button: IoT Button Version: 4.1.7
+I (423) jc4880p443: MIPI DSI PHY Powered on
+I (427) jc4880p443: Install MIPI DSI LCD control panel
+I (431) st7701: version: 2.0.2
+I (472) st7701_mipi: LCD ID: FF FF FF
+I (472) st7701_mipi:  st7701->madctl_val: 0x0, st7701->colmod_val: 0x55
+I (612) Display: Power management not supported
+I (612) LcdDisplay: Turning display on
+I (612) LcdDisplay: Initialize LVGL library
+I (612) LcdDisplay: Initialize LVGL port
+I (616) LVGL: Starting LVGL task
+I (619) LcdDisplay: Adding LCD display
+E (624) lcd_panel: esp_lcd_panel_swap_xy(50): swap_xy is not supported by this panel
+I (760) GT911: I2C address initialization procedure skipped - using default GT9xx setup
+I (761) GT911: TouchPad_ID:0x39,0x31,0x31
+I (761) GT911: TouchPad_Config_Version:250
+I (764) jc4880p443: GT911 touch registered
+I (768) Backlight: Set brightness to 100
+I (771) Application: STATE: starting
+I (776) SD_TEST: Initializing SD card via SDMMC...
+I (779) SD_TEST: Pins: CLK=43, CMD=44, D0=39, D1=40, D2=41, D3=42
+W (785) ldo: The voltage value 0 is out of the recommended range [500, 2700]
+I (792) SD_TEST: LDO power control initialized successfully
+I (1110) SD_TEST: SD card mounted successfully!
 Name: USDU1
 Type: SDHC
 Speed: 20.00 MHz (limit: 20.00 MHz)
 Size: luMB
 CSD: ver=2, sector_size=512, capacity=15333376 read_bl_len=9
 SSR: bus_width=4
-I (1026) SD_TEST: Early preload: Kaltsit cover...
-E (1033) PPACompositor: Cannot open /sdcard/Arknights/main/operator/MEDIC/6STAR/Kaltsit/cover/kaltsit_cover.mjpeg
-I (1040) SD_TEST: Early preload done: 0 frames
-I (1044) SD_TEST: Preloading MOC3 model: /sdcard/Arknights/main/operator/CASTER/5STAR/Amiya/LIVE2D/Amiya.moc3
-I (1058) SD_TEST: Loading Amiya...
-E (1062) LV2: no /sdcard/Arknights/main/operator/CASTER/5STAR/Amiya/LIVE2D/model.l2d
-W (1065) SD_TEST: Amiya load skipped
-I (1069) SD_TEST: 基底目录: /sdcard/Arknights
-I (1073) SD_TEST: 基底目录: /sdcard/Arknights/main
-I (1079) SD_TEST: 基底目录: /sdcard/Arknights/main/operator
-I (1085) SD_TEST: 基底目录: /sdcard/Arknights/main/operator/INDEX
-I (1090) SD_TEST: 基底目录: /sdcard/Arknights/main/background
-I (1096) SD_TEST: 基底目录: /sdcard/Arknights/main/music
-I (1101) Es8311AudioCodec: Duplex channels created
-I (1111) ES8311: Work in Slave mode
-I (1114) Es8311AudioCodec: Es8311AudioCodec initialized
-I (1114) AudioCodec: Set input enable to true
-W (1117) i2s_common: dma frame num is adjusted to 256 to align the dma buffer with 64, bufsize = 512
-I (1126) I2S_IF: STD: TX, data_bit: 16, slot_bit: 16, ws_width: 16, slot_mode: MONO, slot_mask: 0x1
-I (1135) I2S_IF: STD: TX, sample_rate_hz: 16000, mclk_multiple: 256, clk_src: 16
-W (1142) i2s_common: dma frame num is adjusted to 256 to align the dma buffer with 64, bufsize = 512
-I (1151) I2S_IF: STD: RX, data_bit: 16, slot_bit: 16, ws_width: 16, slot_mode: MONO, slot_mask: 0x1
-I (1159) I2S_IF: STD: RX, sample_rate_hz: 16000, mclk_multiple: 256, clk_src: 16
-I (1182) Adev_Codec: Open codec device OK
-I (1183) AudioCodec: Set output enable to true
-I (1183) AudioCodec: Audio codec started
-I (1185) TTS: Initializing ESP-TTS from flash partition...
-I (1188) TTS: Voice partition: offset=0xd00000 size=0x300000
-I (1194) TTS: Voice data mmap'd at 0x404b0000
-init voice set:template
-ESP Chinese TTS v1.7 (Aug  5 2024 11:59:11, 1)
-I (1204) TTS: ESP-TTS ready (partition-based)
-I (1208) AppImageDisplay: FWV=20261007-0010 (batt-screen-layer-fix + dlspeed-pct-reset + page-left + protect-rect)
-I (1218) AppImageDisplay: Initializing image display...
-I (1271) PPACompositor: PPA BLEND client registered
-I (1298) AppImageDisplay: Image display initialized (empty canvas)
-I (1301) BootCover: Boot cover: 3 张,起点 0,3s 后显示
-I (1304) BootCeremony: loading shown
-I (1919) eh_host_port_reset: reset done pin=54 parked=1
-I (1953) eh_host_port_sdio: Function 0 Blocksize: 512
-I (1954) eh_host_port_sdio: Function 1 Blocksize: 512
-I (2054) eh_sdio: Card init success, TRANSPORT_RX_ACTIVE
-I (2083) eh_sdio: SDIO Host operating in STREAMING MODE
-I (2083) eh_sdio: Open data path at slave
-I (2083) eh_sdio: Starting SDIO process rx task
-I (2111) eh_init_evt: slave chip id: 0x0d (esp32c6)
-I (2111) eh_init_evt: capabilities: 0x0d
-I (2111) eh_init_evt: Features supported are:
-I (2112) eh_init_evt:    * WLAN over SDIO
-I (2115) eh_init_evt:      - HCI over SDIO
-I (2119) eh_init_evt:      - BLE only
-I (2123) eh_raw_tp: raw TP inactive
-I (2126) eh_init_evt: Default RPC to V2
-I (2129) eh_init_evt: esp-hosted fw versions: host=3.0.9 coprocessor=2.3.2
-E (2136) eh_init_evt: major version mismatch — OTA coprocessor from host
-I (2143) eh_init_evt: CP without SDIO SW_AGGR; compatible streaming mode enabled
-I (2150) eh_init_evt: Missing SDIO_MODE TLV; Continue anyway.
-I (2155) eh_init_evt: chip=0x0d (esp32c6) fw=0x00020302 caps=0x0d ext=0x00000000
-I (2162) eh_auto_init: auto_init: found 1 descriptor(s)
-I (2167) eh_auto_init: auto_init: initialising 'wifi' (priority 150)
-I (2173) eh_wifi_itwt: wifi iTWT ext init
-I (2469) eh_wifi: rx RPC WifiEventNoArgs id=2
-I (2473) eh_wifi: rx RPC WifiEventNoArgs id=43
-I (2502) eh_wifi: rx RPC WifiEventNoArgs id=2
-I (4880) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot1.bin
-I (4885) AppImageDisplay: boot music: Rhodes_Island wav 不存在,跳过
-I (4903) wifi: Found AP: CMCC-QK9E, BSSID: e0:d4:62:36:b2:b4, RSSI: -82, Channel: 6, Authmode: 4
-I (4904) eh_wifi: set_config iface=STA ssid="CMCC-QK9E" (9 bytes)
-I (7373) eh_wifi: rx RPC StaDisconnected ssid="CMCC-QK9E" reason=201 rssi=-128
-I (7393) wifi: Reconnecting CMCC-QK9E (attempt 1 / 5)
-I (8476) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot2.bin
-I (9299) BootCover: boot cover sync: 检查公共库 cover 目录(第 1 次)
-W (9299) RoleDownload: manifest 获取失败(第1次): network not ready
-I (9799) eh_wifi: rx RPC StaDisconnected ssid="CMCC-QK9E" reason=201 rssi=-128
-I (9811) wifi: Reconnecting CMCC-QK9E (attempt 2 / 5)
-I (10496) BootCeremony: wake button ready
-W (11298) RoleDownload: thumbs 获取失败: network not ready
-W (11298) AppImageDisplay: thumbs sync: 云端清单获取失败
-W (11301) RoleDownload: manifest 获取失败(第2次): network not ready
-I (11477) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot3.bin
-I (11514) SystemInfo: free sram: 300059 minimal sram: 274507
-I (12369) eh_wifi: rx RPC WifiEventNoArgs id=43
-I (12593) esp_wifi_remote: esp_wifi_internal_reg_rxcb: sta: 0x401917f4
---- 0x401917f4: wifi_sta_receive at E:/Passport/esp32/v5.5.1/esp-idf/components/esp_wifi/src/wifi_netif.c:39
-W (13305) RoleDownload: manifest 获取失败(第3次): network not ready
-I (14479) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot1.bin
-I (16161) wifi: Got IP: 192.168.1.109
-I (16161) esp_netif_handlers: sta ip: 192.168.1.109, mask: 255.255.255.0, gw: 192.168.1.1
-I (16184) AudioCodec: Set input enable to false
-I (17479) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot2.bin
-I (18184) AudioCodec: Set output enable to false
-I (20476) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot3.bin
-I (21216) SystemInfo: free sram: 299163 minimal sram: 274507
-I (23478) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot1.bin
-I (26478) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot2.bin
-I (29477) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot3.bin
-I (31216) jc4880p443: batt: raw=1746 mv=1722 pct=-264 trend_chg=0
-I (31217) SystemInfo: free sram: 299163 minimal sram: 274507
-I (32477) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot1.bin
-I (35305) BootCover: boot cover sync: 检查公共库 cover 目录(第 2 次)
-I (35480) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot2.bin
-I (36435) RoleDownload: Download complete:  (0 下载 / 3 跳过)
-I (38545) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot3.bin
-I (41547) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot1.bin
-I (41592) SystemInfo: free sram: 303287 minimal sram: 274507
-I (45036) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot2.bin
-I (47544) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot3.bin
-I (50479) BootCover: Boot cover shown: /sdcard/Arknights/main/cover/boot1.bin
-I (51217) SystemInfo: free sram: 303287 minimal sram: 274507
-I (52530) BootCeremony: ceremony hidden
-I (52530) BootCover: Boot cover stopped and hidden
-I (55370) WifiStation: SCAN_DONE status=0 number=5 scan_id=129
-I (55372) WifiStation: get_ap_num ok n=5 (round 0)
-I (55383) WifiStation: ScanOnce got 5 APs (passive=0, round=0)
-I (56900) SsidManager: compare [royal7:6] [CMCC-QK9E:9]
-I (56901) SsidManager: compare [CMCC-QK9E:9] [CMCC-QK9E:9]
-W (56901) SsidManager: SSID CMCC-QK9E already exists, overwrite it
-I (56931) eh_wifi: rx RPC StaDisconnected ssid="CMCC-QK9E" reason=8 rssi=-77
-I (56952) wifi: Reconnecting CMCC-QK9E (attempt 1 / 5)
-I (57229) eh_wifi: set_config iface=STA ssid="CMCC-QK9E" (9 bytes)
-I (60370) eh_wifi: rx RPC StaDisconnected ssid="CMCC-QK9E" reason=2 rssi=-78
-I (60390) wifi: Reconnecting CMCC-QK9E (attempt 1 / 5)
-I (61216) SystemInfo: free sram: 294659 minimal sram: 274507
-I (61608) jc4880p443: batt: raw=1746 mv=1722 pct=-264 trend_chg=0
-I (62796) eh_wifi: rx RPC StaDisconnected ssid="CMCC-QK9E" reason=205 rssi=-128
-I (62809) wifi: Reconnecting CMCC-QK9E (attempt 2 / 5)
-I (66226) eh_wifi: rx RPC StaDisconnected ssid="CMCC-QK9E" reason=2 rssi=-78
-I (66246) wifi: Reconnecting CMCC-QK9E (attempt 3 / 5)
-I (68652) eh_wifi: rx RPC StaDisconnected ssid="CMCC-QK9E" reason=205 rssi=-128
-I (68665) wifi: Reconnecting CMCC-QK9E (attempt 4 / 5)
-I (71071) eh_wifi: rx RPC StaDisconnected ssid="CMCC-QK9E" reason=201 rssi=-128
-I (71084) wifi: Reconnecting CMCC-QK9E (attempt 5 / 5)
-I (71216) SystemInfo: free sram: 294659 minimal sram: 274507
-I (73679) esp_wifi_remote: esp_wifi_internal_reg_rxcb: sta: 0x401917f4
---- 0x401917f4: wifi_sta_receive at E:/Passport/esp32/v5.5.1/esp-idf/components/esp_wifi/src/wifi_netif.c:39
-I (76843) wifi: Got IP: 192.168.1.109
-I (76843) esp_netif_handlers: sta ip: 192.168.1.109, mask: 255.255.255.0, gw: 192.168.1.1
-I (76863) AppImageDisplay: PPD交互按钮已创建 (ptr=0x4ff6c734)
-I (76868) AppImageDisplay: Chat overlay initialized (hidden)
-W (76868) AppImageDisplay: Indev touch listener attach FAILED (no active indev) → 2s 后重试
-I (76972) PPACompositor: Expendable caches released (active frames kept)
-I (77347) AppImageDisplay: Index: 427 agents scanned (156282 PSRAM bytes)
-I (77350) AppImageDisplay: Index: 427 agents, 1 pages
-I (77363) AppImageDisplay: Page 0: 0 cards shown
-I (77364) AppImageDisplay: Prefetch gen=1 done: 0 loaded (page 0, PSRAM free 25763 KB)
-I (77406) Application: STATE: activating
-I (77407) Ota: Current version: 1.8.55
-I (77431) Ota: OTA Request Body: {"application":{"version":"1.8.55","elf_sha256":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"},"board":{"type":"guition-jc4880p443","name":"guition-jc4880p443","ssid":"royal7","rssi":0},"mac_address":"9c:13:9e:dc:1e:f4","uuid":"4cc5ba94-4a7d-4f45-81bd-e84784314f7b","chip_model_name":"esp32p4","flash_size":16777216,"psram_size":0,"version":0,"chip_info":{"model":0,"cores":0,"revision":0,"features":0},"partition_table":[{"label":"","type":0,"subtype":0,"address":0,"size":0}]}
-W (78872) AppImageDisplay: Indev touch listener retry FAILED
-I (81796) AppImageDisplay: Prof filter: 5
-I (82163) AppImageDisplay: Index: 427 agents scanned (156282 PSRAM bytes)
-I (82164) AppImageDisplay: Filter: prof=5 rarity=0 → 60 agents, 5 pages
-I (82335) Ota: OTA Response: {"server_time":{"timestamp":1791301246812,"timezone_offset":480},"firmware":{"version":"1.8.47","url":"http://124.221.186.33:88/xiaozhi/ota/firmware"},"websocket":{"url":"ws://124.221.186.33:89/xiaozhi/v1/"}}
-I (82346) Ota: Websocket url: ws://124.221.186.33:89/xiaozhi/v1/
-I (82351) Ota: Got websocket configuration
-I (82355) Ota: Time synchronized: 369
-I (82358) Ota: Firmware version in response: 1.8.47
-I (82363) Ota: Firmware URL: http://124.221.186.33:88/xiaozhi/ota/firmware
-I (82369) Ota: Current is the latest version
-I (82373) Ota: Running partition: ota_0
-I (82382) AudioCodec: Set output enable to true
-E (82382) i2s_common: i2s_channel_disable(1218): the channel has not been enabled yet
-E (82389) i2s_common: i2s_channel_disable(1218): the channel has not been enabled yet
-W (82396) i2s_common: dma frame num is adjusted to 256 to align the dma buffer with 64, bufsize = 512
-I (82406) I2S_IF: STD: TX, data_bit: 16, slot_bit: 16, ws_width: 16, slot_mode: MONO, slot_mask: 0x1
-I (82414) I2S_IF: STD: TX, sample_rate_hz: 16000, mclk_multiple: 256, clk_src: 16
-W (82421) i2s_common: dma frame num is adjusted to 256 to align the dma buffer with 64, bufsize = 512
-I (82430) I2S_IF: STD: RX, data_bit: 16, slot_bit: 16, ws_width: 16, slot_mode: MONO, slot_mask: 0x1
-I (82439) I2S_IF: STD: RX, sample_rate_hz: 16000, mclk_multiple: 256, clk_src: 16
-I (82464) Adev_Codec: Open codec device OK
-I (82465) AudioForwarder: Announce task started
-I (82465) AudioForwarder: Started (announce port 50000)
-I (82465) AudioForwarder: Send task started
-I (83482) AppImageDisplay: Page 0: 12 cards shown
-I (83544) Application: Wake words from server: 23 commands, 8 agents
-I (83548) MCP: Add tool: self.get_device_status
-I (83564) MCP: Add tool: self.audio_speaker.set_volume
-I (83565) MCP: Add tool: self.voiceprint.set_enabled
-I (83567) MCP: Add tool: self.screen.set_brightness
-I (83571) MCP: Add tool: self.screen.set_theme
-I (83575) MCP: Add tool: self.camera.take_photo
-I (83580) MCP: Add tool: agent.start_task
-I (83583) MCP: Add tool: agent.get_progress
-I (83587) MCP: Add tool: agent.stop_task
-I (83591) Application: STATE: idle
-I (83601) MODEL_LOADER: The storage free size is 57664 KB
-I (83601) MODEL_LOADER: The partition size is 3008 KB
-I (83604) MODEL_LOADER: Successfully load srmodels
-I (83608) CustomWakeWord: multinet:mn7_cn_ac
-Build fst from commands.
-I (84341) AppImageDisplay: Prefetch gen=2 done: 12 loaded (page 0, PSRAM free 21425 KB)
-Quantized MultiNet7:rnnt_ctc_2.0, name:mn7_cn_ac, (Aug 11 2025 15:21:16)
-Quantized MultiNet7 search method: 2, time out:2.0 s
-set det threshold to 0.100000
-Build fst from commands.
-23 active speech commands:
-Command 1: qi lin er ye dao
-Command 2: qi lin ye dao
-Command 3: ni hao qi lin ye dao
-Command 4: ni hao qi lin er ye dao
-Command 5: ni hao na si ti
-Command 6: na si ti
-Command 7: hei jian
-Command 8: ni hao hei jian
-Command 9: ni hao meng si te
-Command 10: meng si te
-Command 11: mo si te
-Command 12: ni hao mo si te
-Command 13: ni hao an jie li na
-Command 14: an jie li na
-Command 15: ni hao yu yuan an jie li na
-Command 16: yu yuan an jie li na
-Command 17: ni hao xi
-Command 18: ni hao xi gua
-Command 19: ni hao luo ge si
-Command 20: luo ge si
-Command 21: ni hao xiao luo
-Command 22: ni hao te lei xi ya
-Command 23: te lei xi ya
-I (84503) CustomWakeWord: Wake words applied: 23 commands
-I (84509) CustomWakeWord: Custom wake word: ni hao kai er xi
-I (84514) AFE_CONFIG: Set WakeNet Model: wn9_nihaoxiaozhi_tts
-MC Quantized wakenet9: wakenet9l_tts1h8_你好小智_3_0.631_0.635, tigger:v4, mode:0, p:0, (Aug 11 2025 15:21:17)
-I (84546) CustomWakeWord: Audio detection task started, feed size: 512 fetch size: 512
-I (84553) AudioCodec: Set input enable to true
-I (84563) SystemInfo: free sram: 199331 minimal sram: 164651
-I (84706) AppImageDisplay: TOUCH PRESS (289,497) | page=1 building=0 | press=(0,0) moved=1 handled=0
-I (84827) AppImageDisplay: TOUCH RELEASE (195,474) | page=1 building=0 | press=(289,497) moved=1 handled=0
-I (84829) AppImageDisplay: Page 1: 12 cards shown
-I (84831) AppImageDisplay: CARD CLICKED blocked: moved flag (pt=195,474 press=289,497)
-I (85663) AppImageDisplay: Prefetch gen=3 done: 12 loaded (page 1, PSRAM free 20618 KB)
-I (86389) AppImageDisplay: TOUCH PRESS (66,191) | page=1 building=0 | press=(289,497) moved=0 handled=1
-I (86447) AppImageDisplay: TOUCH RELEASE (66,191) | page=1 building=0 | press=(66,191) moved=0 handled=0
-I (86448) AppImageDisplay: CARD CLICKED accepted (pt=66,191 press=66,191)
-I (86453) AppImageDisplay: Card selected: Logos (ai=244)
-I (86581) AgentTools: HTTP GET http://192.168.1.37:7863/agent/events?token=abf77554dd2a&since=-1
-I (87293) AppImageDisplay: Confirm switch: Logos (.done) → 核对云端清单…
-I (87303) RoleDownload: probe: http://124.221.186.33/api/user_repo/manifest?mac=9c%3A13%3A9e%3Adc%3A1e%3Af4&rel=Arknights%2Fmain%2Foperator%2FCASTER%2F6STAR%2FLogos
-I (91654) jc4880p443: batt: raw=1745 mv=1721 pct=-264 trend_chg=0
-I (93217) SystemInfo: free sram: 120115 minimal sram: 114815
-I (101465) AudioCodec: Set output enable to false
-I (102231) RoleDownload: probe OK: 921 个文件, 共 103119 KB
-I (103217) SystemInfo: free sram: 122375 minimal sram: 46827
-E (104719) EspTcp: Failed to connect to 192.168.1.37:7863
-E (104720) HttpClient: TCP connection failed
-W (104720) AgentTools: HTTP Open 失败（电脑桥可达性）
-I (106107) RoleDownload: check : 缺/异 PPD_Q/mesh.json
-I (106107) AppImageDisplay: update check(user repo): Logos r=0(0=有更新 -1=网络失败 -2=云端无包 1=齐全)
-I (106112) AppImageDisplay: update check: Logos 有更新资源 → 弹窗
-I (107724) AgentTools: HTTP GET http://192.168.1.37:7863/agent/events?token=abf77554dd2a&since=-1
-I (113217) SystemInfo: free sram: 131051 minimal sram: 46827
-I (115759) AppImageDisplay: Indev touch listener removed (0 cb remain)
-I (115865) AppImageDisplay: chat_ovl HIDE ← 0x4003280a
---- 0x4003280a: cover_display_start(char const*) at E:/Passport/espp4/sparepart/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/xiaozhi-esp32sp1/main/apps/image_display/ImageDisplay.cpp:757
-I (115865) PPACompositor: Background unloaded
-I (115865) AppImageDisplay: cover: preload wait done (has=0)
-I (121708) jc4880p443: batt: raw=1744 mv=1720 pct=-265 trend_chg=0
-I (123217) SystemInfo: free sram: 112227 minimal sram: 46827
-I (124090) PPACompositor: /sdcard/Arknights/main/operator/CASTER/6STAR/Logos/cover/Logos_RE03.mjpeg: 119/119 frames, 9356 KB PSRAM (streaming, 0 seek)
-I (124098) PPACompositor: Cover cached: 119 frames (/sdcard/Arknights/main/operator/CASTER/6STAR/Logos)
-I (124102) AppImageDisplay: cover: preload done 119 frames (Logos_RE03.mjpeg)
-I (124108) PPACompositor: Swapped cover (loc=2): 119 frames active, 0 in slot
-I (124121) AppImageDisplay: fashion scan: 1 套时装 (默认 Logos_RE03.mjpeg)
-I (124125) AppImageDisplay: Cover mode: /sdcard/Arknights/main/operator/CASTER/6STAR/Logos/cover/Logos_RE03.mjpeg (119 frames), neutral preloading
-I (124135) AppImageDisplay: Starting video playback at 30 FPS (total: 119 images)
-E (124139) PPACompositor: Cannot open /sdcard/Arknights/main/operator/CASTER/6STAR/Logos/emoji/neutral.mjpeg
-I (125229) AppImageDisplay: FPS:13 [cover]
-E (126220) EspTcp: Failed to connect to 192.168.1.37:7863
-E (126221) HttpClient: TCP connection failed
-W (126221) AgentTools: HTTP Open 失败（电脑桥可达性）
-I (126279) AppImageDisplay: FPS:12 [cover]
-I (127395) AppImageDisplay: FPS:6 [cover]
-I (128550) AppImageDisplay: FPS:8 [cover]
-I (129225) AgentTools: HTTP GET http://192.168.1.37:7863/agent/events?token=abf77554dd2a&since=-1
-I (129678) AppImageDisplay: FPS:10 [cover]
-I (130717) AppImageDisplay: FPS:6 [cover]
-I (131900) AppImageDisplay: FPS:10 [cover]
-I (132587) RoleDownload: fetch PPD_Q/mesh.json: 清单大小=5204259, 断点=1835008, part存在=1
-I (132606) RoleDownload: http_dl 续传: http://124.221.186.33/api/roles/file?v=CASTER&s=6STAR&n=Logos&p=PPD_Q%2Fmesh.json (Range: bytes=1835008-)
-I (132953) AppImageDisplay: FPS:9 [cover]
-I (133217) SystemInfo: free sram: 118599 minimal sram: 46827
-I (133982) AppImageDisplay: FPS:14 [cover]
-I (135015) AppImageDisplay: FPS:11 [cover]
-I (136029) AppImageDisplay: FPS:13 [cover]
-I (137205) AppImageDisplay: FPS:10 [cover]
-I (138238) AppImageDisplay: FPS:11 [cover]
-I (139244) AppImageDisplay: FPS:14 [cover]
-I (140300) AppImageDisplay: FPS:8 [cover]
-I (141363) AppImageDisplay: FPS:12 [cover]
-I (142497) AppImageDisplay: FPS:13 [cover]
-I (143217) SystemInfo: free sram: 118499 minimal sram: 46827
-I (143512) AppImageDisplay: FPS:12 [cover]
-I (144635) AppImageDisplay: FPS:10 [cover]
-I (145653) AppImageDisplay: FPS:12 [cover]
-I (146700) AppImageDisplay: FPS:10 [cover]
-E (147724) EspTcp: Failed to connect to 192.168.1.37:7863
-E (147725) HttpClient: TCP connection failed
-W (147725) AgentTools: HTTP Open 失败（电脑桥可达性）
-I (147746) AppImageDisplay: FPS:11 [cover]
-I (148865) AppImageDisplay: FPS:13 [cover]
-I (149994) AppImageDisplay: FPS:11 [cover]
-I (150729) AgentTools: HTTP GET http://192.168.1.37:7863/agent/events?token=abf77554dd2a&since=-1
-I (151054) AppImageDisplay: FPS:12 [cover]
-I (152217) jc4880p443: batt: raw=1744 mv=1720 pct=-265 trend_chg=0
-I (152281) AppImageDisplay: FPS:11 [cover]
-I (153217) SystemInfo: free sram: 118491 minimal sram: 46827
-I (153308) AppImageDisplay: FPS:11 [cover]
-I (154410) AppImageDisplay: FPS:13 [cover]
-I (155616) AppImageDisplay: FPS:11 [cover]
-I (156686) AppImageDisplay: FPS:14 [cover]
-I (157692) AppImageDisplay: FPS:11 [cover]
-I (158886) AppImageDisplay: FPS:12 [cover]
-I (159940) AppImageDisplay: FPS:11 [cover]
-I (160964) AppImageDisplay: FPS:14 [cover]
-I (162111) AppImageDisplay: FPS:12 [cover]
-I (163120) AppImageDisplay: FPS:10 [cover]
-I (163217) SystemInfo: free sram: 118491 minimal sram: 46827
-I (164249) AppImageDisplay: FPS:13 [cover]
-I (165345) AppImageDisplay: FPS:12 [cover]
-
-https://linx.qiniu.com/docs/xrobot/platform/
-https://linx.qiniu.com/docs/xrobot/platform/OTA
-https://linx.qiniu.com/docs/xrobot/platform/websocket
-https://linx.qiniu.com/docs/xrobot/platform/wifi-config（注意，我们的WIFI配网有两个版本，一个是和老师对接时候不去拦截的，另一个是本地测试需要拦截的）
-https://linx.qiniu.com/docs/xrobot/platform/agent-voice-switch
-
-https://linx.qiniu.com/docs/xrobot/api/agent
-https://linx.qiniu.com/docs/xrobot/api/llm
-https://linx.qiniu.com/docs/xrobot/api/knowledge
-https://linx.qiniu.com/docs/xrobot/api/chat-history
-https://linx.qiniu.com/docs/xrobot/api/device
-https://linx.qiniu.com/docs/xrobot/api/voice-clone
-https://linx.qiniu.com/docs/xrobot/api/longterm-memory
-https://linx.qiniu.com/docs/xrobot/api/firmware
-https://linx.qiniu.com/docs/xrobot/api/voiceprint-v2
-https://linx.qiniu.com/docs/xrobot/api/language
-https://linx.qiniu.com/docs/xrobot/api/others
-
-https://linx.qiniu.com/docs/xrobot/mcp/hardware-mcp
-https://linx.qiniu.com/docs/xrobot/mcp/software-mcp
-
-
-https://linx.qiniu.com/docs/xrobot/guide/longterm-memory-start
-https://linx.qiniu.com/docs/xrobot/guide/knowledge-start
-https://linx.qiniu.com/docs/xrobot/guide/mcp-store
-https://linx.qiniu.com/docs/xrobot/guide/voice-start
-https://linx.qiniu.com/docs/xrobot/guide/camera-feature
+I (1117) SD_TEST: Early preload: Kaltsit cover...
+E (1125) PPACompositor: Cannot open /sdcard/Arknights/main/operator/MEDIC/6STAR/Kaltsit/cover/kaltsit_cover.mjpeg
+I (1131) SD_TEST: Early preload done: 0 frames
+I (1136) SD_TEST: Preloading MOC3 model: /sdcard/Arknights/main/operator/CASTER/5STAR/Amiya/LIVE2D/Amiya.moc3
+I (1149) SD_TEST: Loading Amiya...
+E (1153) LV2: no /sdcard/Arknights/main/operator/CASTER/5STAR/Amiya/LIVE2D/model.l2d
+W (1156) SD_TEST: Amiya load skipped
+I (1160) SD_TEST: 基底目录: /sdcard/Arknights
+I (1164) SD_TEST: 基底目录: /sdcard/Arknights/main
+I (1170) SD_TEST: 基底目录: /sdcard/Arknights/main/operator
+I (1176) SD_TEST: 基底目录: /sdcard/Arknights/main/operator/INDEX
+I (1182) SD_TEST: 基底目录: /sdcard/Arknights/main/background
+I (1187) SD_TEST: 基底目录: /sdcard/Arknights/main/music
+I (1193) Es8311AudioCodec: Duplex channels created
+I (1202) ES8311: Work in Slave mode
+I (1205) Es8311AudioCodec: Es8311AudioCodec initialized
+W (1205) AudioCodec: Output volume value (0) is too small, setting to default (10)
+I (1211) AudioCodec: Set input enable to true
+W (1216) i2s_common: dma frame num is adjusted to 256 to align the dma buffer with 64, bufsize = 512
+I (1225) I2S_IF: STD: TX, data_bit: 16, slot_bit: 16, ws_width: 16, slot_mode: MONO, slot_mask: 0x1
+I (1233) I2S_IF: STD: TX, sample_rate_hz: 16000, mclk_multiple: 256, clk_src: 16
+W (1240) i2s_common: dma frame num is adjusted to 256 to align the dma buffer with 64, bufsize = 512
+I (1249) I2S_IF: STD: RX, data_bit: 16, slot_bit: 16, ws_width: 16, slot_mode: MONO, slot_mask: 0x1
+I (1258) I2S_IF: STD: RX, sample_rate_hz: 16000, mclk_multiple: 256, clk_src: 16
+I (1281) Adev_Codec: Open codec device OK
